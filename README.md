@@ -43,7 +43,7 @@ live metrics.
 For a deterministic browser demo that does not consume subscription quota:
 
 ```bash
-SOLOFACTORY_DEMO=1 SOLOFACTORY_HOME=/tmp/solofactory-demo npm start
+SOLOFACTORY_DEMO=1 SOLOFACTORY_HOME=./solofactory-demo npm start
 ```
 
 ## Report a problem or an idea
