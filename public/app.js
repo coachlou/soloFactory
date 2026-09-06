@@ -266,6 +266,7 @@ function renderJob() {
   $("#resume-button").classList.toggle("hidden", !job.recovery?.canResume || !terminalFailure);
   $("#copy-recovery-button").classList.toggle("hidden", !job.recovery || !terminalFailure);
   $("#start-over-button").classList.toggle("hidden", !terminalFailure);
+  $("#report-run-button").classList.toggle("hidden", !terminalFailure);
   if (job.state === "completed" && job.deployment?.status === "live") {
     $("#open-app").href = job.deployment.url;
     $("#open-app").classList.remove("hidden");
@@ -378,6 +379,99 @@ $("#start-over-button").addEventListener("click", async () => {
   renderJob();
   poll();
   startPolling();
+});
+
+// Feedback dialog. Preview is rendered server-side; the browser only shows and copies the exact markdown it received.
+const feedback = { trigger: null, markdown: null, fingerprint: null, jobId: null };
+const feedbackDialog = $("#feedback-dialog");
+
+$("#feedback-button").addEventListener("click", (event) => openFeedback(event.currentTarget, { mode: "improvement" }));
+$("#report-run-button").addEventListener("click", (event) => openFeedback(event.currentTarget, { mode: "problem", jobId: state.job?.id }));
+$("#feedback-close-button").addEventListener("click", () => feedbackDialog.close());
+feedbackDialog.addEventListener("close", () => feedback.trigger?.focus());
+// Native <dialog> closes on Escape via the cancel event; some embedded browsers skip it, so close explicitly too.
+feedbackDialog.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); feedbackDialog.close(); } });
+for (const radio of document.querySelectorAll('#feedback-form input[name="mode"]')) radio.addEventListener("change", renderFeedbackMode);
+
+function openFeedback(trigger, { mode, jobId = null }) {
+  Object.assign(feedback, { trigger, markdown: null, fingerprint: null, jobId });
+  const form = $("#feedback-form");
+  form.reset();
+  form.querySelector(`input[name="mode"][value="${mode}"]`).checked = true;
+  $("#feedback-diagnostics-row").classList.toggle("hidden", !jobId);
+  // Cancelled runs are reportable, but the user chose to stop, so diagnostics start unticked.
+  $("#feedback-diagnostics").checked = Boolean(jobId) && state.job?.state !== "cancelled";
+  const issues = state.config?.issues;
+  $("#feedback-privacy").textContent = "Nothing is sent anywhere until you copy the report or open GitHub yourself."
+    + (issues ? "" : " GitHub links are off because SOLOFACTORY_ISSUES_URL is not set.");
+  $("#feedback-search-button").classList.toggle("hidden", !issues);
+  $("#feedback-github-button").classList.toggle("hidden", !issues);
+  setFeedbackPreview(null);
+  renderFeedbackMode();
+  feedbackDialog.showModal();
+}
+
+function renderFeedbackMode() {
+  const problem = feedbackMode() === "problem";
+  // Disabled fieldsets drop out of FormData and constraint validation, so hidden required fields never block submit.
+  $("#feedback-problem-fields").disabled = !problem;
+  $("#feedback-problem-fields").classList.toggle("hidden", !problem);
+  $("#feedback-improvement-fields").disabled = problem;
+  $("#feedback-improvement-fields").classList.toggle("hidden", problem);
+  setFeedbackPreview(null);
+}
+
+function feedbackMode() { return $("#feedback-form").elements.mode.value; }
+
+function setFeedbackPreview(result) {
+  feedback.markdown = result?.markdown ?? null;
+  feedback.fingerprint = result?.fingerprint ?? null;
+  $("#feedback-preview").textContent = feedback.markdown ?? "Choose Preview report to see exactly what will be copied.";
+  $("#feedback-redacted").classList.toggle("hidden", !result?.redacted);
+  for (const id of ["copy", "search", "github"]) $(`#feedback-${id}-button`).disabled = !feedback.markdown;
+  $("#feedback-copy-button").textContent = "Copy report";
+}
+
+$("#feedback-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  $("#feedback-error").classList.add("hidden");
+  if (!form.reportValidity()) return;
+  const fields = Object.fromEntries([...new FormData(form)].filter(([key]) => key !== "mode"));
+  $("#feedback-preview-button").disabled = true;
+  try {
+    const includeDiagnostics = Boolean(feedback.jobId) && $("#feedback-diagnostics").checked;
+    setFeedbackPreview(await api("/api/feedback/preview", { method: "POST", body: { mode: feedbackMode(), fields, jobId: feedback.jobId, includeDiagnostics } }));
+  } catch (error) {
+    $("#feedback-error").textContent = error.message;
+    $("#feedback-error").classList.remove("hidden");
+  } finally {
+    $("#feedback-preview-button").disabled = false;
+  }
+});
+
+$("#feedback-copy-button").addEventListener("click", async () => {
+  if (!feedback.markdown) return;
+  try {
+    await navigator.clipboard.writeText(feedback.markdown);
+    $("#feedback-copy-button").textContent = "Copied";
+  } catch {
+    // Clipboard API needs a secure context; a LAN-hosted http:// page falls back to selecting the preview.
+    window.getSelection().selectAllChildren($("#feedback-preview"));
+    $("#feedback-copy-button").textContent = "Press ⌘C / Ctrl+C to copy";
+  }
+});
+
+$("#feedback-search-button").addEventListener("click", () => {
+  const query = feedback.fingerprint ?? $("#feedback-title").value.trim().slice(0, 100);
+  window.open(`${state.config.issues.base}?q=${encodeURIComponent(`is:issue ${query}`)}`, "_blank", "noopener");
+});
+
+$("#feedback-github-button").addEventListener("click", () => {
+  const problem = feedbackMode() === "problem";
+  const title = `${problem ? "[Problem]" : "[Improvement]"} ${$("#feedback-title").value.trim()}`;
+  // Title only. The report body travels via the clipboard, never in a URL.
+  window.open(`${state.config.issues.base}/new?template=${problem ? "problem" : "improvement"}.yml&title=${encodeURIComponent(title)}`, "_blank", "noopener");
 });
 
 function startPolling() {
