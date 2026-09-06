@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { createSoloFactoryServer } from "../src/server.mjs";
@@ -171,4 +171,66 @@ test("HTTP journey with the vertical-slice strategy completes and serves the fin
   const slicesArtifact = await fetch(`${base}/api/jobs/${job.id}/artifacts/slices`);
   assert.equal(slicesArtifact.ok, true);
   assert.match(await slicesArtifact.text(), /SLICE-SKELETON/);
+});
+
+test("feedback preview reports a failed run without touching its evidence", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-feedback-"));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true, issuesUrl: "https://github.com/acme/solo-factory/issues" });
+  await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const job = await app.store.create({
+    brief: { workingName: "Leaky", promise: "PRIVATE BRIEF" },
+    transcript: [{ role: "user", content: "TRANSCRIPT SECRET" }],
+    provider: "fixture",
+  });
+  job.state = "failed";
+  job.failedState = "verifying";
+  job.error = { code: "quality_gate_failed", message: "test failed. See /Users/x/log.log.", details: { gate: "test", output: "AGENT OUTPUT sk-abcdefghijklmnop" } };
+  await app.store.writeState(job);
+  await app.store.appendEvent(job.id, { type: "gate.failed", state: "verifying", gate: "test", durationMs: 50, message: "test failed /Users/x/log.log" });
+  const jobDir = app.store.jobDir(job.id);
+  const before = await Promise.all(["state.json", "events.jsonl"].map((f) => readFile(path.join(jobDir, f), "utf8")));
+
+  const config = await getJson(`${base}/api/config`);
+  assert.equal(config.version, JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).version);
+  assert.deepEqual(config.issues, { base: "https://github.com/acme/solo-factory/issues", available: true });
+
+  const fields = { title: "Test gate", happened: "<script>alert(1)</script>", expected: "pass" };
+  const preview = await postJson(`${base}/api/feedback/preview`, { mode: "problem", fields, jobId: job.id, includeDiagnostics: true });
+  assert.equal(preview.fingerprint, "fixture:quality_gate_failed:verifying:test");
+  assert.equal(preview.redacted, false);
+  assert.match(preview.markdown, /\| Error code \| quality_gate_failed \|/);
+  assert.match(preview.markdown, /\| gate\.failed \| verifying \| test \| 50ms \|/);
+  assert.match(preview.markdown, /<script>alert\(1\)<\/script>/);
+  for (const forbidden of ["TRANSCRIPT", "PRIVATE BRIEF", "/Users/", "AGENT OUTPUT", "sk-", job.id]) assert.equal(preview.markdown.includes(forbidden), false, `leaked: ${forbidden}`);
+
+  const without = await postJson(`${base}/api/feedback/preview`, { mode: "problem", fields, jobId: job.id, includeDiagnostics: false });
+  assert.equal(without.fingerprint, null);
+  assert.doesNotMatch(without.markdown, /diagnostics|lifecycle/i);
+
+  const after = await Promise.all(["state.json", "events.jsonl"].map((f) => readFile(path.join(jobDir, f), "utf8")));
+  assert.deepEqual(after, before, "preview must not mutate run evidence");
+});
+
+test("feedback preview works without an issues URL and rejects bad input with clear codes", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-feedback-nourl-"));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true, issuesUrl: "https://gitlab.com/a/b/issues" });
+  await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  assert.equal((await getJson(`${base}/api/config`)).issues, null);
+
+  const improvement = await postJson(`${base}/api/feedback/preview`, {
+    mode: "improvement",
+    fields: { title: "Faster resume", friction: "Slow", outcome: "Fast", frequency: "often", area: "recovery" },
+  });
+  assert.match(improvement.markdown, /- Frequency: often\n- Area: recovery/);
+
+  const tooLarge = await fetch(`${base}/api/feedback/preview`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "problem", fields: { title: "t", happened: "h".repeat(5000), expected: "e" } }) });
+  assert.equal(tooLarge.status, 413);
+  assert.equal((await tooLarge.json()).code, "feedback_too_large");
+  const invalid = await fetch(`${base}/api/feedback/preview`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "improvement", fields: { title: "t", friction: "f", outcome: "o", frequency: "once", area: "kitchen" } }) });
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).code, "feedback_invalid");
 });

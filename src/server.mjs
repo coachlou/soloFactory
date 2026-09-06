@@ -13,6 +13,7 @@ import {
 } from "./interview.mjs";
 import { createProvider, detectProviderDiagnostics, discoverProviders } from "./providers.mjs";
 import { createFixtureProvider } from "./fixture-provider.mjs";
+import { REPORTABLE_STATES, buildDiagnostics, issuesConfig, renderReport, validateFeedback } from "./feedback.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.dirname(here);
@@ -29,6 +30,10 @@ export async function createSoloFactoryServer(options = {}) {
   const providerFactory = options.providerFactory ?? ((id) => (id === "fixture" && fixtureMode ? createFixtureProvider() : createProvider(id)));
   const factories = new Map();
   let busyJobId = null;
+  const { version } = JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8"));
+  const issuesUrl = options.issuesUrl ?? process.env.SOLOFACTORY_ISSUES_URL;
+  const issues = issuesConfig(issuesUrl);
+  if (issuesUrl && !issues) console.warn("SOLOFACTORY_ISSUES_URL must look like https://github.com/<owner>/<repo>/issues with no query or fragment; GitHub links are disabled.");
 
   const server = http.createServer(async (request, response) => {
     try {
@@ -44,6 +49,8 @@ export async function createSoloFactoryServer(options = {}) {
           providers,
           opening: makeOpeningTurn(),
           fixtureMode,
+          version,
+          issues: issues ? { base: issues.base, available: true } : null,
           sdlcOptions: [
             { id: "single", label: "Single build (v0 behavior)", detail: "One implementation turn for the whole app, then gates." },
             { id: "slices", label: "Vertical slices (wbs)", detail: "Walking skeleton first, then one bounded agent turn per slice, gated after each." },
@@ -64,6 +71,26 @@ export async function createSoloFactoryServer(options = {}) {
         });
         return json(response, 200, validateInterviewResult(result));
       }
+      if (request.method === "POST" && url.pathname === "/api/feedback/preview") {
+        let feedback;
+        try {
+          feedback = validateFeedback(await readJson(request));
+        } catch (error) {
+          if (!error.code?.startsWith("feedback_")) throw error;
+          return json(response, error.code === "feedback_too_large" ? 413 : 400, { error: error.message, code: error.code });
+        }
+        let diagnostics = null;
+        if (feedback.includeDiagnostics && feedback.jobId) {
+          // store.read, not ensureRecovery: previewing a report must never mutate run evidence.
+          const job = await store.read(feedback.jobId);
+          if (!REPORTABLE_STATES.includes(job.state)) return json(response, 409, { error: "Diagnostics are only available for failed, interrupted, or cancelled runs.", code: "feedback_not_reportable" });
+          const factory = factories.get(job.id) ?? new SoloFactory({ store, provider: providerFactory(job.provider) });
+          const { summary } = await factory.telemetry(job.id);
+          diagnostics = buildDiagnostics({ job, events: await store.events(job.id, 500), summary, version });
+        }
+        return json(response, 200, renderReport(feedback.mode, feedback.fields, diagnostics));
+      }
+
       if (request.method === "GET" && url.pathname === "/api/jobs") {
         return json(response, 200, { jobs: await store.list(), busyJobId });
       }
