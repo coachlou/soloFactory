@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="SoloFactory turns a rigorous requirements conversation into a tested, working app." />
+    <title>SoloFactory</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="SoloFactory home">
+          <span class="brand-mark" aria-hidden="true">SF</span>
+          <span><strong>SoloFactory</strong><small>idea to working app</small></span>
+        </a>
+        <div class="top-status"><span class="pulse"></span><span id="system-status">Checking factory</span></div>
+      </header>
+
+      <main class="workspace">
+        <aside class="rail" aria-label="Factory progress">
+          <p class="eyebrow">Factory run</p>
+          <ol class="stages" id="stages">
+            <li class="active" data-stage="interview"><span>01</span><div><strong>Interview</strong><small>Shape the brief</small></div></li>
+            <li data-stage="specifying"><span>02</span><div><strong>Specify</strong><small>PRD + plan + proof</small></div></li>
+            <li data-stage="building"><span>03</span><div><strong>Build</strong><small>Working product</small></div></li>
+            <li data-stage="verifying"><span>04</span><div><strong>Verify</strong><small>Tests + production build</small></div></li>
+            <li data-stage="reviewing"><span>05</span><div><strong>Review</strong><small>Contract audit</small></div></li>
+            <li data-stage="deploying"><span>06</span><div><strong>Deploy</strong><small>Health + telemetry</small></div></li>
+          </ol>
+          <div class="rail-note">
+            <span>Local-first</span>
+            <p>Your subscription does the AI work. No API key is requested or stored.</p>
+          </div>
+        </aside>
+
+        <section class="main-panel">
+          <div id="notice" class="notice hidden" role="alert"></div>
+
+          <section id="interview-view" class="view">
+            <div class="view-heading">
+              <div>
+                <p class="eyebrow">Factory Guide</p>
+                <h1>Let’s make the idea buildable.</h1>
+              </div>
+              <div id="provider-picker" class="provider-picker"></div>
+            </div>
+
+            <div class="interview-grid">
+              <div class="chat-card">
+                <div id="messages" class="messages" aria-live="polite"></div>
+                <form id="message-form" class="composer">
+                  <label class="sr-only" for="message-input">Your answer</label>
+                  <textarea id="message-input" rows="3" placeholder="Answer in your own words…" required></textarea>
+                  <div class="composer-row">
+                    <small>Do not paste passwords, tokens, or private customer data.</small>
+                    <button id="send-button" class="button primary" type="submit">Send answer <span>↗</span></button>
+                  </div>
+                </form>
+              </div>
+
+              <aside class="coverage-card">
+                <div class="coverage-head">
+                  <div><p class="eyebrow">Brief coverage</p><strong id="coverage-score">0%</strong></div>
+                  <div class="ring" id="coverage-ring" style="--value:0"><span></span></div>
+                </div>
+                <div id="coverage-list" class="coverage-list"></div>
+                <p class="coverage-foot">The Guide can ask. The controller decides when the brief is actually complete.</p>
+              </aside>
+            </div>
+          </section>
+
+          <section id="review-view" class="view hidden">
+            <div class="view-heading">
+              <div><p class="eyebrow">Frozen brief</p><h1>Small enough to ship. Precise enough to test.</h1></div>
+              <button id="back-button" class="button ghost">Continue interview</button>
+            </div>
+            <div class="review-layout">
+              <article id="brief" class="brief"></article>
+              <aside class="launch-card">
+                <p class="eyebrow">Ready to run</p>
+                <h2>The factory takes it from here.</h2>
+                <p>It will write the PRD and plan, build, test, review, launch, and verify the app. You can close this tab and return later.</p>
+                <ul>
+                  <li>Subscription-backed agent</li>
+                  <li>Two bounded repair attempts</li>
+                  <li>Local health-checked deployment</li>
+                  <li>Private aggregate telemetry</li>
+                </ul>
+                <label class="field" for="sdlc-select">
+                  <span class="field-title">Build strategy</span>
+                  <select id="sdlc-select" class="sdlc-select"></select>
+                  <small id="sdlc-detail" class="field-hint"></small>
+                </label>
+                <button id="start-button" class="button primary wide">Start the factory <span>→</span></button>
+              </aside>
+            </div>
+          </section>
+
+          <section id="run-view" class="view hidden">
+            <div class="run-heading">
+              <div><p class="eyebrow" id="run-id">Factory run</p><h1 id="run-title">Building your app</h1><p id="run-subtitle">The controller is preparing the workspace.</p></div>
+              <div class="run-actions">
+                <button id="cancel-button" class="button danger">Cancel run</button>
+                <button id="resume-button" class="button primary hidden">Resume current run <span>→</span></button>
+                <button id="copy-recovery-button" class="button ghost hidden">Copy recovery packet</button>
+                <button id="start-over-button" class="button ghost hidden">Start over</button>
+              </div>
+            </div>
+
+            <section id="recovery-card" class="recovery-card hidden" aria-live="polite">
+              <div>
+                <p class="eyebrow">Recovery checkpoint</p>
+                <h2 id="recovery-title">Run paused</h2>
+                <p id="recovery-summary"></p>
+              </div>
+              <ul id="recovery-actions"></ul>
+              <div class="recovery-meta">
+                <p><strong>Files preserved</strong><span id="recovery-workspace"></span></p>
+                <p><strong>Token safeguard</strong><span id="recovery-retry"></span></p>
+              </div>
+            </section>
+
+            <div class="dashboard-grid">
+              <section class="status-card panel">
+                <div class="panel-head"><p class="eyebrow">Build telemetry</p><span id="run-state" class="state-pill">Queued</span></div>
+                <div class="big-status"><span class="activity-orb"></span><div><strong id="current-stage">Queued</strong><small id="elapsed">0:00 elapsed</small></div></div>
+                <div id="stage-bars" class="stage-bars"></div>
+                <div class="stats-row">
+                  <div><small>Repair attempts</small><strong id="repair-count">0 / 2</strong></div>
+                  <div><small>Passed gates</small><strong id="gate-count">0</strong></div>
+                  <div><small>Strategy</small><strong id="strategy-label">—</strong></div>
+                  <div><small>Agent</small><strong id="agent-name">—</strong></div>
+                </div>
+              </section>
+
+              <section class="app-card panel">
+                <div class="panel-head"><p class="eyebrow">Live app activity</p><span id="app-live" class="state-pill muted">Waiting</span></div>
+                <div class="metric-hero"><strong id="request-total">—</strong><span>requests</span></div>
+                <div class="metric-grid">
+                  <div><small>Errors</small><strong id="error-total">—</strong></div>
+                  <div><small>Average</small><strong id="latency-average">—</strong></div>
+                  <div><small>Uptime</small><strong id="app-uptime">—</strong></div>
+                </div>
+                <div id="route-list" class="route-list"><p>No app traffic yet.</p></div>
+              </section>
+
+              <section class="evidence-card panel">
+                <div class="panel-head"><p class="eyebrow">Evidence stream</p><span class="live-label"><i></i> live</span></div>
+                <div id="events" class="events"></div>
+              </section>
+
+              <section class="artifacts-card panel">
+                <div class="panel-head"><p class="eyebrow">Artifacts</p></div>
+                <div id="artifacts" class="artifact-list"><p>Artifacts appear after specification.</p></div>
+                <a id="open-app" class="button primary wide hidden" href="#" target="_blank" rel="noreferrer">Open working app <span>↗</span></a>
+              </section>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
