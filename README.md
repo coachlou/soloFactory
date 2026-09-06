@@ -46,6 +46,26 @@ For a deterministic browser demo that does not consume subscription quota:
 SOLOFACTORY_DEMO=1 SOLOFACTORY_HOME=/tmp/solofactory-demo npm start
 ```
 
+## Report a problem or an idea
+
+**Feedback** in the top bar, or **Report this run** on a failed, interrupted, or cancelled
+run, opens a short form and previews a markdown report. Copy it and paste it into an issue.
+The report contains what you typed plus, only when you tick the box, an allowlisted run
+summary: version, platform, error code, failed stage, gate, counts, and recent lifecycle
+event types. Your brief, transcript, agent output, and file paths are never included, and
+nothing is sent anywhere until you copy the report or open GitHub yourself.
+
+To enable the **Search existing issues** and **Open GitHub** buttons, point SoloFactory at
+your issue tracker:
+
+```bash
+SOLOFACTORY_ISSUES_URL=https://github.com/<owner>/<repository>/issues npm start
+```
+
+The value must be exactly that shape, with no query string or fragment; anything else is
+treated as unset and the buttons stay hidden. GitHub links carry only the issue template and
+title. The report body always travels through your clipboard.
+
 ## Operational boundaries
 
 - SoloFactory binds to `127.0.0.1` by default and handles one active build at a time.

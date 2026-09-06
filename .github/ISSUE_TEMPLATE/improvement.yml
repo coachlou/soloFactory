@@ -1,0 +1,16 @@
+name: Improvement request
+description: Something in SoloFactory is slow, unclear, or missing.
+title: "[Improvement] "
+labels: ["feature-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        In SoloFactory, choose **Feedback → Improvement**, preview the report, copy it, and
+        paste it below.
+  - type: textarea
+    id: report
+    attributes:
+      label: Paste your SoloFactory report
+    validations:
+      required: true

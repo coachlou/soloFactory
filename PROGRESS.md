@@ -213,3 +213,24 @@ factory is explicitly pinned to `gpt-5.6-sol` with low reasoning effort, the mis
 lockfile was repaired, test/build gates passed, contract review completed, and the local
 health/telemetry deployment is live. Final factory regression: **40/40 pass**. Live checks
 returned `status: ok`, finite aggregate telemetry, and zero server errors.
+
+## Feedback reporting shipped (2026-09-06)
+
+Spec: `docs/feedback-reporting-spec.md`. WP1 added `src/feedback.mjs` and
+`POST /api/feedback/preview` (allowlisted diagnostics, fingerprint, scrubber, 400/413
+validation, store-only reads so previewing never mutates run evidence). WP2 added the
+`<dialog>` in `public/`, `.github/ISSUE_TEMPLATE/{problem,improvement}.yml`, and the
+`SOLOFACTORY_ISSUES_URL` README section.
+
+Observed:
+
+- `node --test test/*.test.mjs` → **54/54 pass** (40 before). New: 11 unit tests including
+  the leaky-fixture privacy test, 3 HTTP cases including byte-identical `state.json` /
+  `events.jsonl` before and after preview.
+- Browser walkthrough (embedded Chromium, 800px and 390px): Feedback and Report this run
+  open the dialog with focus on Title; Problem mode preselected with diagnostics ticked for a
+  failed fixture run; preview showed `quality_gate_failed`, `verifying`, the fingerprint and
+  lifecycle table with zero forbidden strings; `<script>` and `#` in user text rendered inert;
+  Copy report set the clipboard; Escape closed the dialog and focus returned to the trigger;
+  with `SOLOFACTORY_ISSUES_URL` set, search and new-issue URLs carried title and template
+  only.

@@ -1,0 +1,18 @@
+name: Problem report
+description: A SoloFactory run failed, stalled, or behaved unexpectedly.
+title: "[Problem] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        In SoloFactory, choose **Report this run** (or **Feedback → Problem**), preview the
+        report, copy it, and paste it below. The report holds only what you typed plus an
+        allowlisted run summary; your brief, transcript, agent output, and paths never leave
+        your machine.
+  - type: textarea
+    id: report
+    attributes:
+      label: Paste your SoloFactory report
+    validations:
+      required: true
