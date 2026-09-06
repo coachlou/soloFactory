@@ -3,8 +3,10 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 export class JobStore {
-  constructor(root) {
+  constructor(root, { jobsRoot } = {}) {
     this.root = path.resolve(root);
+    // ponytail: optional override so an ambient folder can keep runs in projects/ while home holds interviews
+    this._jobsRoot = jobsRoot ? path.resolve(jobsRoot) : path.join(this.root, "jobs");
   }
 
   async init() {
@@ -12,7 +14,7 @@ export class JobStore {
   }
 
   jobsRoot() {
-    return path.join(this.root, "jobs");
+    return this._jobsRoot;
   }
 
   jobDir(id) {

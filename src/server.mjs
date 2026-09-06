@@ -21,7 +21,7 @@ const publicRoot = path.join(projectRoot, "public");
 
 export async function createSoloFactoryServer(options = {}) {
   const home = options.home ?? process.env.SOLOFACTORY_HOME ?? path.join(projectRoot, ".solofactory");
-  const store = options.store ?? new JobStore(home);
+  const store = options.store ?? new JobStore(home, { jobsRoot: options.jobsRoot ?? process.env.SOLOFACTORY_JOBS_ROOT });
   await store.init();
   await store.recoverInterrupted();
   for (const job of await store.list()) await ensureRecovery(job, store);
