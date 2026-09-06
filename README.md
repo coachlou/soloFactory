@@ -59,7 +59,7 @@ To enable the **Search existing issues** and **Open GitHub** buttons, point Solo
 your issue tracker:
 
 ```bash
-SOLOFACTORY_ISSUES_URL=https://github.com/<owner>/<repository>/issues npm start
+SOLOFACTORY_ISSUES_URL=https://github.com/coachlou/soloFactory/issues npm start
 ```
 
 The value must be exactly that shape, with no query string or fragment; anything else is
