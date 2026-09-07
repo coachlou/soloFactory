@@ -1,0 +1,55 @@
+# {{NAME}} — Behavior
+
+## When this applies
+
+Any request to build, resume, inspect, or report on a software project in this
+folder: "build me an app that…", "start the factory", "what happened to
+project X", "resume the last run", "show me the PRD", "where's the deployed
+app". SoloFactory is this folder's agentic function; projects are its output.
+
+## Inputs
+
+| File | Kind | Load when |
+|------|------|-----------|
+| `~/.aai/identity.md`, `purpose.md`, `context.md`, `memory.md` | reference — the owner's global ambient home | always, **if `~/.aai/` exists**; then `~/.aai/rules/core.md`. Skip silently if absent. |
+| `.aai/references/*.md` | reference — folder-level rules | always, if present |
+| `.ailib/solofactory/` | vendored — resolve `.aai/skills/solofactory/` first (shadowing) | any factory operation |
+| `.ailib/solofactory/app/README.md` | reference — how the app runs and its boundaries | before starting or troubleshooting the factory |
+| `projects/<id>/state.json`, `events.jsonl`, `app/.factory/*.md` | working — one project's state, log, PRD/PLAN/ACCEPTANCE | when the request names or implies that project |
+
+## Process
+
+1. **Start the factory** (deterministic): `bash .ailib/solofactory/run.sh`
+   (use the `.aai/skills/solofactory/run.sh` fork if one exists). It serves
+   <http://127.0.0.1:4173>, writes runs to `projects/<id>/`, and keeps the
+   interview log in `.aai/memory/solofactory/`. `SOLOFACTORY_DEMO=1` gives a
+   deterministic demo that spends no quota.
+2. **New project**: the owner answers the Factory Guide in the browser, reviews
+   the compiled brief, and chooses *Start the factory*. Do not drive the
+   interview for them; do help them phrase acceptance scenarios as observable
+   behavior if asked.
+3. **Inspect / report** (inference over working files): read only the named
+   project's `state.json`, recent `events.jsonl`, and `.factory/` artifacts.
+   Summarize state, stage, failures, and the deployment URL.
+4. **Resume / recover**: interrupted runs are recoverable from the UI; point the
+   owner there rather than editing `state.json` by hand.
+5. **Update the factory**: re-run the installer from the library
+   (`install.sh <this folder>`); it re-syncs `.ailib/` and leaves `.aai/` and
+   `projects/` alone.
+
+## Outputs
+
+- `projects/<id>/state.json`, `events.jsonl` → run state and lifecycle log
+- `projects/<id>/app/` → the generated application, deployed on a loopback port
+- `projects/<id>/app/.factory/{PRD,PLAN,ACCEPTANCE}.md` → the frozen contract
+- `.aai/memory/solofactory/` → interview log, runtime state across runs
+
+## Rules
+
+- The factory handles one active build at a time and binds to 127.0.0.1.
+  Keep it running while a generated app is in use.
+- Node 22+ and a signed-in `codex` or `claude` CLI are prerequisites; check
+  them before diagnosing a "provider not found" error.
+- Project ids look like `YYYY-MM-DD-xxxxxxxx`; refer to projects by id.
+- Generated code runs with the owner's OS permissions. Never put credentials
+  or customer records in a brief.
