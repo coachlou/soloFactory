@@ -1,5 +1,5 @@
 import http from "node:http";
-import { readFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JobStore } from "./store.mjs";
@@ -21,15 +21,52 @@ const publicRoot = path.join(projectRoot, "public");
 
 export async function createSoloFactoryServer(options = {}) {
   const home = options.home ?? process.env.SOLOFACTORY_HOME ?? path.join(projectRoot, ".solofactory");
-  const store = options.store ?? new JobStore(home, { jobsRoot: options.jobsRoot ?? process.env.SOLOFACTORY_JOBS_ROOT });
-  await store.init();
-  await store.recoverInterrupted();
-  for (const job of await store.list()) await ensureRecovery(job, store);
+  // Projects are git repos under root/ or root/projects/. The source checkout keeps them in
+  // .solofactory/; the distro points SOLOFACTORY_ROOT at the ambient folder.
+  const root = path.resolve(options.root ?? process.env.SOLOFACTORY_ROOT ?? home);
+  const activeFile = path.join(home, "active-project");
+  let active; // { id, dir, store } — every job endpoint works on this project's store
+  let store;
+  async function openProject(id) {
+    const next = new JobStore(path.join(root, id));
+    await next.init();
+    await next.recoverInterrupted();
+    for (const job of await next.list()) await ensureRecovery(job, next);
+    active = { id, dir: next.project };
+    store = next;
+    await mkdir(home, { recursive: true });
+    await writeFile(activeFile, `${id}\n`);
+  }
+  {
+    const projects = await discoverProjects(root);
+    const remembered = (await readFile(activeFile, "utf8").catch(() => "")).trim();
+    await openProject(projects.find((p) => p.id === remembered)?.id ?? projects[0]?.id ?? "projects/default");
+  }
   const skill = await readFile(path.join(projectRoot, "skills", "factory-guide.md"), "utf8");
   const fixtureMode = options.fixtureMode ?? process.env.SOLOFACTORY_DEMO === "1";
   const providerFactory = options.providerFactory ?? ((id) => (id === "fixture" && fixtureMode ? createFixtureProvider() : createProvider(id)));
   const factories = new Map();
   let busyJobId = null;
+  let busyRun = null; // promise of the active run, awaited when a switch cancels it
+
+  function launch(job, run) {
+    busyJobId = job.id;
+    busyRun = run().finally(() => {
+      if (busyJobId === job.id) busyJobId = busyRun = null;
+    });
+  }
+
+  // Selecting a project while a run is active is refused unless the caller opts into cancelling it.
+  async function selectProject(response, id, { cancel = false } = {}) {
+    if (!(await discoverProjects(root)).some((p) => p.id === id)) return json(response, 404, { error: `Unknown project: ${id}.` });
+    if (busyJobId && id !== active.id) {
+      if (!cancel) return json(response, 409, { error: `Run ${busyJobId} is still active.`, busyJobId });
+      await factories.get(busyJobId)?.cancel(busyJobId);
+      await busyRun;
+    }
+    if (id !== active.id) await openProject(id);
+    return json(response, 200, { active: active.id, projects: await discoverProjects(root) });
+  }
   const { version } = JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8"));
   const issuesUrl = options.issuesUrl ?? process.env.SOLOFACTORY_ISSUES_URL;
   const issues = issuesConfig(issuesUrl);
@@ -39,7 +76,24 @@ export async function createSoloFactoryServer(options = {}) {
     try {
       const url = new URL(request.url, "http://127.0.0.1");
       if (request.method === "GET" && url.pathname === "/api/health") {
-        return json(response, 200, { ok: true, busyJobId });
+        return json(response, 200, { ok: true, busyJobId, project: active.id });
+      }
+      if (request.method === "GET" && url.pathname === "/api/projects") {
+        return json(response, 200, { projects: await discoverProjects(root), active: active.id, busyJobId });
+      }
+      if (request.method === "POST" && url.pathname === "/api/projects") {
+        const body = await readJson(request);
+        const slug = String(body.name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+        if (!slug) return json(response, 400, { error: "Project name must contain letters or digits." });
+        const id = `projects/${slug}`;
+        if (busyJobId && body.cancel !== true) return json(response, 409, { error: `Run ${busyJobId} is still active.`, busyJobId });
+        if (await stat(path.join(root, id)).catch(() => null)) return json(response, 409, { error: `Project ${slug} already exists.` });
+        await new JobStore(path.join(root, id)).init();
+        return selectProject(response, id, { cancel: body.cancel === true });
+      }
+      if (request.method === "POST" && url.pathname === "/api/projects/select") {
+        const body = await readJson(request);
+        return selectProject(response, String(body.id ?? ""), { cancel: body.cancel === true });
       }
       if (request.method === "GET" && url.pathname === "/api/config") {
         const providers = fixtureMode
@@ -92,7 +146,7 @@ export async function createSoloFactoryServer(options = {}) {
       }
 
       if (request.method === "GET" && url.pathname === "/api/jobs") {
-        return json(response, 200, { jobs: await store.list(), busyJobId });
+        return json(response, 200, { jobs: await store.list(), busyJobId, project: active.id });
       }
       if (request.method === "POST" && url.pathname === "/api/jobs") {
         if (busyJobId) return json(response, 409, { error: `Run ${busyJobId} is already active.` });
@@ -110,10 +164,7 @@ export async function createSoloFactoryServer(options = {}) {
         const job = await store.create({ brief: validated.brief, transcript: body.transcript, provider, sdlc });
         const factory = new SoloFactory({ store, provider: providerFactory(provider) });
         factories.set(job.id, factory);
-        busyJobId = job.id;
-        factory.start(job.id).finally(() => {
-          if (busyJobId === job.id) busyJobId = null;
-        });
+        launch(job, () => factory.start(job.id));
         return json(response, 202, { job });
       }
 
@@ -150,10 +201,7 @@ export async function createSoloFactoryServer(options = {}) {
         }
         const factory = new SoloFactory({ store, provider: providerFactory(job.provider) });
         factories.set(job.id, factory);
-        busyJobId = job.id;
-        factory.resume(job.id).finally(() => {
-          if (busyJobId === job.id) busyJobId = null;
-        });
+        launch(job, () => factory.resume(job.id));
         return json(response, 202, { job, resumed: true });
       }
       const recoveryMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/recovery-packet$/);
@@ -172,10 +220,7 @@ export async function createSoloFactoryServer(options = {}) {
         const job = await store.create({ brief: original.brief, transcript: original.transcript, provider: original.provider, sdlc: original.sdlc ?? "single" });
         const factory = new SoloFactory({ store, provider: providerFactory(job.provider) });
         factories.set(job.id, factory);
-        busyJobId = job.id;
-        factory.start(job.id).finally(() => {
-          if (busyJobId === job.id) busyJobId = null;
-        });
+        launch(job, () => factory.start(job.id));
         return json(response, 202, { job, retriedFrom: original.id });
       }
 
@@ -189,12 +234,36 @@ export async function createSoloFactoryServer(options = {}) {
 
   return {
     server,
-    store,
+    get store() {
+      return store;
+    },
     async close() {
+      if (busyJobId) {
+        await factories.get(busyJobId)?.cancel(busyJobId);
+        await busyRun;
+      }
       await Promise.all([...factories.values()].map((factory) => factory.shutdown()));
       await new Promise((resolve) => server.close(resolve));
     },
   };
+}
+
+// A project is any non-hidden child of root/ or root/projects/ that is a git repo.
+// ponytail: readdir on every call; cache by mtime if a root ever holds hundreds of repos.
+async function discoverProjects(root) {
+  const projects = [];
+  for (const parent of ["", "projects"]) {
+    const entries = await readdir(path.join(root, parent), { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".") || (parent === "" && entry.name === "projects")) continue;
+      const id = parent ? `${parent}/${entry.name}` : entry.name;
+      if (!(await stat(path.join(root, id, ".git")).catch(() => null))) continue;
+      const runs = await new JobStore(path.join(root, id)).list();
+      const last = runs[0];
+      projects.push({ id, name: entry.name, runCount: runs.length, lastRun: last ? { id: last.id, state: last.state, createdAt: last.createdAt, workingName: last.brief?.workingName ?? null } : null });
+    }
+  }
+  return projects.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 async function ensureRecovery(job, store) {

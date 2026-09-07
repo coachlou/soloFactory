@@ -234,3 +234,34 @@ test("feedback preview works without an issues URL and rejects bad input with cl
   assert.equal(invalid.status, 400);
   assert.equal((await invalid.json()).code, "feedback_invalid");
 });
+
+test("projects are discovered git repos; switching while busy needs an explicit cancel", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-projects-"));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true });
+  await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+
+  let listing = await getJson(`${base}/api/projects`);
+  assert.equal(listing.active, "projects/default");
+  assert.deepEqual(listing.projects.map((p) => p.id), ["projects/default"]);
+
+  const config = await getJson(`${base}/api/config`);
+  const transcript = [{ role: "assistant", content: config.opening.message }, { role: "user", content: "Build a tiny private daily tracker with no login and observable save behavior." }];
+  const guide = await postJson(`${base}/api/interview/turn`, { provider: "fixture", messages: transcript });
+  const started = await postJson(`${base}/api/jobs`, { provider: "fixture", transcript, coverage: guide.coverage, brief: guide.brief });
+
+  const refused = await fetch(`${base}/api/projects`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Second App!" }) });
+  assert.equal(refused.status, 409, "creating must not switch away from a running build");
+  assert.equal((await refused.json()).busyJobId, started.job.id);
+
+  const switched = await postJson(`${base}/api/projects`, { name: "Second App!", cancel: true });
+  assert.equal(switched.active, "projects/second-app");
+  assert.equal((await getJson(`${base}/api/health`)).busyJobId, null);
+  assert.deepEqual((await getJson(`${base}/api/jobs`)).jobs, []);
+  assert.equal(app.store.project, path.join(home, "projects", "second-app"));
+
+  const back = await postJson(`${base}/api/projects/select`, { id: "projects/default" });
+  assert.equal(back.projects.find((p) => p.id === "projects/default").lastRun.state, "cancelled");
+  assert.equal((await fetch(`${base}/api/projects/select`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "../etc" }) })).status, 404);
+});
