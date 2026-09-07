@@ -70,8 +70,10 @@ export class SoloFactory {
       );
 
       job = await this.stage(job, "specifying", "Writing PRD, plan, and acceptance contract");
+      const before = await readdir(appDir);
       await this.invoke(job, "specification", specificationPrompt(job.sdlc === "slices"), signal);
-      await this.validateSpecification(appDir);
+      await this.validateSpecification(appDir, before);
+      await this.commit(job, "factory: specification");
 
       if (job.sdlc === "slices") {
         if (!job.planReviewed) job = await this.reviewSlicePlan(job, signal);
@@ -116,8 +118,10 @@ export class SoloFactory {
 
       if (failedState === "specifying") {
         job = await this.stage(job, "specifying", "Finishing the interrupted specification");
+        const before = await readdir(appDir);
         await this.invoke(job, "specification-resume", continuationPrompt("specification", job.sdlc === "slices"), signal, { resumeSessionId });
-        await this.validateSpecification(appDir);
+        await this.validateSpecification(appDir, before);
+        await this.commit(job, "factory: specification");
         if (job.sdlc === "slices") {
           if (!job.planReviewed) job = await this.reviewSlicePlan(job, signal);
           return await this.buildSlices(job, signal);
@@ -315,6 +319,15 @@ export class SoloFactory {
     return this.store.appendEvent(jobId, event);
   }
 
+  // Stage-boundary commit into the project repo. Best effort: a git hiccup is evidence, not a build failure.
+  async commit(job, message) {
+    try {
+      if (await this.store.commit(message)) await this.emit(job.id, { type: "git.committed", state: job.state, message });
+    } catch (error) {
+      await this.emit(job.id, { type: "git.failed", state: job.state, message: `commit failed: ${error.message}` });
+    }
+  }
+
   async invoke(job, label, prompt, signal, { resumeSessionId = null } = {}) {
     const appDir = this.store.appDir(job.id);
     const logPath = path.join(appDir, ".factory", "logs", `${label}.log`);
@@ -338,7 +351,9 @@ export class SoloFactory {
     return result;
   }
 
-  async validateSpecification(appDir) {
+  // `before` is the repo's top-level listing before the spec turn: the repo already holds
+  // .git, .gitignore, .solofactory and any earlier build, so only *new* entries count as early code.
+  async validateSpecification(appDir, before = []) {
     const required = ["PRD.md", "PLAN.md", "ACCEPTANCE.md"];
     for (const name of required) {
       const content = await readFile(path.join(appDir, ".factory", name), "utf8").catch(() => "");
@@ -346,8 +361,8 @@ export class SoloFactory {
         throw new FactoryError("invalid_specification", `${name} is missing or too thin.`);
       }
     }
-    const top = await readdir(appDir, { withFileTypes: true });
-    const unexpected = top.filter((entry) => entry.name !== ".factory").map((entry) => entry.name);
+    const top = await readdir(appDir);
+    const unexpected = top.filter((name) => name !== ".factory" && !before.includes(name));
     if (unexpected.length) {
       throw new FactoryError(
         "spec_created_code",
@@ -384,7 +399,11 @@ export class SoloFactory {
     for (;;) {
       current = await this.stage(current, "verifying", "Running deterministic quality gates");
       const failure = await this.verify(current, manifest, signal, { includeInstall });
-      if (!failure) return current;
+      if (!failure) {
+        const passed = slice ? `slice ${slice.id}` : [...current.stageHistory].reverse().find((s) => !["verifying", "repairing"].includes(s.state))?.state ?? "build";
+        await this.commit(current, `factory: ${passed} passed gates`);
+        return current;
+      }
       if (current.attempt >= this.maxRepairs) throw failure;
       current.attempt += 1;
       await this.store.writeState(current);

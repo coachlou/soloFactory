@@ -1,20 +1,31 @@
 import { appendFile, mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { promisify } from "node:util";
 
+const execFileAsync = promisify(execFile);
+
+// A JobStore is rooted in one project: a git repo the factory builds into.
+// The app lives at the repo root; run evidence lives in .solofactory/runs/<id>/ (gitignored).
 export class JobStore {
-  constructor(root, { jobsRoot } = {}) {
-    this.root = path.resolve(root);
-    // ponytail: optional override so an ambient folder can keep runs in projects/ while home holds interviews
-    this._jobsRoot = jobsRoot ? path.resolve(jobsRoot) : path.join(this.root, "jobs");
+  constructor(project) {
+    this.project = path.resolve(project);
   }
 
   async init() {
     await mkdir(this.jobsRoot(), { recursive: true });
+    const isRepo = await stat(path.join(this.project, ".git")).then(() => true, () => false);
+    if (!isRepo) await this.git("init", "-q");
+    // ponytail: append-only ignore rules; a hand-edited .gitignore keeps its own lines
+    const ignoreFile = path.join(this.project, ".gitignore");
+    const current = await readFile(ignoreFile, "utf8").catch(() => "");
+    const missing = [".solofactory/", ".factory/logs/"].filter((rule) => !current.split("\n").includes(rule));
+    if (missing.length) await writeFile(ignoreFile, `${current}${current && !current.endsWith("\n") ? "\n" : ""}${missing.join("\n")}\n`);
   }
 
   jobsRoot() {
-    return this._jobsRoot;
+    return path.join(this.project, ".solofactory", "runs");
   }
 
   jobDir(id) {
@@ -22,8 +33,22 @@ export class JobStore {
     return path.join(this.jobsRoot(), id);
   }
 
-  appDir(id) {
-    return path.join(this.jobDir(id), "app");
+  appDir() {
+    return this.project;
+  }
+
+  async git(...args) {
+    // Identity is pinned so commits work on machines without a global git config.
+    const { stdout } = await execFileAsync("git", ["-c", "user.name=SoloFactory", "-c", "user.email=factory@solofactory.local", ...args], { cwd: this.project });
+    return stdout.trim();
+  }
+
+  // Commits everything the factory produced so far; returns false when the tree is clean.
+  async commit(message) {
+    await this.git("add", "-A");
+    if (!(await this.git("status", "--porcelain"))) return false;
+    await this.git("commit", "-q", "-m", message);
+    return true;
   }
 
   async create({ brief, transcript, provider, sdlc = "single" }) {
@@ -56,7 +81,7 @@ export class JobStore {
       job.sliceStats = {};
       job.slicePlanIds = [];
     }
-    await mkdir(this.appDir(id), { recursive: true });
+    await mkdir(this.jobDir(id), { recursive: true });
     await this.writeState(job);
     await this.appendEvent(id, { type: "job.created", state: "queued", message: "Run queued" });
     return job;
@@ -146,7 +171,8 @@ export class JobStore {
     };
     const relative = map[name];
     if (!relative) throw new Error("Unknown artifact.");
-    const file = path.join(this.appDir(id), relative);
+    this.jobDir(id); // validates the id even though artifacts are project-level now
+    const file = path.join(this.appDir(), relative);
     await stat(file);
     return { file, content: await readFile(file, "utf8") };
   }

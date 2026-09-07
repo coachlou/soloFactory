@@ -339,3 +339,27 @@ test("a plan review that leaves the plan invalid parks the run and resume recove
   const events = await store.events(job.id, 500);
   assert.equal(events.filter((event) => event.type === "job.resumed").length, 1);
 });
+
+test("a project is a git repo: app at the root, evidence gitignored, commits at stage boundaries", async (t) => {
+  const project = await mkdtemp(path.join(os.tmpdir(), "solo-factory-project-"));
+  const store = new JobStore(project);
+  await store.init();
+  const job = await store.create({ brief, transcript, provider: "fixture" });
+  const factory = new SoloFactory({
+    store,
+    provider: createFixtureProvider(),
+    commandRunner: async () => ({ code: 0, output: "passed" }),
+    deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9998" }),
+  });
+  t.after(() => factory.shutdown());
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+
+  assert.equal(store.appDir(job.id), project);
+  assert.equal(store.jobDir(job.id), path.join(project, ".solofactory", "runs", job.id));
+  await readFile(path.join(project, "factory.json"), "utf8");
+  const log = await store.git("log", "--format=%s");
+  assert.deepEqual(log.split("\n"), ["factory: reviewing passed gates", "factory: building passed gates", "factory: specification"]);
+  assert.equal(await store.git("status", "--porcelain"), "", "evidence and logs must be ignored");
+  assert.equal(await store.git("ls-files", ".solofactory"), "");
+});
