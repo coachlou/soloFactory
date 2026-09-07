@@ -162,6 +162,8 @@ h2 { font: 500 27px/1.08 var(--serif); margin: 0 0 14px; }
 
 /* Feedback dialog */
 .top-right { display: flex; align-items: center; gap: 16px; }
+.project-select { padding: 8px 32px 8px 10px; max-width: 280px; text-overflow: ellipsis; }
+.background-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); font-size: 13px; }
 .button.small { padding: 7px 11px; font-size: 11px; }
 .feedback-dialog { width: min(680px, calc(100vw - 24px)); max-height: calc(100vh - 24px); padding: 0; border: 1px solid var(--line); border-radius: 20px; color: var(--ink); background: var(--panel); box-shadow: 0 30px 90px rgba(0,0,0,.5); }
 .feedback-dialog::backdrop { background: rgba(8,10,9,.66); backdrop-filter: blur(8px); }

@@ -15,7 +15,7 @@ const labels = {
 };
 
 const stageOrder = ["specifying", "building", "verifying", "reviewing", "deploying", "completed"];
-const state = { config: null, provider: null, messages: [], guide: null, job: null, events: [], telemetry: null, poller: null };
+const state = { config: null, provider: null, messages: [], guide: null, job: null, events: [], telemetry: null, poller: null, jobs: [], busyJobId: null, projects: [], project: null };
 const $ = (selector) => document.querySelector(selector);
 
 boot().catch(showError);
@@ -30,22 +30,144 @@ async function boot() {
   renderMessages();
   renderCoverage();
   renderSdlcOptions();
-  const health = await api("/api/health");
-  $("#system-status").textContent = health.busyJobId ? "Factory running" : "Factory ready";
-  const listing = await api("/api/jobs");
+  await refreshProjects();
   const savedId = localStorage.getItem("solofactory.currentJob");
-  const candidate = listing.jobs.find((job) => job.id === savedId)
-    ?? listing.jobs.find((job) => ["failed", "interrupted"].includes(job.state));
-  if (candidate) {
-    const result = await api(`/api/jobs/${candidate.id}`);
-    state.job = result.job;
-    state.events = result.events;
-    state.provider = state.job.provider;
-    localStorage.setItem("solofactory.currentJob", state.job.id);
-    showRun();
-    await poll();
-    if (!["completed", "failed", "cancelled", "interrupted"].includes(state.job.state)) startPolling();
+  const candidate = state.jobs.find((job) => job.id === savedId)
+    ?? state.jobs.find((job) => ["failed", "interrupted"].includes(job.state));
+  if (candidate) await selectRun(candidate.id);
+  // ponytail: /api/projects reads every run's state.json; fine for a handful of projects, paginate if it ever isn't
+  setInterval(() => refreshProjects().catch(() => {}), 5000);
+}
+
+async function refreshProjects() {
+  const [projects, listing] = await Promise.all([api("/api/projects"), api("/api/jobs")]);
+  state.projects = projects.projects;
+  state.project = projects.active;
+  state.jobs = listing.jobs;
+  state.busyJobId = listing.busyJobId;
+  $("#system-status").textContent = state.busyJobId ? "Factory running" : "Factory ready";
+  renderProjects();
+  renderRuns();
+  renderBackgroundBanner();
+}
+
+function projectName(job) {
+  return job?.brief?.workingName || job?.id || "Untitled";
+}
+
+function option(value, text) {
+  return Object.assign(document.createElement("option"), { value, textContent: text });
+}
+
+function renderProjects() {
+  const select = $("#project-select");
+  select.replaceChildren(option("new", "+ New project…"), ...state.projects.map((project) => {
+    const marker = project.id === state.project && state.busyJobId ? "● " : "";
+    const last = project.lastRun ? `${project.lastRun.state} · ${project.runCount} run${project.runCount === 1 ? "" : "s"}` : "no runs";
+    return option(project.id, `${marker}${project.name} · ${last}`);
+  }));
+  select.value = state.project;
+}
+
+function renderRuns() {
+  const select = $("#run-select");
+  select.replaceChildren(option("new", "+ New run"), ...state.jobs.map((job) => {
+    const marker = job.id === state.busyJobId ? "● " : "";
+    return option(job.id, `${marker}${projectName(job)} · ${job.state} · ${job.createdAt.slice(0, 10)}`);
+  }));
+  select.value = state.job?.id ?? "new";
+}
+
+function renderBackgroundBanner() {
+  const busy = state.busyJobId && state.busyJobId !== state.job?.id ? state.jobs.find((job) => job.id === state.busyJobId) : null;
+  $("#background-banner").classList.toggle("hidden", !busy);
+  if (busy) $("#background-text").textContent = `“${projectName(busy)}” is ${busy.state} in the background.`;
+}
+
+$("#project-select").addEventListener("change", (event) => switchProject(event.target.value).catch(showError));
+$("#run-select").addEventListener("change", (event) => selectRun(event.target.value).catch(showError));
+$("#background-view-button").addEventListener("click", () => selectRun(state.busyJobId).catch(showError));
+
+// Switching projects is the one view change that can interrupt a build: the server refuses
+// with 409 + busyJobId until the owner confirms, then cancels and waits before switching.
+async function switchProject(id) {
+  clearError();
+  const create = id === "new";
+  const body = create ? { name: window.prompt("Project name?") ?? "" } : { id };
+  if (create && !body.name.trim()) return renderProjects();
+  const url = create ? "/api/projects" : "/api/projects/select";
+  let result = await api(url, { method: "POST", body, allow: [409] });
+  if (result.busyJobId) {
+    const busy = state.jobs.find((job) => job.id === result.busyJobId);
+    if (!window.confirm(`“${projectName(busy)}” is still ${busy?.state ?? "running"}. Cancel it and switch project?`)) return renderProjects();
+    result = await api(url, { method: "POST", body: { ...body, cancel: true } });
+  } else if (result.error) throw new Error(result.error);
+  stopPolling();
+  await refreshProjects();
+  return state.jobs[0] ? selectRun(state.jobs[0].id) : showInterview();
+}
+
+async function selectRun(id) {
+  clearError();
+  if (id === "new") return showInterview();
+  const result = await api(`/api/jobs/${id}`);
+  state.job = result.job;
+  state.events = result.events;
+  state.telemetry = null;
+  state.provider = state.job.provider;
+  localStorage.setItem("solofactory.currentJob", state.job.id);
+  resetRunPanels();
+  showRun();
+  renderRuns();
+  renderBackgroundBanner();
+  await poll();
+  if (["completed", "failed", "cancelled", "interrupted"].includes(state.job.state)) stopPolling();
+  else startPolling();
+}
+
+function showInterview() {
+  stopPolling();
+  state.job = null;
+  state.events = [];
+  state.telemetry = null;
+  state.guide = state.config.opening;
+  state.messages = [{ role: "assistant", content: state.guide.message }];
+  localStorage.removeItem("solofactory.currentJob");
+  $("#run-view").classList.add("hidden");
+  $("#review-view").classList.add("hidden");
+  $("#interview-view").classList.remove("hidden");
+  document.querySelectorAll(".stages li").forEach((item) => item.classList.remove("active", "done"));
+  document.querySelector('[data-stage="interview"]').classList.add("active");
+  $("#start-button").disabled = false;
+  renderProviders();
+  renderMessages();
+  renderCoverage();
+  renderRuns();
+  renderBackgroundBanner();
+}
+
+function resetRunPanels() {
+  for (const id of ["request-total", "error-total", "latency-average", "app-uptime"]) $(`#${id}`).textContent = "—";
+  $("#route-list").replaceChildren(Object.assign(document.createElement("p"), { textContent: "No app traffic yet." }));
+  $("#app-live").textContent = "Waiting";
+  $("#app-live").classList.add("muted");
+  $("#open-app").classList.add("hidden");
+  $("#artifacts").replaceChildren(Object.assign(document.createElement("p"), { textContent: "Artifacts appear after specification." }));
+}
+
+// Option A: viewing another project never interrupts a build; acting on one does, after confirmation.
+async function ensureFactoryFree() {
+  await refreshProjects();
+  const busy = state.busyJobId && state.busyJobId !== state.job?.id ? state.jobs.find((job) => job.id === state.busyJobId) : null;
+  if (!busy) return true;
+  if (!window.confirm(`“${projectName(busy)}” is still ${busy.state}. Cancel it and continue with this project?`)) return false;
+  await api(`/api/jobs/${busy.id}/cancel`, { method: "POST", body: {} });
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const health = await api("/api/health");
+    if (!health.busyJobId) return true;
   }
+  throw new Error(`“${projectName(busy)}” did not stop in time. Try again in a moment.`);
 }
 
 function renderProviders() {
@@ -194,6 +316,7 @@ $("#start-button").addEventListener("click", async () => {
   clearError();
   $("#start-button").disabled = true;
   try {
+    if (!(await ensureFactoryFree())) { $("#start-button").disabled = false; return; }
     const { job } = await api("/api/jobs", {
       method: "POST",
       body: { provider: state.provider, transcript: state.messages, coverage: state.guide.coverage, brief: state.guide.brief, sdlc: $("#sdlc-select").value },
@@ -203,6 +326,7 @@ $("#start-button").addEventListener("click", async () => {
     showRun();
     poll();
     startPolling();
+    refreshProjects();
   } catch (error) {
     showError(error);
     $("#start-button").disabled = false;
@@ -229,8 +353,8 @@ async function poll() {
     state.telemetry = await api(`/api/jobs/${state.job.id}/telemetry`);
     renderJob();
     if (["failed", "cancelled", "interrupted"].includes(state.job.state)) {
-      clearInterval(state.poller);
-      state.poller = null;
+      stopPolling();
+      refreshProjects();
     }
   } catch (error) { showError(error); }
 }
@@ -347,9 +471,11 @@ $("#resume-button").addEventListener("click", async () => {
   clearError();
   $("#resume-button").disabled = true;
   try {
+    if (!(await ensureFactoryFree())) return;
     await api(`/api/jobs/${state.job.id}/resume`, { method: "POST", body: {} });
     await poll();
     startPolling();
+    refreshProjects();
   } catch (error) {
     showError(error);
   } finally {
@@ -371,14 +497,22 @@ $("#copy-recovery-button").addEventListener("click", async () => {
 });
 
 $("#start-over-button").addEventListener("click", async () => {
-  const { job } = await api(`/api/jobs/${state.job.id}/retry`, { method: "POST", body: {} });
-  state.job = job;
-  state.events = [];
-  state.telemetry = null;
-  localStorage.setItem("solofactory.currentJob", job.id);
-  renderJob();
-  poll();
-  startPolling();
+  clearError();
+  try {
+    if (!(await ensureFactoryFree())) return;
+    const { job } = await api(`/api/jobs/${state.job.id}/retry`, { method: "POST", body: {} });
+    state.job = job;
+    state.events = [];
+    state.telemetry = null;
+    localStorage.setItem("solofactory.currentJob", job.id);
+    resetRunPanels();
+    showRun();
+    poll();
+    startPolling();
+    refreshProjects();
+  } catch (error) {
+    showError(error);
+  }
 });
 
 // Feedback dialog. Preview is rendered server-side; the browser only shows and copies the exact markdown it received.
@@ -475,8 +609,13 @@ $("#feedback-github-button").addEventListener("click", () => {
 });
 
 function startPolling() {
-  if (state.poller) clearInterval(state.poller);
+  stopPolling();
   state.poller = setInterval(poll, 1500);
+}
+
+function stopPolling() {
+  if (state.poller) clearInterval(state.poller);
+  state.poller = null;
 }
 
 function statusCopy(status) {
@@ -496,7 +635,7 @@ async function api(url, options = {}) {
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || `Request failed with HTTP ${response.status}.`);
+  if (!response.ok && !options.allow?.includes(response.status)) throw new Error(body.error || `Request failed with HTTP ${response.status}.`);
   return body;
 }
 

@@ -15,6 +15,10 @@
           <span><strong>SoloFactory</strong><small>idea to working app</small></span>
         </a>
         <div class="top-right">
+          <label class="sr-only" for="project-select">Project</label>
+          <select id="project-select" class="sdlc-select project-select" aria-label="Project"></select>
+          <label class="sr-only" for="run-select">Run</label>
+          <select id="run-select" class="sdlc-select project-select" aria-label="Run"></select>
           <button id="feedback-button" class="button ghost small" type="button">Feedback</button>
           <div class="top-status"><span class="pulse"></span><span id="system-status">Checking factory</span></div>
         </div>
@@ -39,6 +43,10 @@
 
         <section class="main-panel">
           <div id="notice" class="notice hidden" role="alert"></div>
+          <div id="background-banner" class="background-banner hidden" role="status">
+            <span id="background-text"></span>
+            <button id="background-view-button" class="button ghost small" type="button">View</button>
+          </div>
 
           <section id="interview-view" class="view">
             <div class="view-heading">
