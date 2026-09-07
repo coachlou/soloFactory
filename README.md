@@ -22,9 +22,15 @@ npm start
 ```
 
 Open <http://127.0.0.1:4173>. Answer the Factory Guide one turn at a time, review the
-compiled brief, and choose **Start the factory**. Runs and generated apps are stored in
-`.solofactory/jobs/` unless `SOLOFACTORY_HOME` points elsewhere. Set `SOLOFACTORY_JOBS_ROOT`
-to keep runs in a different directory from the rest of the home (the interview log).
+compiled brief, and choose **Start the factory**.
+
+A **project** is a git repo the factory builds into. Projects are discovered under
+`SOLOFACTORY_ROOT` (default: the home, `.solofactory/`) — any `<root>/<name>/` or
+`<root>/projects/<name>/` that contains `.git/`. The header selector switches projects or
+creates one (`projects/<slug>`, `git init`); switching while a build is running asks before
+cancelling it. The app lives at the repo root; the factory commits after the specification
+and after every passed gate set; run evidence (`state.json`, `events.jsonl`) lives in
+`<project>/.solofactory/runs/<id>/` and is gitignored along with `.factory/logs/`.
 
 The generated app is deployed locally on an unused loopback port. Keep SoloFactory running
 while using that app. This is the deliberately small v0.1 deployment contract; no cloud

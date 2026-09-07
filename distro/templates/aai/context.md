@@ -9,4 +9,4 @@
 | `start.sh` | root-level launcher (delegates into `.ailib/solofactory/run.sh`) | starting the factory |
 | `.ailib/solofactory/` | vendored SoloFactory capability: `run.sh`, `app/` | updating the factory |
 | `.ailib/manifest.yaml` | what's vendored and at which version | "what version is installed" |
-| `projects/<id>/` | one factory run: state, events, generated `app/` with `.factory/` contract | any question about that project |
+| `projects/<name>/` | one project: a git repo with the app at its root, `.factory/` contract, `.solofactory/runs/` evidence | any question about that project |

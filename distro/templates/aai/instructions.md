@@ -15,14 +15,14 @@ app". SoloFactory is this folder's agentic function; projects are its output.
 | `.aai/references/*.md` | reference — folder-level rules | always, if present |
 | `.ailib/solofactory/` | vendored — resolve `.aai/skills/solofactory/` first (shadowing) | any factory operation |
 | `.ailib/solofactory/app/README.md` | reference — how the app runs and its boundaries | before starting or troubleshooting the factory |
-| `projects/<id>/state.json`, `events.jsonl`, `app/.factory/*.md` | working — one project's state, log, PRD/PLAN/ACCEPTANCE | when the request names or implies that project |
+| `projects/<name>/.factory/*.md`, `.solofactory/runs/<id>/{state.json,events.jsonl}` | working — one project's state, log, PRD/PLAN/ACCEPTANCE | when the request names or implies that project |
 
 ## Process
 
 1. **Start the factory** (deterministic): `bash start.sh` at the folder root
    (resolves to the `.aai/skills/solofactory/run.sh` fork if one exists, else
    `.ailib/solofactory/run.sh`). It serves
-   <http://127.0.0.1:4173>, writes runs to `projects/<id>/`, and keeps the
+   <http://127.0.0.1:4173>, builds projects in `projects/<name>/` (git repos), and keeps the
    interview log in `.aai/memory/solofactory/`. `SOLOFACTORY_DEMO=1` gives a
    deterministic demo that spends no quota.
 2. **New project**: the owner answers the Factory Guide in the browser, reviews
@@ -40,9 +40,9 @@ app". SoloFactory is this folder's agentic function; projects are its output.
 
 ## Outputs
 
-- `projects/<id>/state.json`, `events.jsonl` → run state and lifecycle log
-- `projects/<id>/app/` → the generated application, deployed on a loopback port
-- `projects/<id>/app/.factory/{PRD,PLAN,ACCEPTANCE}.md` → the frozen contract
+- `projects/<name>/.solofactory/runs/<id>/{state.json,events.jsonl}` → run state and lifecycle log
+- `projects/<name>/` → the generated application (git repo, `git log` = build history), deployed on a loopback port
+- `projects/<name>/.factory/{PRD,PLAN,ACCEPTANCE}.md` → the frozen contract
 - `.aai/memory/solofactory/` → interview log, runtime state across runs
 
 ## Rules

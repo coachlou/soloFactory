@@ -7,7 +7,7 @@
 #
 # Resolves the folder by walking up to the nearest .aai/, so it works from
 # .ailib/solofactory/ and from a fork in .aai/skills/solofactory/ alike.
-# Runs land in <folder>/projects/<id>; the interview log in <folder>/.aai/memory/solofactory/.
+# Projects are git repos in <folder>/projects/<name>; the interview log in <folder>/.aai/memory/solofactory/.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FOLDER="$HERE"
@@ -18,6 +18,6 @@ done
 command -v node >/dev/null || { echo "node 22+ is required" >&2; exit 1; }
 mkdir -p "$FOLDER/projects" "$FOLDER/.aai/memory/solofactory"
 export SOLOFACTORY_HOME="${SOLOFACTORY_HOME:-$FOLDER/.aai/memory/solofactory}"
-export SOLOFACTORY_JOBS_ROOT="${SOLOFACTORY_JOBS_ROOT:-$FOLDER/projects}"
-echo "SoloFactory → http://127.0.0.1:${PORT:-4173}   projects: $SOLOFACTORY_JOBS_ROOT"
+export SOLOFACTORY_ROOT="${SOLOFACTORY_ROOT:-$FOLDER}"
+echo "SoloFactory → http://127.0.0.1:${PORT:-4173}   projects: $SOLOFACTORY_ROOT/{*,projects/*}"
 exec node "$HERE/app/src/server.mjs"

@@ -50,14 +50,14 @@ bash "${CLAUDE_PLUGIN_ROOT}/library/ambient-folder/install.sh" solofactory <targ
 │   ├── ambient-folder/        #   generic install/update script (dependency)
 │   └── solofactory/           #   this capability: run.sh, app/, templates/
 ├── start.sh                   #   root-level launcher → .ailib/solofactory/run.sh
-├── projects/                  # one folder per run id (YYYY-MM-DD-xxxxxxxx)
+├── projects/                  # one git repo per project (created from the app)
 ├── CLAUDE.md, AGENTS.md       # discovery anchors (appended, never replaced)
 ```
 
 3. Verify: `ls <target>/.aai <target>/.ailib/solofactory <target>/projects`.
 4. Tell the user: start with `bash <target>/start.sh`, open
    <http://127.0.0.1:4173>, answer the guide, review the brief, start the
-   factory. Runs land in `projects/<id>/`.
+   factory. Each project is a git repo in `projects/<name>/`; the app is at its root.
 
 Re-running the installer (or `bash <target>/.ailib/ambient-folder/install.sh solofactory <target>`) is the **update** path: `.ailib/` is refreshed,
 `.aai/` and `projects/` are untouched.
@@ -68,8 +68,9 @@ The folder's own `.aai/instructions.md` governs; it was written from
 `templates/aai/instructions.md` here. In short: `start.sh` (at the folder root)
 runs `run.sh`, which starts the factory
 with `SOLOFACTORY_HOME=<folder>/.aai/memory/solofactory` and
-`SOLOFACTORY_JOBS_ROOT=<folder>/projects`; inspect a project by reading
-`projects/<id>/state.json`, `events.jsonl`, and `app/.factory/*.md`.
+`SOLOFACTORY_ROOT=<folder>` (projects are discovered in `<folder>/*` and
+`<folder>/projects/*` — any child with `.git/`); inspect a project by reading its
+`.factory/*.md`, `git log`, and `.solofactory/runs/<id>/{state.json,events.jsonl}`.
 
 ## Maintain — refresh the library copy (library maintainers)
 

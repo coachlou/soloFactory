@@ -234,3 +234,28 @@ Observed:
   Copy report set the clipboard; Escape closed the dialog and focus returned to the trigger;
   with `SOLOFACTORY_ISSUES_URL` set, search and new-issue URLs carried title and template
   only.
+
+## Projects as git repos (2026-09-07, in progress)
+
+Definition (owner): a project is a workspace the factory builds into — a git repo living
+at `<root>/<project>/` or `<root>/projects/<project>/`. Decisions: the factory commits at
+stage boundaries (spec, each passed gate set, completion); run evidence lives inside the
+project at `.solofactory/runs/<id>/` (gitignored).
+
+- [x] Step 1 — `src/store.mjs` project-rooted (`appDir` = repo root, runs under
+      `.solofactory/runs/`, `init()` = `git init` + `.gitignore`), `src/factory.mjs` commits
+      at boundaries, spec-created-code check compares against a pre-turn snapshot.
+      Interim: server points at `<home>/projects/default` until step 2.
+- [x] Step 2 — server project registry: `GET/POST /api/projects`, `POST /api/projects/select`
+      (409 while busy unless `cancel:true`), `SOLOFACTORY_ROOT` replaces `SOLOFACTORY_JOBS_ROOT`.
+- [x] Step 3 — UI selector lists projects (name · last run · run count) + "+ New project";
+      switching while busy → confirm → cancel → switch; active project's run history.
+- [x] Docs/distro: `distro/run.sh`, `distro/instructions.md`, README, SPEC.
+
+Observed: `npm test` → **56/56** (new: project-repo lifecycle with exact commit sequence;
+HTTP registry with 409-while-busy, cancel-and-switch, per-project run lists, traversal id →
+404). Demo browser walkthrough: header shows project + run selectors; "+ New project…"
+created `projects/second-app` and switched; a build started there; switching back to
+`default` mid-build raised the confirm, cancelled the run (`second-app` last run =
+cancelled), and showed `default`'s completed run. On disk each project has the app at the
+root, three `factory:` commits, a clean tree, and gitignored `.solofactory/runs/`.

@@ -171,20 +171,24 @@ recorded. In-memory aggregates reset on app restart in v0.1.
 
 ## 6. State and evidence
 
-Each run has a generated ID and lives under the configured factory home:
+A project is a git repo the factory builds into, discovered as `<root>/<name>/` or
+`<root>/projects/<name>/` (any child containing `.git/`; `root` = `SOLOFACTORY_ROOT`, default
+the factory home). One project is active at a time; every run belongs to it. The factory
+commits after the specification and after each passed gate set (`factory: <stage> passed
+gates`), so `git log` is the build history.
 
 ```text
-jobs/<run-id>/
-  state.json               atomic current snapshot
-  events.jsonl             append-only lifecycle evidence
-  app/                     generated application
-    .factory/
-      requirements.json
-      PRD.md
-      PLAN.md
-      ACCEPTANCE.md
-      recovery.json         failure evidence supplied to a resumed worker
-      logs/
+<project>/                 git repo; generated application at the root
+  .factory/
+    requirements.json
+    PRD.md
+    PLAN.md
+    ACCEPTANCE.md
+    recovery.json           failure evidence supplied to a resumed worker
+    logs/                   gitignored
+  .solofactory/runs/<id>/   gitignored run evidence
+    state.json              atomic current snapshot
+    events.jsonl            append-only lifecycle evidence
 ```
 
 Canonical states are `queued`, `specifying`, `building`, `verifying`, `repairing`,
@@ -225,7 +229,11 @@ Only one job may be active because the target user does not benefit from resourc
 
 ## 9. HTTP surface
 
-- `GET /api/health` — factory health.
+- `GET /api/health` — factory health, active project, busy run.
+- `GET /api/projects` — discovered projects with run count and last run; the active one.
+- `POST /api/projects` — create `projects/<slug>` (`git init`) and select it.
+- `POST /api/projects/select` — switch the active project; `409 { busyJobId }` while a run is
+  active unless `cancel: true`, which cancels it and waits before switching.
 - `GET /api/config` — intake questions and available subscription providers.
 - `POST /api/interview/turn` — run one Factory Guide turn and return structured coverage.
 - `POST /api/jobs` — validate intake, freeze input, queue a run.
