@@ -19,8 +19,9 @@ app". SoloFactory is this folder's agentic function; projects are its output.
 
 ## Process
 
-1. **Start the factory** (deterministic): `bash .ailib/solofactory/run.sh`
-   (use the `.aai/skills/solofactory/run.sh` fork if one exists). It serves
+1. **Start the factory** (deterministic): `bash start.sh` at the folder root
+   (resolves to the `.aai/skills/solofactory/run.sh` fork if one exists, else
+   `.ailib/solofactory/run.sh`). It serves
    <http://127.0.0.1:4173>, writes runs to `projects/<id>/`, and keeps the
    interview log in `.aai/memory/solofactory/`. `SOLOFACTORY_DEMO=1` gives a
    deterministic demo that spends no quota.
