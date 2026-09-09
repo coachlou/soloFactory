@@ -253,9 +253,14 @@ Go to **C1**.
 
 # Track B — Windows
 
-SoloFactory's launcher and installer are Linux/Mac shell scripts, and the app detects the
-coding-agent CLI in a way that does not work on native Windows. So on Windows it runs inside
-WSL2 — a real Ubuntu Linux that Microsoft ships as a standard Windows feature.
+SoloFactory's launcher and installer are Linux/Mac shell scripts, and the commands it runs
+to build and test a project spawn bare names like `npm` that do not resolve to Windows shims
+without a shell. So on Windows it runs inside WSL2 — a real Ubuntu Linux that Microsoft
+ships as a standard Windows feature.
+
+**WSL2 is a requirement on Windows, not a fallback.** There is no native-Windows path;
+do not try to build one. B1 walks through installing it if it is absent, and converting it
+if the machine has the older WSL1.
 
 **Never explain WSL2 to the owner.** To them it is "a Linux window that Windows comes with,"
 and after setup it is just "the Ubuntu window." Nothing more.
@@ -263,16 +268,46 @@ and after setup it is just "the Ubuntu window." Nothing more.
 The good news: the browser part still works normally. They will open Chrome or Edge on
 Windows as usual and go to the same address.
 
-## B1. Install WSL2
+## B1. Set up the Linux window (WSL2)
 
-> Windows needs one component switched on first. Microsoft includes it — we just have to
-> turn it on.
+**WSL2 is a hard requirement on Windows.** WSL1 is not sufficient — it emulates Linux
+syscalls rather than running a real kernel, and the differences show up as confusing
+failures much later, long after the point where you could connect them to the cause. If the
+owner has WSL1, convert it here.
+
+### B1a. Check what they already have
+
+Many machines already have some of this. Find out before installing anything.
+
+> Windows needs one component switched on. Microsoft includes it — we may just need to turn
+> it on, or you may already have it.
 >
 > 1. Click the Start button and type `powershell`.
 > 2. **Right-click** on *Windows PowerShell* in the results and choose **Run as
 >    administrator**. A window will ask "do you want to allow this app to make changes" —
 >    click **Yes**.
-> 3. A blue window opens. Paste this in and press Enter:
+> 3. A blue window opens. Paste this in and press Enter, then send me everything it prints:
+
+```powershell
+wsl --status; wsl --list --verbose
+```
+
+> This only looks around and reports back. It changes nothing.
+
+Read the output yourself and pick exactly one row:
+
+| What you see | Meaning | Go to |
+|---|---|---|
+| `'wsl' is not recognized...` | WSL is not installed at all | **B1b** |
+| An error mentioning *no installed distributions*, or an empty list | WSL is on, no Linux installed | **B1c** |
+| A list with a distro at `VERSION  2` | Already correct | **B1e** |
+| A list with a distro at `VERSION  1` | WSL1 — must be converted | **B1d** |
+| Any mention of *WSL 1* as the default version | Default is wrong | **B1d** |
+
+If the list shows several distros, prefer an Ubuntu one at VERSION 2. Tell the owner which
+name you picked and use that name consistently from here on.
+
+### B1b. Install WSL2 from scratch
 
 ```powershell
 wsl --install
@@ -281,10 +316,70 @@ wsl --install
 > That downloads and switches on the Linux component. When it finishes it will tell you to
 > restart your computer. **Restart it.** Tell me once you're back and logged in.
 
-After the restart:
+**If it says `wsl` is not a recognized command even now**, their Windows is too old for the
+one-line installer. Check the version:
 
-> An Ubuntu window should open by itself. If it doesn't, click Start, type `ubuntu`, and open
-> it.
+```powershell
+winver
+```
+
+WSL2 needs Windows 11, or Windows 10 version 2004 / build 19041 or higher. If they are
+below that, the honest answer is that their Windows needs updating first — send them to
+Settings → Windows Update, and stop until that is done. Do not attempt the legacy manual
+WSL install with a non-technical owner; it is a six-step registry-and-reboot dance and it
+is not worth it.
+
+After the restart, go to **B1e**.
+
+### B1c. Install Ubuntu (WSL is on, but there is no Linux)
+
+```powershell
+wsl --set-default-version 2
+```
+
+> This makes sure the right version is used. It prints one line.
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+> This installs Ubuntu itself. It downloads for a few minutes.
+
+Go to **B1e**.
+
+### B1d. Convert an existing WSL1 install to WSL2
+
+Set the default first so anything installed later is correct:
+
+```powershell
+wsl --set-default-version 2
+```
+
+Then convert their existing distro, replacing `Ubuntu` with the exact name from the list in
+B1a if it differs:
+
+```powershell
+wsl --set-version Ubuntu 2
+```
+
+> This upgrades your existing Linux to the newer version. **It can take ten or twenty
+> minutes and will look stuck partway through — leave it alone and let it finish.** Tell me
+> when it says the conversion is complete.
+
+Then confirm it actually took:
+
+```powershell
+wsl --list --verbose
+```
+
+The distro must now show `VERSION  2`. If it still shows `1`, the conversion failed — the
+usual cause is the virtualization problem below.
+
+Go to **B1e**.
+
+### B1e. Open Ubuntu and create the Linux account
+
+> Click Start, type `ubuntu`, and open it.
 >
 > The first time it runs it sets itself up for a couple of minutes, then asks you to create a
 > username and password. Use anything you'll remember — this is separate from your Windows
@@ -294,16 +389,25 @@ After the restart:
 >
 > Tell me when you see a line ending in a `$` sign.
 
+If it opens straight to a `$` with no setup, the account already exists and that is fine.
+
 **From here on, every command goes in the Ubuntu window, not PowerShell.** State this
 plainly once, and if a later command behaves strangely, first confirm which window they
 pasted into — mixing them up is the single most common Windows failure.
 
-**If `wsl --install` fails** with a virtualization error, the machine has hardware
+### B1f. When WSL will not install at all
+
+**If any of the above fails with a virtualization error**, the machine has hardware
 virtualization disabled in its BIOS. You cannot fix that from software. Tell the owner
 plainly that their computer has a setting switched off that only they can change, that it
 requires going into the machine's start-up settings, and that it varies by manufacturer —
 they should search their PC model plus "enable virtualization in BIOS," or ask whoever
 supports their computer. Do not attempt to walk them through a BIOS blind.
+
+Two other real causes worth recognising before you blame the BIOS: a virtual machine that
+does not pass virtualization through to the guest, and a corporate laptop where an
+administrator has blocked WSL by policy. In both cases the owner cannot fix it alone —
+say so and stop rather than looping.
 
 ## B2. Check and install the Ubuntu essentials
 
@@ -542,6 +646,8 @@ Work these yourself. Do not read this table out loud.
 | `git: command not found` | git missing | A3 / B2 |
 | `install: refused — these paths already exist with different contents` | A previous half-install left conflicting files | Do **not** delete anything. Show the owner the listed paths and ask whether they installed here before. Only proceed once they confirm the folder is disposable. |
 | `command not found` right after installing something | Shell has a stale PATH | Fresh terminal window, then retry. This resolves it the overwhelming majority of the time. |
+| Windows: odd filesystem, permission or exec failures with no other explanation | Running on WSL1, not WSL2 | `wsl --list --verbose` in PowerShell; if VERSION is 1, convert per B1d |
+| Windows: `'wsl' is not recognized` after `wsl --install` | Windows build too old for WSL2 | `winver`; needs Win11 or Win10 build 19041+. Windows Update first, then stop |
 | Windows: nothing behaves as documented | Commands went into PowerShell instead of Ubuntu | Confirm which window; everything after B1 belongs in Ubuntu |
 
 **Two things you must never do to get past an error:** never delete a folder the owner did
@@ -564,5 +670,6 @@ yourself; do not ask the owner to confirm them.
 7. The page shows a provider as signed in — not "Select an authenticated subscription
    provider."
 8. The owner has been given the restart command, in a copy/paste box.
+9. On Windows only: `wsl --list --verbose` shows the distro at `VERSION  2`, not 1.
 
 If any one of these fails, you are not done. Fix it.
