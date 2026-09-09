@@ -1,12 +1,25 @@
 import { spawnSync } from "node:child_process";
+import { accessSync, constants } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { runProcess } from "./process.mjs";
 
+// ponytail: PATH scan rather than shelling out to `which`, which needed a hardcoded
+// /usr/bin/env and so reported every provider missing anywhere that path is absent.
+// PATHEXT is the Windows half; harmless elsewhere, where it is unset and the suffix is "".
 function commandExists(command) {
-  const result = spawnSync("/usr/bin/env", ["which", command], { encoding: "utf8" });
-  return result.status === 0;
+  const suffixes = process.platform === "win32" ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";") : [""];
+  for (const dir of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (!dir) continue;
+    for (const suffix of suffixes) {
+      try {
+        accessSync(path.join(dir, command + suffix), constants.X_OK);
+        return true;
+      } catch {}
+    }
+  }
+  return false;
 }
 
 function codexStatus() {
