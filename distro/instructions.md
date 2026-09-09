@@ -21,6 +21,12 @@ library reachable.
 
 ## Install — make a folder a SoloFactory workspace
 
+**Installing for a non-technical owner?** Read `INSTALL.md` next to this file and follow it
+instead of this section. It is a step-by-step runbook covering both macOS and Windows (WSL2),
+with dependency detection, copy/paste blocks written for a beginner, and remediation for
+every known failure. This section assumes the prerequisites are already in place; `INSTALL.md`
+does not.
+
 Without the library plugin (member one-liner, same result):
 
 ```bash
