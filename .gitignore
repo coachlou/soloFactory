@@ -5,3 +5,7 @@ npm-debug.log*
 solofactory-demo/
 .claude/
 .serena/
+
+# local install target for testing the distro (an installed ambient folder, not source)
+# ponytail: literal name; add others here if you test-install under different names
+my-folder/
