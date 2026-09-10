@@ -489,6 +489,12 @@ into Linux have different file permissions and are dramatically slower, and git 
 incorrectly on them. `cd ~` handles this; do not let the owner talk you into a Windows path
 like `C:\Users\...`.
 
+If the owner wants it visible from Windows (for example in a OneDrive or apps folder), don't
+move it — offer this instead: paste `\\wsl.localhost\Ubuntu\home\<user>\solofactory` into
+File Explorer's address bar and pin it to Quick access (or put a shortcut to that path in
+their folder). Never copy or move the real folder into OneDrive — sync will corrupt the git
+repo. The path only opens while WSL is running.
+
 ```sh
 cd ~ && curl -fsSL https://raw.githubusercontent.com/coachlou/ambient-library/main/library/ambient-folder/bootstrap.sh | bash -s -- solofactory solofactory
 ```
