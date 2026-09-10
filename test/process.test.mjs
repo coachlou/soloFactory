@@ -16,6 +16,8 @@ test("subscription environment strips common API keys", () => {
   assert.equal(env.PORT, undefined);
   assert.equal(subscriptionEnvironment({ PORT: "8123" }).PORT, "8123");
   assert.equal(env.SAFE_VALUE, "yes");
+  const routed = subscriptionEnvironment({ ANTHROPIC_AUTH_TOKEN: "t", ANTHROPIC_BASE_URL: "http://proxy", CLAUDE_CODE_USE_BEDROCK: "1" });
+  assert.deepEqual([routed.ANTHROPIC_AUTH_TOKEN, routed.ANTHROPIC_BASE_URL, routed.CLAUDE_CODE_USE_BEDROCK], [undefined, undefined, undefined]);
   if (original === undefined) delete process.env.OPENAI_API_KEY;
   else process.env.OPENAI_API_KEY = original;
   if (originalPort === undefined) delete process.env.PORT;

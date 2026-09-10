@@ -3,7 +3,7 @@ import { accessSync, constants } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { runProcess } from "./process.mjs";
+import { runProcess, subscriptionEnvironment } from "./process.mjs";
 
 // ponytail: PATH scan rather than shelling out to `which`, which needed a hardcoded
 // /usr/bin/env and so reported every provider missing anywhere that path is absent.
@@ -24,7 +24,7 @@ function commandExists(command) {
 
 function codexStatus() {
   if (!commandExists("codex")) return { installed: false, authenticated: false, detail: "Codex CLI is not installed." };
-  const result = spawnSync("codex", ["login", "status"], { encoding: "utf8" });
+  const result = spawnSync("codex", ["login", "status"], { encoding: "utf8", env: subscriptionEnvironment() });
   const text = `${result.stdout ?? ""}${result.stderr ?? ""}`;
   return {
     installed: true,
@@ -37,21 +37,26 @@ function codexStatus() {
 
 function claudeStatus() {
   if (!commandExists("claude")) return { installed: false, authenticated: false, detail: "Claude Code is not installed." };
-  const result = spawnSync("claude", ["auth", "status"], { encoding: "utf8" });
+  // Same stripped environment the runs get, so this checks the auth a build will actually use.
+  const result = spawnSync("claude", ["auth", "status"], { encoding: "utf8", env: subscriptionEnvironment() });
   let parsed;
   try {
-    parsed = JSON.parse(result.stdout || "{}");
+    parsed = JSON.parse(result.stdout);
   } catch {
-    parsed = {};
+    // Older Claude Code has no `auth status`; a signed-in owner would otherwise be told to sign in.
+    return { installed: true, authenticated: false, detail: "Could not read Claude Code's sign-in. Run `claude update`, then reload." };
   }
-  const apiAuth = String(parsed.authMethod ?? "").toLowerCase().includes("api");
-  return {
-    installed: true,
-    authenticated: Boolean(parsed.loggedIn) && !apiAuth,
-    detail: parsed.loggedIn && !apiAuth
-      ? "Signed in with Claude subscription"
-      : "Run `claude auth login` with a subscription account.",
-  };
+  // Whatever API source survives the stripped env comes from settings (e.g. apiKeyHelper) and would bill the API.
+  const usesApi =
+    String(parsed.authMethod ?? "").toLowerCase().includes("api") ||
+    Boolean(parsed.apiKeySource) ||
+    (parsed.apiProvider && parsed.apiProvider !== "firstParty");
+  const problem = !parsed.loggedIn
+    ? "Run `claude auth login` with your Claude subscription account, then reload."
+    : usesApi
+      ? "Claude Code is set to use an API key, not your subscription. Remove apiKeyHelper from ~/.claude/settings.json, run `claude auth login`, then reload."
+      : null;
+  return { installed: true, authenticated: !problem, detail: problem ?? "Signed in with Claude subscription" };
 }
 
 export function discoverProviders() {

@@ -17,16 +17,19 @@ const labels = {
 const stageOrder = ["specifying", "building", "verifying", "reviewing", "deploying", "completed"];
 const state = { config: null, provider: null, messages: [], guide: null, job: null, events: [], telemetry: null, poller: null, jobs: [], busyJobId: null, projects: [], project: null };
 const $ = (selector) => document.querySelector(selector);
+const NO_PROVIDER = "No subscription is signed in yet. Follow the note under Claude Code above, then reload this page.";
 
 boot().catch(showError);
 
 async function boot() {
   state.config = await api("/api/config");
   const first = state.config.providers.find((provider) => provider.authenticated);
-  state.provider = first?.id ?? state.config.providers[0]?.id;
+  // No fallback to a signed-out provider: it looked selected but every request failed with its detail.
+  state.provider = first?.id ?? null;
   state.guide = state.config.opening;
   state.messages = [{ role: "assistant", content: state.guide.message }];
   renderProviders();
+  if (!first) showError(new Error(NO_PROVIDER));
   renderMessages();
   renderCoverage();
   renderSdlcOptions();
@@ -242,7 +245,8 @@ $("#message-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = $("#message-input");
   const content = input.value.trim();
-  if (!content || !state.provider) return;
+  if (!content) return;
+  if (!state.provider) return showError(new Error(NO_PROVIDER));
   clearError();
   state.messages.push({ role: "user", content });
   input.value = "";

@@ -3,9 +3,14 @@ import { createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
+// Anything that would route a CLI to paid API billing instead of the owner's subscription.
 const SECRET_ENV_KEYS = new Set([
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
   "GOOGLE_API_KEY",
   "GEMINI_API_KEY",
   "OPENROUTER_API_KEY",
