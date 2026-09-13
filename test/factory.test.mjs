@@ -430,3 +430,28 @@ test("a project with a shipped manifest specs and slices the brief as a follow-o
   assert.equal(freshResult.followOn, false);
   assert.match(freshPrompts.specification, /Slice 1 must be a thin walking skeleton/);
 });
+
+test("a project's next release replaces its previous live deployment", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-replace-"));
+  const store = new JobStore(root);
+  await store.init();
+  const factories = [];
+  t.after(() => Promise.all(factories.map((factory) => factory.shutdown())));
+  const release = async () => {
+    const job = await store.create({ brief, transcript, provider: "fixture" });
+    const factory = new SoloFactory({ store, provider: createFixtureProvider() });
+    factories.push(factory);
+    const result = await factory.start(job.id);
+    assert.equal(result.state, "completed", result.error?.message);
+    return result;
+  };
+  const first = await release();
+  const second = await release();
+  const old = await store.read(first.id);
+  assert.equal(old.deployment.status, "replaced");
+  assert.equal(old.deployment.replacedBy, second.id);
+  await assert.rejects(fetch(`${first.deployment.url}/health`), "the replaced app must be stopped");
+  assert.equal((await fetch(`${second.deployment.url}/health`)).ok, true);
+  const live = factories.flatMap((factory) => [...factory.deployments.values()]);
+  assert.equal(live.length, 1, "exactly one live child per project");
+});

@@ -18,6 +18,10 @@ export class FactoryError extends Error {
   }
 }
 
+// Live local deployments keyed by project directory. Module-level because the server makes
+// one SoloFactory per run, and a project's next release must stop the previous release's app.
+const liveByProject = new Map();
+
 export class SoloFactory {
   constructor({ store, provider, maxRepairs = 2, commandRunner = runProcess, deployer } = {}) {
     this.store = store;
@@ -457,7 +461,27 @@ export class SoloFactory {
     const command = manifest.commands.start;
     const port = await availablePort();
     const url = `http://127.0.0.1:${port}`;
-    const logPath = path.join(this.store.appDir(job.id), ".factory", "logs", "deployment.log");
+    const appDir = this.store.appDir(job.id);
+    const previous = liveByProject.get(appDir);
+    if (previous) {
+      liveByProject.delete(appDir);
+      if (previous.jobId !== job.id) {
+        try {
+          const old = await this.store.read(previous.jobId);
+          if (old.deployment?.status === "live") {
+            old.deployment.status = "replaced";
+            old.deployment.stoppedAt = new Date().toISOString();
+            old.deployment.replacedBy = job.id;
+            await this.store.writeState(old);
+            await this.emit(old.id, { type: "deployment.replaced", state: old.state, message: `Replaced by run ${job.id}.` });
+          }
+        } catch {
+          // A missing old run record must not block the new release from deploying.
+        }
+      }
+      previous.child.kill("SIGTERM");
+    }
+    const logPath = path.join(appDir, ".factory", "logs", "deployment.log");
     const log = createWriteStream(logPath, { flags: "a" });
     const child = spawn(command[0], command.slice(1), {
       cwd: this.store.appDir(job.id),
@@ -467,10 +491,12 @@ export class SoloFactory {
     child.stdout.pipe(log);
     child.stderr.pipe(log);
     this.deployments.set(job.id, child);
+    liveByProject.set(appDir, { jobId: job.id, child });
     signal.addEventListener("abort", () => child.kill("SIGTERM"), { once: true });
     child.once("exit", async (code) => {
       log.end();
       this.deployments.delete(job.id);
+      if (liveByProject.get(appDir)?.child === child) liveByProject.delete(appDir);
       try {
         const latest = await this.store.read(job.id);
         if (latest.deployment?.status === "live") {
