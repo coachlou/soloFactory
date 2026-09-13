@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SoloFactory User Manual</title>
+<style>
+  :root { color-scheme: light dark; --ink: #1c2117; --muted: #5d6657; --accent: #3d7a1f; --line: #d8ddd2; --card: #f5f7f1; }
+  @media (prefers-color-scheme: dark) { :root { --ink: #e8ece2; --muted: #9ba597; --accent: #a5e653; --line: #2c332a; --card: #171b15; } }
+  body { margin: 0; font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: var(--card); }
+  main { max-width: 900px; margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { font-size: 2.4rem; line-height: 1.1; margin: 0 0 4px; }
+  h2 { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { margin-top: 28px; }
+  .lede, .muted { color: var(--muted); }
+  nav ol { columns: 2; padding-left: 20px; }
+  figure { margin: 24px 0; }
+  figure img { width: 100%; border: 1px solid var(--line); border-radius: 8px; display: block; }
+  figcaption { font-size: 0.9rem; color: var(--muted); margin-top: 8px; }
+  code, kbd { font: 0.92em ui-monospace, SFMono-Regular, Menlo, monospace; background: rgba(127,127,127,.12); padding: 1px 5px; border-radius: 4px; }
+  pre { background: rgba(127,127,127,.12); padding: 12px 16px; border-radius: 8px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: .04em; }
+  b.btn { display: inline-block; padding: 0 6px; border: 1px solid var(--line); border-radius: 5px; font-weight: 600; }
+  .accent { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <p class="accent"><strong>SoloFactory 0.7</strong></p>
+  <h1>User manual</h1>
+  <p class="lede">From a conversation to a running, verified app on your own machine. Your Codex or Claude subscription does the AI work; SoloFactory owns the process, the gates and the evidence.</p>
+
+  <nav>
+    <ol>
+      <li><a href="#start">Start the factory</a></li>
+      <li><a href="#projects">Projects</a></li>
+      <li><a href="#interview">Shape the brief</a></li>
+      <li><a href="#queue">Queue a run</a></li>
+      <li><a href="#run">Follow a run</a></li>
+      <li><a href="#board">The Factory board</a></li>
+      <li><a href="#controls">Pause, resume, cancel, restart</a></li>
+      <li><a href="#recovery">When a run parks</a></li>
+      <li><a href="#feedback">Report a problem</a></li>
+      <li><a href="#settings">Settings</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="start">1. Start the factory</h2>
+  <p>You need Node 22 or newer and a signed-in Codex or Claude Code command line. Then:</p>
+  <pre><code>npm start</code></pre>
+  <p>Open <a href="http://127.0.0.1:4173">http://127.0.0.1:4173</a>. The status pill top right reads <em>Factory ready</em> when a provider is signed in. No API key is ever asked for or stored; the agents run under your subscription.</p>
+
+  <h2 id="projects">2. Projects</h2>
+  <p>A project is the folder the factory builds into. The first selector in the header switches between them or creates a new one. Each project is its own git repository with the app at the root, a <code>.aai/</code> folder of project context you can edit, and a run history.</p>
+  <p>Projects live under the factory home (<code>~/.solofactory/projects/</code> by default). A folder you create there by hand shows up too. Switching projects never interrupts a run.</p>
+
+  <h2 id="interview">3. Shape the brief</h2>
+  <figure>
+    <img src="img/01-interview.png" alt="The Factory Guide interview with a message box and a coverage checklist">
+    <figcaption>The interview. The Factory Guide asks one thing at a time; the checklist on the right fills in as the brief takes shape.</figcaption>
+  </figure>
+  <p>Answer in your own words. The guide keeps asking until it can state the promise, the primary user, the core workflow, the must-haves, the non-goals and at least one acceptance scenario. Nothing is built until the brief is complete, because a vague brief is the most expensive kind of bug.</p>
+  <figure>
+    <img src="img/02-brief.png" alt="The frozen brief beside the Ready to run panel with a build strategy selector">
+    <figcaption>The frozen brief. Review it, pick a build strategy, and queue it.</figcaption>
+  </figure>
+  <p><strong>Build strategy.</strong> <em>Single build</em> makes the whole app in one implementation turn. <em>Vertical slices</em> breaks it into a walking skeleton followed by thin end-to-end slices, each one tested and committed before the next starts. Slices cost more turns but fail smaller, and only slice runs can be restarted from a chosen slice.</p>
+  <p><b class="btn">Continue interview</b> reopens the conversation if something is missing.</p>
+
+  <h2 id="queue">4. Queue a run</h2>
+  <p><b class="btn">Queue for the factory</b> freezes the brief and puts the run in the project's queue. You land back in a fresh interview, so you can shape the next release while this one builds.</p>
+  <ul>
+    <li>Runs in one project go one after another, each building on the tree the last one left.</li>
+    <li>Runs in different projects can overlap when <code>SOLOFACTORY_MAX_ACTIVE_RUNS</code> is above 1.</li>
+    <li>A second brief for a project that already shipped becomes a follow-on release. Deploying it stops the previous release's app.</li>
+    <li><b class="btn">Remove from queue</b> drops a brief that has not started.</li>
+  </ul>
+
+  <h2 id="run">5. Follow a run</h2>
+  <figure>
+    <img src="img/04-run-completed.png" alt="A completed run: build telemetry, live app activity, evidence stream and artifacts">
+    <figcaption>A completed slice run. The app is live on a local port and every artifact is one click away.</figcaption>
+  </figure>
+  <p>The second header selector picks a run within the current project. The run view shows:</p>
+  <table>
+    <tr><th>Panel</th><th>What it tells you</th></tr>
+    <tr><td>Build telemetry</td><td>Current stage, elapsed time, the stage bar, repair attempts used (of two), gates passed, strategy and agent.</td></tr>
+    <tr><td>Live app activity</td><td>Aggregate metrics from the deployed app: requests, errors, latency, uptime and route counts. No bodies, headers, addresses or identifiers.</td></tr>
+    <tr><td>Evidence stream</td><td>Every lifecycle event, newest first. Gate results, commits, agent starts and stops.</td></tr>
+    <tr><td>Artifacts</td><td>Product requirements, build plan, acceptance contract, frozen input, slice plan, runtime manifest, and <b class="btn">Open working app</b> once it is live.</td></tr>
+  </table>
+  <p>The rail on the left shows the six stages. Each one ends with a gate the controller owns: install, test and build must exit 0; review must pass; the deployed app must answer its health check. A failed gate gets at most two bounded repair attempts, then the run parks.</p>
+
+  <h2 id="board">6. The Factory board</h2>
+  <figure>
+    <img src="img/03-board.png" alt="The Factory board with columns for each stage and cards for every run">
+    <figcaption>Every run of every project, grouped by column. Green segments are finished slices; an orange one is in progress.</figcaption>
+  </figure>
+  <p><b class="btn">Factory</b> in the header opens the board. Columns follow the lifecycle: queued, specifying, building, reviewing, deploying, then parked and completed. Repairing counts as building; failed, interrupted, cancelled and paused runs all sit in parked. Each card names its project, stage and duration, and slice runs carry a progress bar. A queued card that is waiting on a parked run says so.</p>
+  <p>Click a card to open that run. If it belongs to another project the factory switches to it first.</p>
+
+  <h2 id="controls">7. Pause, resume, cancel, restart</h2>
+  <figure>
+    <img src="img/05-run-paused.png" alt="A paused slice run showing Resume and the recovery checkpoint with a restart-from-slice button">
+    <figcaption>A paused slice run. The tree is committed and green; Resume continues from the reviewing stage, or the run can be rewound to a slice.</figcaption>
+  </figure>
+  <table>
+    <tr><th>Control</th><th>When it shows</th><th>What it does</th></tr>
+    <tr><td><b class="btn">Pause</b></td><td>While a stage is running</td><td>Lets the run finish the stage it is in, commits the green tree, and parks before the next one. The button reads <em>Pausing after …</em> until the run parks. Nothing is lost and nothing is replayed on resume.</td></tr>
+    <tr><td><b class="btn">Resume</b></td><td>On a paused, failed or interrupted run</td><td>Continues the same run, same files, from the stage it stopped at. Goes to the front of the project's queue.</td></tr>
+    <tr><td><b class="btn">Cancel run</b></td><td>While active</td><td>Stops work now. The workspace stays as it was.</td></tr>
+    <tr><td><b class="btn">Restart from slice</b></td><td>On a parked slice run, for every completed slice after the first</td><td>Rewinds the tree to the commit before that slice and rebuilds it and everything after, exactly once. Earlier slices keep their commits.</td></tr>
+    <tr><td><b class="btn">Start over</b></td><td>On a parked run</td><td>Creates a brand-new run from the same brief. Use it when the first slice itself is wrong.</td></tr>
+    <tr><td><b class="btn">Dismiss</b></td><td>On a parked run</td><td>Releases the project's queue without fixing this run.</td></tr>
+  </table>
+
+  <h2 id="recovery">8. When a run parks</h2>
+  <p>A run parks when a gate fails past its repair budget, an agent hits a usage limit, sign-in, network or toolchain problem, the factory restarts mid-run, or you pause or cancel it. Known blockers are never blindly retried; a parked run holds its project's queue so nothing builds on a half-repaired tree.</p>
+  <p>The <strong>Recovery checkpoint</strong> card explains what happened, what to do, where the preserved files are, and whether any automatic retry was spent. <b class="btn">Copy recovery packet</b> puts a full handoff on your clipboard for pasting into Codex or Claude when you want to fix things by hand, then <b class="btn">Resume</b> from the preserved workspace.</p>
+
+  <h2 id="feedback">9. Report a problem</h2>
+  <p><b class="btn">Feedback</b> in the header, or <b class="btn">Report this run</b> on a parked run, drafts a bug report or feature request. The run report attaches the run's evidence and the last log lines, scrubbed of paths and secrets. The body always travels through your clipboard, so you see exactly what is sent.</p>
+
+  <h2 id="settings">10. Settings</h2>
+  <table>
+    <tr><th>Variable</th><th>Meaning</th></tr>
+    <tr><td><code>SOLOFACTORY_HOME</code></td><td>Where runs, projects and the demo live. Default <code>~/.solofactory</code>.</td></tr>
+    <tr><td><code>SOLOFACTORY_ROOT</code></td><td>Where projects are discovered. Default: the home.</td></tr>
+    <tr><td><code>SOLOFACTORY_MAX_ACTIVE_RUNS</code></td><td>How many projects may build at once. Default 1.</td></tr>
+    <tr><td><code>SOLOFACTORY_AGENT_IDLE_MINUTES</code></td><td>Agent idle deadline, reset by any output. Default 6.</td></tr>
+    <tr><td><code>SOLOFACTORY_AGENT_HARD_MINUTES</code></td><td>Agent total safety cap. Default 45.</td></tr>
+    <tr><td><code>SOLOFACTORY_AGENT_BACKOFF_SECONDS</code></td><td>Wait before the one automatic Codex resume. Default 15.</td></tr>
+    <tr><td><code>SOLOFACTORY_DEMO=1</code></td><td>Run with the deterministic fixture provider instead of a real agent.</td></tr>
+    <tr><td><code>SOLOFACTORY_ISSUES_URL</code></td><td>Where feedback reports are filed.</td></tr>
+  </table>
+  <p class="muted">Screenshots were taken from the demo mode (fixture provider), which is why every project is called Pocket Pulse.</p>
+</main>
+</body>
+</html>
