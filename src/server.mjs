@@ -51,7 +51,12 @@ export async function createSoloFactoryServer(options = {}) {
     for (const project of projects) {
       const projectStore = storeFor(project.id);
       await projectStore.recoverInterrupted();
-      for (const job of await projectStore.list()) if (job.state === "queued") queuedJobs.push({ projectId: project.id, job });
+      for (const job of await projectStore.list()) {
+        // Seed jobProject from every job on disk, not just queued ones, so a restart doesn't
+        // make storeOfJob() fall back to the active project for a job that belongs elsewhere.
+        jobProject.set(job.id, project.id);
+        if (job.state === "queued") queuedJobs.push({ projectId: project.id, job });
+      }
     }
     const remembered = (await readFile(activeFile, "utf8").catch(() => "")).trim();
     await openProject(projects.find((p) => p.id === remembered)?.id ?? projects[0]?.id ?? "projects/default");

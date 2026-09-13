@@ -365,6 +365,27 @@ test("a job still queued when the server stopped starts on the next boot", async
   assert.equal((await waitForJob(base, queued.id, ["completed"])).state, "completed");
 });
 
+test("a completed job in a non-active project is still reachable by id after a restart", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-restart-lookup-"));
+  const first = await createSoloFactoryServer({ home, fixtureMode: true });
+  const firstBase = await listen(first, t);
+  const config = await getJson(`${firstBase}/api/config`);
+  const transcript = [{ role: "assistant", content: config.opening.message }, { role: "user", content: "Build a tiny private daily tracker with no login and observable save behavior." }];
+  const guide = await postJson(`${firstBase}/api/interview/turn`, { provider: "fixture", messages: transcript });
+  await postJson(`${firstBase}/api/projects`, { name: "beta" });
+  const betaJob = (await postJson(`${firstBase}/api/jobs`, { provider: "fixture", transcript, coverage: guide.coverage, brief: guide.brief })).job;
+  assert.equal((await waitForJob(firstBase, betaJob.id, ["completed"])).state, "completed");
+  await first.close();
+
+  // Restart with a different project active; jobProject's in-memory map is gone, so lookups
+  // must be reseeded from disk rather than defaulting to whichever project is now active.
+  const second = await createSoloFactoryServer({ home, fixtureMode: true });
+  const base = await listen(second, t);
+  await postJson(`${base}/api/projects/select`, { id: "projects/default" });
+  const found = await getJson(`${base}/api/jobs/${betaJob.id}`);
+  assert.equal(found.job.id, betaJob.id, "the beta project's job resolves from its own store, not the active project's");
+});
+
 async function listen(app, t) {
   await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
   t.after(() => app.close());

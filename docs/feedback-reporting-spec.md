@@ -1,6 +1,7 @@
 # SoloFactory Feedback Reporting — Intake Spec
 
-Status: intake input (audited from `docs/feedback-tracking-brief.md`, 2026-09-06)
+Status: implemented (`src/feedback.mjs`). Kept as design record; audited from
+`docs/feedback-tracking-brief.md`, 2026-09-06.
 Source of truth for names below: `src/factory.mjs`, `src/store.mjs`, `src/providers.mjs`, `src/server.mjs`
 
 ---

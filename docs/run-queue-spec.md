@@ -1,5 +1,8 @@
 # Run queue and per-project scheduling — spec
 
+**Status: implemented in 0.5.0.** This doc is kept as design record; SPEC.md is the source
+of truth for current behavior.
+
 **Goal.** Keep the owner and the factory both busy. Submitting a brief never waits for the
 factory to be free, and the factory never sits idle while a brief is queued. Parallelism is
 taken only where it is free: across projects. Within one project, runs stay strictly serial.
@@ -50,8 +53,9 @@ brief through the chat (the project's `.factory/PRD.md` already holds that state
    (resume, start over, or dismiss). `GET /api/jobs` reports `blockedBy: <jobId>` on such
    queued jobs so the UI can say "waiting on recovery of run X". A dismissed run frees the
    project. (Rationale: the tree may be mid-repair; a queued brief must not build on it.)
-4. **Dequeue.** `DELETE /api/jobs/<id>` while `queued` removes it from the FIFO and marks it
-   `cancelled`. No other state is deletable.
+4. **Dequeue.** `POST /api/jobs/<id>/cancel` while `queued` removes it from the FIFO and
+   marks it `cancelled`. No other state is deletable this way (an active run's `cancel`
+   goes through `factory.cancel` instead).
 5. **Follow-on releases.** The Factory Guide skill gains one rule: if `.factory/PRD.md`
    exists in the working folder, read it and `.factory/ACCEPTANCE.md`; treat them as already
    delivered; interview only for the next increment; the brief's `promise` names the

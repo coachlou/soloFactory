@@ -1,5 +1,8 @@
 # Project workspaces — spec
 
+**Status: implemented.** Kept as design record; SPEC.md is the source of truth for current
+behavior.
+
 **Goal.** Work on several projects from one installed SoloFactory folder, one at a time.
 Selecting `projects/<name>` in the app makes that folder the current workspace: its
 context, its memory, its git repo, and the folder every agent session runs in.
