@@ -53,6 +53,73 @@ async function refreshProjects() {
   renderProjects();
   renderRuns();
   renderBackgroundBanner();
+  if (!$("#board-view").classList.contains("hidden")) renderBoard(await api("/api/board"));
+}
+
+// Factory board: one column per state, a card per run, click to open it.
+const BOARD_COLUMNS = ["queued", "specifying", "building", "reviewing", "deploying", "parked", "completed"];
+$("#board-button").addEventListener("click", () => {
+  if ($("#board-view").classList.contains("hidden")) showBoard().catch(showError);
+  else showInterview();
+});
+
+async function showBoard() {
+  clearError();
+  stopPolling();
+  for (const id of ["interview-view", "review-view", "run-view"]) $(`#${id}`).classList.add("hidden");
+  $("#board-view").classList.remove("hidden");
+  $("#board-button").setAttribute("aria-pressed", "true");
+  renderBoard(await api("/api/board"));
+}
+
+function hideBoard() {
+  $("#board-view").classList.add("hidden");
+  $("#board-button").setAttribute("aria-pressed", "false");
+}
+
+function renderBoard(board) {
+  $("#board-capacity").textContent = `${board.active} of ${board.maxActiveRuns} active run${board.maxActiveRuns === 1 ? "" : "s"}`;
+  $("#board-columns").replaceChildren(...BOARD_COLUMNS.map((name) => {
+    const column = document.createElement("div");
+    column.className = "board-column";
+    const heading = document.createElement("h3");
+    heading.append(name, Object.assign(document.createElement("span"), { textContent: String(board.columns[name].length) }));
+    column.append(heading, ...board.columns[name].map(boardCard));
+    return column;
+  }));
+}
+
+function boardCard(card) {
+  const button = document.createElement("button");
+  button.className = "board-card";
+  button.type = "button";
+  const title = Object.assign(document.createElement("strong"), { textContent: card.promise || card.jobId });
+  const meta = Object.assign(document.createElement("small"), { textContent: `${card.project} · ${card.stage || card.state}${card.startedAt ? ` · ${formatDuration(card.elapsedMs)}` : ""}` });
+  button.append(title, meta);
+  if (card.slices) {
+    const bar = document.createElement("div");
+    bar.className = "slice-bar";
+    for (let i = 0; i < card.slices.total; i += 1) {
+      const seg = document.createElement("i");
+      if (i < card.slices.done) seg.classList.add("done");
+      else if (i === card.slices.done && !["completed", "failed", "cancelled", "interrupted"].includes(card.state)) seg.classList.add("current");
+      bar.append(seg);
+    }
+    if (card.slices.repairs && bar.lastChild) bar.children[Math.max(0, card.slices.done - 1)].classList.add("repaired");
+    bar.title = `${card.slices.done}/${card.slices.total} slices${card.slices.repairs ? ` · ${card.slices.repairs} repair${card.slices.repairs === 1 ? "" : "s"}` : ""}`;
+    button.append(bar);
+  }
+  if (card.blockedBy) button.append(Object.assign(document.createElement("small"), { className: "blocked", textContent: `waiting on recovery of ${card.blockedBy}` }));
+  button.addEventListener("click", () => openFromBoard(card).catch(showError));
+  return button;
+}
+
+async function openFromBoard(card) {
+  if (card.projectId !== state.project) {
+    await api("/api/projects/select", { method: "POST", body: { id: card.projectId } });
+    await refreshProjects();
+  }
+  await selectRun(card.jobId);
 }
 
 function projectName(job) {
@@ -133,6 +200,7 @@ function showInterview() {
   state.guide = state.config.opening;
   state.messages = [{ role: "assistant", content: state.guide.message }];
   localStorage.removeItem("solofactory.currentJob");
+  hideBoard();
   $("#run-view").classList.add("hidden");
   $("#review-view").classList.add("hidden");
   $("#interview-view").classList.remove("hidden");
@@ -318,6 +386,7 @@ $("#start-button").addEventListener("click", async () => {
 });
 
 function showRun() {
+  hideBoard();
   $("#review-view").classList.add("hidden");
   $("#interview-view").classList.add("hidden");
   $("#run-view").classList.remove("hidden");

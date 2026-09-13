@@ -19,6 +19,7 @@
           <select id="project-select" class="sdlc-select project-select" aria-label="Project"></select>
           <label class="sr-only" for="run-select">Run</label>
           <select id="run-select" class="sdlc-select project-select" aria-label="Run"></select>
+          <button id="board-button" class="button ghost small" type="button" aria-pressed="false">Factory</button>
           <button id="feedback-button" class="button ghost small" type="button">Feedback</button>
           <div class="top-status"><span class="pulse"></span><span id="system-status">Checking factory</span></div>
         </div>
@@ -47,6 +48,14 @@
             <span id="background-text"></span>
             <button id="background-view-button" class="button ghost small" type="button">View</button>
           </div>
+
+          <section id="board-view" class="view hidden">
+            <div class="view-heading">
+              <div><p class="eyebrow">Factory</p><h1>Every run, at a glance.</h1></div>
+              <p id="board-capacity" class="board-capacity"></p>
+            </div>
+            <div id="board-columns" class="board"></div>
+          </section>
 
           <section id="interview-view" class="view">
             <div class="view-heading">
