@@ -16,6 +16,9 @@ test("HTTP journey goes from Guide turn to a reachable generated app", async (t)
 
   const config = await getJson(`${base}/api/config`);
   assert.equal(config.providers[0].authenticated, true);
+  const manual = await fetch(`${base}/manual`);
+  assert.equal(manual.status, 200);
+  assert.match(await manual.text(), /SoloFactory/);
 
   const transcript = [
     { role: "assistant", content: config.opening.message },

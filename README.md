@@ -21,7 +21,8 @@ It does not request or store an OpenAI or Anthropic API key.
 npm start
 ```
 
-Open <http://127.0.0.1:4173>. Answer the Factory Guide one turn at a time, review the
+Open <http://127.0.0.1:4173>. The **Manual** button in the header opens the illustrated user
+manual (`docs/manual/index.html`, also served at `/manual`). Answer the Factory Guide one turn at a time, review the
 compiled brief, and choose **Queue for the factory**. The brief joins that project's run
 queue and you land back in a fresh interview, so the next release can be shaped while this
 one builds. Runs in one project go one after another, each building on the last; runs in

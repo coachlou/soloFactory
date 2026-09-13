@@ -264,6 +264,7 @@ Only one job may be active because the target user does not benefit from resourc
 
 ## 9. HTTP surface
 
+- `GET /manual` — the self-contained HTML user manual (`docs/manual/index.html`), linked from the header.
 - `GET /api/health` — factory health, active project, busy run, `activeRuns`, `maxActiveRuns`.
 - `GET /api/board` — every run of every project grouped by column (queued, specifying,
   building, reviewing, deploying, parked, completed; completed capped at five per project)

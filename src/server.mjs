@@ -19,6 +19,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const PARKED = new Set(["failed", "interrupted", "cancelled", "paused"]);
 const projectRoot = path.dirname(here);
 const publicRoot = path.join(projectRoot, "public");
+const manualFile = path.join(projectRoot, "docs", "manual", "index.html");
 
 export async function createSoloFactoryServer(options = {}) {
   const home = options.home ?? process.env.SOLOFACTORY_HOME ?? path.join(projectRoot, ".solofactory");
@@ -485,11 +486,11 @@ function json(response, status, body) {
 
 async function serveStatic(response, pathname) {
   const map = { "/": "index.html", "/app.js": "app.js", "/styles.css": "styles.css" };
-  const fileName = map[pathname];
-  if (!fileName) return json(response, 404, { error: "Not found" });
+  const file = pathname === "/manual" ? manualFile : map[pathname] && path.join(publicRoot, map[pathname]);
+  if (!file) return json(response, 404, { error: "Not found" });
   const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8" };
-  response.writeHead(200, { "content-type": types[path.extname(fileName)], "cache-control": "no-store" });
-  response.end(await readFile(path.join(publicRoot, fileName)));
+  response.writeHead(200, { "content-type": types[path.extname(file)], "cache-control": "no-store" });
+  response.end(await readFile(file));
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

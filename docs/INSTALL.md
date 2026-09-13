@@ -621,6 +621,9 @@ Do not launch into how to build an app. Installation is finished. Say something 
 > Whenever you want to use it again, open the same text window and type:
 > `cd ~/solofactory && bash start.sh`, then open that web address.
 >
+> There's a **Manual** button at the top of the page, with pictures, whenever you want to
+> look something up.
+>
 > Want me to walk you through building your first thing?
 
 Give them that restart command in its own copy/paste box — it is the one thing they will
@@ -707,6 +710,19 @@ breath:
 > restarting anything. A folder you drop into the `projects` folder yourself shows up there
 > too.
 
+**If they were below 0.7.0 before the update**, there are new buttons. Say so, briefly:
+
+> A few new things: a **Factory** button shows every build across all your projects at a
+> glance. While something is building you can now **Pause** it and pick it back up later,
+> and if a build goes sideways partway through, you can restart it from the step where it
+> went wrong instead of starting over. The **Manual** button at the top explains all of it,
+> with pictures.
+
+**If they were on 0.7.x**, the only visible change is the **Manual** button in the header.
+
+Do not walk an updating owner through Part C. They already know how to use the app; the
+update is finished once U4 holds.
+
 ## U4. Update done means all of this
 
 1. The server was stopped before the update, and started again after it.
@@ -750,9 +766,10 @@ use the npm prefix fix in A5 instead.
 
 ---
 
-# Done means all of this
+# New install done means all of this
 
-Do not tell the owner they are finished until every one of these is true. Verify them
+This checklist is for a new install. An update is judged by **U4** instead. Do not tell the
+owner they are finished until every one of these is true. Verify them
 yourself; do not ask the owner to confirm them.
 
 1. `node --version` prints v22 or higher.
