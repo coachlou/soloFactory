@@ -36,7 +36,7 @@ async function boot() {
   await refreshProjects();
   const savedId = localStorage.getItem("solofactory.currentJob");
   const candidate = state.jobs.find((job) => job.id === savedId)
-    ?? state.jobs.find((job) => ["failed", "interrupted"].includes(job.state));
+    ?? state.jobs.find((job) => PARKED.includes(job.state));
   if (candidate) await selectRun(candidate.id);
   // ponytail: /api/projects reads every run's state.json; fine for a handful of projects, paginate if it ever isn't
   setInterval(() => refreshProjects().catch(() => {}), 5000);
@@ -57,6 +57,7 @@ async function refreshProjects() {
 }
 
 // Factory board: one column per state, a card per run, click to open it.
+const PARKED = ["failed", "cancelled", "interrupted", "paused"];
 const BOARD_COLUMNS = ["queued", "specifying", "building", "reviewing", "deploying", "parked", "completed"];
 $("#board-button").addEventListener("click", () => {
   if ($("#board-view").classList.contains("hidden")) showBoard().catch(showError);
@@ -102,7 +103,7 @@ function boardCard(card) {
     for (let i = 0; i < card.slices.total; i += 1) {
       const seg = document.createElement("i");
       if (i < card.slices.done) seg.classList.add("done");
-      else if (i === card.slices.done && !["completed", "failed", "cancelled", "interrupted"].includes(card.state)) seg.classList.add("current");
+      else if (i === card.slices.done && !["completed", ...PARKED].includes(card.state)) seg.classList.add("current");
       bar.append(seg);
     }
     if (card.slices.repairs && bar.lastChild) bar.children[Math.max(0, card.slices.done - 1)].classList.add("repaired");
@@ -188,7 +189,7 @@ async function selectRun(id) {
   renderRuns();
   renderBackgroundBanner();
   await poll();
-  if (["completed", "failed", "cancelled", "interrupted"].includes(state.job.state)) stopPolling();
+  if (["completed", ...PARKED].includes(state.job.state)) stopPolling();
   else startPolling();
 }
 
@@ -405,7 +406,9 @@ async function poll() {
     state.events = result.events;
     state.telemetry = await api(`/api/jobs/${state.job.id}/telemetry`);
     renderJob();
-    if (["failed", "cancelled", "interrupted"].includes(state.job.state)) {
+    if (PARKED.includes(state.job.state)) {
+      state.pausing = false;
+      $("#pause-button").disabled = false;
       stopPolling();
       refreshProjects();
     }
@@ -426,7 +429,7 @@ function renderJob() {
   $("#strategy-label").textContent = sdlcOption(job.sdlc).label;
   const elapsedUntil = job.completedAt ? new Date(job.completedAt).getTime() : Date.now();
   $("#elapsed").textContent = `${formatDuration(elapsedUntil - new Date(job.startedAt || job.createdAt).getTime())} elapsed`;
-  const progressState = ["failed", "cancelled", "interrupted"].includes(job.state) ? job.failedState : job.state;
+  const progressState = PARKED.includes(job.state) ? job.failedState : job.state;
   const currentIndex = Math.max(0, stageOrder.indexOf(progressState));
   $("#stage-bars").replaceChildren(...stageOrder.slice(0, -1).map((stage, index) => {
     const bar = document.createElement("span");
@@ -442,9 +445,12 @@ function renderJob() {
   renderArtifacts();
   renderAppMetrics();
   renderRecovery();
-  const terminalFailure = ["failed", "cancelled", "interrupted"].includes(job.state);
+  const terminalFailure = PARKED.includes(job.state);
   $("#cancel-button").classList.toggle("hidden", terminalFailure || job.state === "completed");
   $("#cancel-button").textContent = job.state === "queued" ? "Remove from queue" : "Cancel run";
+  $("#pause-button").classList.toggle("hidden", !["specifying", "building", "repairing", "reviewing"].includes(job.state));
+  if (!state.pausing) $("#pause-button").textContent = "Pause";
+  $("#resume-button").textContent = job.state === "paused" ? "Resume" : "Resume current run";
   $("#dismiss-button").classList.toggle("hidden", !terminalFailure || Boolean(job.dismissed));
   $("#resume-button").classList.toggle("hidden", !job.recovery?.canResume || !terminalFailure);
   $("#copy-recovery-button").classList.toggle("hidden", !job.recovery || !terminalFailure);
@@ -463,7 +469,7 @@ function renderJob() {
 
 function renderRecovery() {
   const recovery = state.job.recovery;
-  const visible = recovery && ["failed", "cancelled", "interrupted"].includes(state.job.state);
+  const visible = recovery && PARKED.includes(state.job.state);
   $("#recovery-card").classList.toggle("hidden", !visible);
   if (!visible) return;
   $("#recovery-title").textContent = recovery.title;
@@ -475,6 +481,29 @@ function renderRecovery() {
   }));
   $("#recovery-workspace").textContent = recovery.workspace;
   $("#recovery-retry").textContent = recovery.automaticRetry;
+  const restartable = (state.job.sliceDone ?? []).slice(1);
+  $("#recovery-restart").classList.toggle("hidden", restartable.length === 0);
+  $("#recovery-restart-buttons").replaceChildren(...restartable.map((sliceId) => {
+    const button = document.createElement("button");
+    button.className = "button ghost small";
+    button.type = "button";
+    button.textContent = sliceId;
+    button.title = `Rewind the tree to just before ${sliceId} and rebuild from there`;
+    button.addEventListener("click", () => restartFromSlice(sliceId));
+    return button;
+  }));
+}
+
+async function restartFromSlice(sliceId) {
+  clearError();
+  try {
+    await api(`/api/jobs/${state.job.id}/restart`, { method: "POST", body: { fromSlice: sliceId } });
+    await poll();
+    startPolling();
+    refreshProjects();
+  } catch (error) {
+    showError(error);
+  }
 }
 
 function renderEvents() {
@@ -521,6 +550,18 @@ function renderAppMetrics() {
     return row;
   }));
 }
+
+$("#pause-button").addEventListener("click", async () => {
+  clearError();
+  try {
+    await api(`/api/jobs/${state.job.id}/pause`, { method: "POST", body: {} });
+    state.pausing = true; // ponytail: cleared when the run parks; the run keeps polling until then
+    $("#pause-button").textContent = `Pausing after ${state.job.stage}…`;
+    $("#pause-button").disabled = true;
+  } catch (error) {
+    showError(error);
+  }
+});
 
 $("#cancel-button").addEventListener("click", async () => {
   await api(`/api/jobs/${state.job.id}/cancel`, { method: "POST", body: {} }).catch(showError);

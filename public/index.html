@@ -121,6 +121,7 @@
             <div class="run-heading">
               <div><p class="eyebrow" id="run-id">Factory run</p><h1 id="run-title">Building your app</h1><p id="run-subtitle">The controller is preparing the workspace.</p></div>
               <div class="run-actions">
+                <button id="pause-button" class="button ghost hidden" title="Finish the current stage, commit the green tree, then stop">Pause</button>
                 <button id="cancel-button" class="button danger">Cancel run</button>
                 <button id="resume-button" class="button primary hidden">Resume current run <span>→</span></button>
                 <button id="copy-recovery-button" class="button ghost hidden">Copy recovery packet</button>
@@ -140,6 +141,10 @@
               <div class="recovery-meta">
                 <p><strong>Files preserved</strong><span id="recovery-workspace"></span></p>
                 <p><strong>Token safeguard</strong><span id="recovery-retry"></span></p>
+              </div>
+              <div id="recovery-restart" class="recovery-restart hidden">
+                <p><strong>Restart from slice</strong><span>Rewinds to the commit before that slice and rebuilds it and everything after.</span></p>
+                <div id="recovery-restart-buttons" class="recovery-restart-buttons"></div>
               </div>
             </section>
 

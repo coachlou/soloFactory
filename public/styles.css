@@ -207,3 +207,8 @@ h2 { font: 500 27px/1.08 var(--serif); margin: 0 0 14px; }
 .feedback-preview { margin: 0; max-height: 40vh; overflow: auto; padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--bg); color: #c8cbc5; font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .feedback-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 560px) { .feedback-form { padding: 18px; } .feedback-two { grid-template-columns: 1fr; } .feedback-actions .button { flex: 1 1 45%; } }
+
+.recovery-restart { margin-top: 12px; }
+.recovery-restart p { margin: 0 0 8px; }
+.recovery-restart p strong { display: block; }
+.recovery-restart-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
