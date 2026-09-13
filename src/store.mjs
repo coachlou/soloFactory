@@ -176,9 +176,10 @@ export class JobStore {
 
   async recoverInterrupted() {
     const jobs = await this.list();
-    const terminal = new Set(["completed", "failed", "cancelled", "interrupted"]);
+    // Queued jobs never started, so a restart leaves them queued for the scheduler to pick up.
+    const settled = new Set(["completed", "failed", "cancelled", "interrupted", "queued"]);
     for (const job of jobs) {
-      if (!terminal.has(job.state)) {
+      if (!settled.has(job.state)) {
         job.failedState = job.state;
         job.state = "interrupted";
         job.stage = "Interrupted by restart";

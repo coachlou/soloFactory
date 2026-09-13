@@ -48,7 +48,8 @@ async function refreshProjects() {
   state.project = projects.active;
   state.jobs = listing.jobs;
   state.busyJobId = listing.busyJobId;
-  $("#system-status").textContent = state.busyJobId ? "Factory running" : "Factory ready";
+  const active = listing.activeRuns?.length ?? 0;
+  $("#system-status").textContent = active ? `Factory running${active > 1 ? ` (${active})` : ""}` : "Factory ready";
   renderProjects();
   renderRuns();
   renderBackgroundBanner();
@@ -65,9 +66,10 @@ function option(value, text) {
 function renderProjects() {
   const select = $("#project-select");
   select.replaceChildren(option("new", "+ New project…"), ...state.projects.map((project) => {
-    const marker = project.id === state.project && state.busyJobId ? "● " : "";
+    const marker = project.activeJobId ? "● " : "";
     const last = project.lastRun ? `${project.lastRun.state} · ${project.runCount} run${project.runCount === 1 ? "" : "s"}` : "no runs";
-    return option(project.id, `${marker}${project.name} · ${last}`);
+    const queued = project.queued ? ` · ${project.queued} queued` : "";
+    return option(project.id, `${marker}${project.name} · ${last}${queued}`);
   }));
   select.value = state.project;
 }
@@ -75,7 +77,7 @@ function renderProjects() {
 function renderRuns() {
   const select = $("#run-select");
   select.replaceChildren(option("new", "+ New run"), ...state.jobs.map((job) => {
-    const marker = job.id === state.busyJobId ? "● " : "";
+    const marker = job.id === state.busyJobId ? "● " : job.queuePosition ? `#${job.queuePosition} ` : "";
     return option(job.id, `${marker}${projectName(job)} · ${job.state} · ${job.createdAt.slice(0, 10)}`);
   }));
   select.value = state.job?.id ?? "new";
@@ -83,28 +85,23 @@ function renderRuns() {
 
 function renderBackgroundBanner() {
   const busy = state.busyJobId && state.busyJobId !== state.job?.id ? state.jobs.find((job) => job.id === state.busyJobId) : null;
+  const queued = state.jobs.filter((job) => job.queuePosition).length;
   $("#background-banner").classList.toggle("hidden", !busy);
-  if (busy) $("#background-text").textContent = `“${projectName(busy)}” is ${busy.state} in the background.`;
+  if (busy) $("#background-text").textContent = `“${projectName(busy)}” is ${busy.state} in the background${queued ? ` · ${queued} queued` : ""}.`;
 }
 
 $("#project-select").addEventListener("change", (event) => switchProject(event.target.value).catch(showError));
 $("#run-select").addEventListener("change", (event) => selectRun(event.target.value).catch(showError));
 $("#background-view-button").addEventListener("click", () => selectRun(state.busyJobId).catch(showError));
 
-// Switching projects is the one view change that can interrupt a build: the server refuses
-// with 409 + busyJobId until the owner confirms, then cancels and waits before switching.
+// Switching projects only changes the view; runs in other projects keep going.
 async function switchProject(id) {
   clearError();
   const create = id === "new";
   const body = create ? { name: window.prompt("Project name?") ?? "" } : { id };
   if (create && !body.name.trim()) return renderProjects();
   const url = create ? "/api/projects" : "/api/projects/select";
-  let result = await api(url, { method: "POST", body, allow: [409] });
-  if (result.busyJobId) {
-    const busy = state.jobs.find((job) => job.id === result.busyJobId);
-    if (!window.confirm(`“${projectName(busy)}” is still ${busy?.state ?? "running"}. Cancel it and switch project?`)) return renderProjects();
-    result = await api(url, { method: "POST", body: { ...body, cancel: true } });
-  } else if (result.error) throw new Error(result.error);
+  await api(url, { method: "POST", body });
   stopPolling();
   await refreshProjects();
   return state.jobs[0] ? selectRun(state.jobs[0].id) : showInterview();
@@ -156,21 +153,6 @@ function resetRunPanels() {
   $("#app-live").classList.add("muted");
   $("#open-app").classList.add("hidden");
   $("#artifacts").replaceChildren(Object.assign(document.createElement("p"), { textContent: "Artifacts appear after specification." }));
-}
-
-// Option A: viewing another project never interrupts a build; acting on one does, after confirmation.
-async function ensureFactoryFree() {
-  await refreshProjects();
-  const busy = state.busyJobId && state.busyJobId !== state.job?.id ? state.jobs.find((job) => job.id === state.busyJobId) : null;
-  if (!busy) return true;
-  if (!window.confirm(`“${projectName(busy)}” is still ${busy.state}. Cancel it and continue with this project?`)) return false;
-  await api(`/api/jobs/${busy.id}/cancel`, { method: "POST", body: {} });
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const health = await api("/api/health");
-    if (!health.busyJobId) return true;
-  }
-  throw new Error(`“${projectName(busy)}” did not stop in time. Try again in a moment.`);
 }
 
 function renderProviders() {
@@ -320,17 +302,15 @@ $("#start-button").addEventListener("click", async () => {
   clearError();
   $("#start-button").disabled = true;
   try {
-    if (!(await ensureFactoryFree())) { $("#start-button").disabled = false; return; }
     const { job } = await api("/api/jobs", {
       method: "POST",
       body: { provider: state.provider, transcript: state.messages, coverage: state.guide.coverage, brief: state.guide.brief, sdlc: $("#sdlc-select").value },
     });
-    state.job = job;
-    localStorage.setItem("solofactory.currentJob", job.id);
-    showRun();
-    poll();
-    startPolling();
-    refreshProjects();
+    // Submitted briefs queue; the owner goes straight back to shaping the next release.
+    showInterview();
+    await refreshProjects();
+    renderBackgroundBanner();
+    if (job.queuePosition) $("#system-status").textContent = `Brief queued #${job.queuePosition}`;
   } catch (error) {
     showError(error);
     $("#start-button").disabled = false;
@@ -367,7 +347,11 @@ function renderJob() {
   const job = state.job;
   $("#run-state").textContent = job.state;
   $("#current-stage").textContent = job.stage;
-  $("#run-subtitle").textContent = job.error?.message || statusCopy(job.state);
+  $("#run-subtitle").textContent = job.blockedBy
+    ? `Waiting on recovery of run ${job.blockedBy}: resume it, start it over, or dismiss it.`
+    : job.queuePosition
+      ? `Queued #${job.queuePosition}${job.queuedFor === "resume" ? " to resume" : ""}; starts when this project's current run finishes.`
+      : job.error?.message || statusCopy(job.state);
   $("#repair-count").textContent = `${job.attempt} / 2`;
   $("#gate-count").textContent = String(state.events.filter((event) => event.type === "gate.passed").length);
   $("#strategy-label").textContent = sdlcOption(job.sdlc).label;
@@ -391,6 +375,8 @@ function renderJob() {
   renderRecovery();
   const terminalFailure = ["failed", "cancelled", "interrupted"].includes(job.state);
   $("#cancel-button").classList.toggle("hidden", terminalFailure || job.state === "completed");
+  $("#cancel-button").textContent = job.state === "queued" ? "Remove from queue" : "Cancel run";
+  $("#dismiss-button").classList.toggle("hidden", !terminalFailure || Boolean(job.dismissed));
   $("#resume-button").classList.toggle("hidden", !job.recovery?.canResume || !terminalFailure);
   $("#copy-recovery-button").classList.toggle("hidden", !job.recovery || !terminalFailure);
   $("#start-over-button").classList.toggle("hidden", !terminalFailure);
@@ -469,13 +455,26 @@ function renderAppMetrics() {
 
 $("#cancel-button").addEventListener("click", async () => {
   await api(`/api/jobs/${state.job.id}/cancel`, { method: "POST", body: {} }).catch(showError);
+  await poll();
+  refreshProjects();
+});
+
+// A parked run holds its project's queue so nothing builds on a half-repaired tree; dismiss releases it.
+$("#dismiss-button").addEventListener("click", async () => {
+  clearError();
+  try {
+    await api(`/api/jobs/${state.job.id}/dismiss`, { method: "POST", body: {} });
+    await poll();
+    refreshProjects();
+  } catch (error) {
+    showError(error);
+  }
 });
 
 $("#resume-button").addEventListener("click", async () => {
   clearError();
   $("#resume-button").disabled = true;
   try {
-    if (!(await ensureFactoryFree())) return;
     await api(`/api/jobs/${state.job.id}/resume`, { method: "POST", body: {} });
     await poll();
     startPolling();
@@ -503,7 +502,6 @@ $("#copy-recovery-button").addEventListener("click", async () => {
 $("#start-over-button").addEventListener("click", async () => {
   clearError();
   try {
-    if (!(await ensureFactoryFree())) return;
     const { job } = await api(`/api/jobs/${state.job.id}/retry`, { method: "POST", body: {} });
     state.job = job;
     state.events = [];

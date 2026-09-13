@@ -236,7 +236,7 @@ test("feedback preview works without an issues URL and rejects bad input with cl
   assert.equal((await invalid.json()).code, "feedback_invalid");
 });
 
-test("projects are discovered git repos; switching while busy needs an explicit cancel", async (t) => {
+test("projects are discovered git repos; switching never interrupts a run", async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-projects-"));
   const interviewCalls = [];
   const fixture = createFixtureProvider();
@@ -255,18 +255,16 @@ test("projects are discovered git repos; switching while busy needs an explicit 
   const guide = await postJson(`${base}/api/interview/turn`, { provider: "fixture", messages: transcript });
   const started = await postJson(`${base}/api/jobs`, { provider: "fixture", transcript, coverage: guide.coverage, brief: guide.brief });
 
-  const refused = await fetch(`${base}/api/projects`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Second App!" }) });
-  assert.equal(refused.status, 409, "creating must not switch away from a running build");
-  assert.equal((await refused.json()).busyJobId, started.job.id);
-
-  const switched = await postJson(`${base}/api/projects`, { name: "Second App!", cancel: true });
-  assert.equal(switched.active, "projects/second-app");
-  assert.equal((await getJson(`${base}/api/health`)).busyJobId, null);
+  const switched = await postJson(`${base}/api/projects`, { name: "Second App!" });
+  assert.equal(switched.active, "projects/second-app", "creating a project switches the view without a cancel");
+  assert.equal((await getJson(`${base}/api/health`)).busyJobId, null, "busyJobId is scoped to the viewed project");
   assert.deepEqual((await getJson(`${base}/api/jobs`)).jobs, []);
   assert.equal(app.store.project, path.join(home, "projects", "second-app"));
 
+  const done = await waitForJob(base, started.job.id, ["completed"]);
+  assert.equal(done.state, "completed", "the run in the other project kept going");
   const back = await postJson(`${base}/api/projects/select`, { id: "projects/default" });
-  assert.equal(back.projects.find((p) => p.id === "projects/default").lastRun.state, "cancelled");
+  assert.equal(back.projects.find((p) => p.id === "projects/default").lastRun.state, "completed");
   const projectDir = path.join(home, "projects", "default");
   assert.equal(interviewCalls.at(-1).cwd, projectDir, "the guide runs inside the active project");
   assert.equal(interviewCalls.at(-1).logPath, path.join(projectDir, ".aai", "memory", "interviews", "guide.log"));
@@ -279,3 +277,107 @@ test("projects are discovered git repos; switching while busy needs an explicit 
   assert.ok(await stat(path.join(home, "projects", "seeded", ".aai", "identity.md")).catch(() => null));
   assert.equal((await fetch(`${base}/api/projects/select`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "../etc" }) })).status, 404);
 });
+
+test("briefs queue per project, overlap across projects, and wait behind a parked run", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-queue-"));
+  const fixture = createFixtureProvider();
+  const held = new Map(); // project dir -> release()
+  const failNext = new Set(); // project dirs whose next specification turn throws
+  const providerFactory = () => ({
+    ...fixture,
+    run: async (args) => {
+      if (args.context?.stage === "specification") {
+        if (failNext.delete(args.cwd)) throw new Error("fixture specification failure");
+        if (held.has(args.cwd)) await held.get(args.cwd).promise;
+      }
+      return fixture.run(args);
+    },
+  });
+  const hold = (dir) => { let release; const promise = new Promise((resolve) => (release = resolve)); held.set(dir, { promise, release }); };
+  const release = (dir) => { held.get(dir)?.release(); held.delete(dir); };
+  const app = await createSoloFactoryServer({ home, fixtureMode: true, providerFactory, maxActiveRuns: 2 });
+  await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const config = await getJson(`${base}/api/config`);
+  const transcript = [{ role: "assistant", content: config.opening.message }, { role: "user", content: "Build a tiny private daily tracker with no login and observable save behavior." }];
+  const guide = await postJson(`${base}/api/interview/turn`, { provider: "fixture", messages: transcript });
+  const submit = () => postJson(`${base}/api/jobs`, { provider: "fixture", transcript, coverage: guide.coverage, brief: guide.brief });
+  const dirA = path.join(home, "projects", "default");
+  const dirB = path.join(home, "projects", "beta");
+
+  hold(dirA);
+  const a1 = (await submit()).job;
+  const a2 = (await submit()).job;
+  assert.equal(a2.state, "queued", "a second brief in a busy project is accepted, not refused");
+  assert.equal(a2.queuePosition, 1);
+  await waitForJob(base, a1.id, ["specifying"]);
+
+  hold(dirB);
+  await postJson(`${base}/api/projects`, { name: "beta" });
+  const b1 = (await submit()).job;
+  await waitForJob(base, b1.id, ["specifying"]);
+  const health = await getJson(`${base}/api/health`);
+  assert.equal(health.activeRuns.length, 2, "two projects run at once under maxActiveRuns=2");
+  const projects = (await getJson(`${base}/api/projects`)).projects;
+  assert.equal(projects.find((p) => p.id === "projects/default").queued, 1);
+  assert.equal(projects.find((p) => p.id === "projects/default").activeJobId, a1.id);
+
+  release(dirA);
+  assert.equal((await waitForJob(base, a1.id, ["completed"])).state, "completed");
+  assert.equal((await waitForJob(base, a2.id, ["completed"])).state, "completed", "the queued brief starts when its project frees up");
+  release(dirB);
+  assert.equal((await waitForJob(base, b1.id, ["completed"])).state, "completed");
+
+  // A parked run holds its project's queue until the owner resolves it.
+  await postJson(`${base}/api/projects/select`, { id: "projects/default" });
+  failNext.add(dirA);
+  const a3 = (await submit()).job;
+  assert.equal((await waitForJob(base, a3.id, ["failed"])).state, "failed");
+  const a4 = (await submit()).job;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const waiting = (await getJson(`${base}/api/jobs/${a4.id}`)).job;
+  assert.equal(waiting.state, "queued");
+  assert.equal(waiting.blockedBy, a3.id);
+
+  const dequeued = await postJson(`${base}/api/jobs/${a4.id}/cancel`, {});
+  assert.equal(dequeued.dequeued, true);
+  assert.equal((await getJson(`${base}/api/jobs/${a4.id}`)).job.state, "cancelled");
+  const a5 = (await submit()).job;
+  await postJson(`${base}/api/jobs/${a3.id}/dismiss`, {});
+  assert.equal((await waitForJob(base, a5.id, ["completed"])).state, "completed", "dismissing the parked run releases the queue");
+});
+
+test("a job still queued when the server stopped starts on the next boot", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-queue-restart-"));
+  const first = await createSoloFactoryServer({ home, fixtureMode: true });
+  await new Promise((resolve) => first.server.listen(0, "127.0.0.1", resolve));
+  const firstBase = `http://127.0.0.1:${first.server.address().port}`;
+  const config = await getJson(`${firstBase}/api/config`);
+  const transcript = [{ role: "assistant", content: config.opening.message }, { role: "user", content: "Build a tiny private daily tracker with no login and observable save behavior." }];
+  const guide = await postJson(`${firstBase}/api/interview/turn`, { provider: "fixture", messages: transcript });
+  // Created on disk but never enqueued, which is exactly what a stop leaves behind: the in-memory queue is gone.
+  const queued = await first.store.create({ brief: guide.brief, transcript, provider: "fixture" });
+  await first.close();
+
+  const second = await createSoloFactoryServer({ home, fixtureMode: true });
+  const base = await listen(second, t);
+  assert.equal((await waitForJob(base, queued.id, ["completed"])).state, "completed");
+});
+
+async function listen(app, t) {
+  await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  t.after(() => app.close());
+  return `http://127.0.0.1:${app.server.address().port}`;
+}
+
+async function waitForJob(base, id, states, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  let job;
+  while (Date.now() < deadline) {
+    job = (await getJson(`${base}/api/jobs/${id}`)).job;
+    if (states.includes(job.state) || (job.state === "failed" && !states.includes("failed"))) return job;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return job;
+}

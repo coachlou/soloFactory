@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
@@ -16,6 +17,10 @@ export class FactoryError extends Error {
     this.details = details;
   }
 }
+
+// Live local deployments keyed by project directory. Module-level because the server makes
+// one SoloFactory per run, and a project's next release must stop the previous release's app.
+const liveByProject = new Map();
 
 export class SoloFactory {
   constructor({ store, provider, maxRepairs = 2, commandRunner = runProcess, deployer } = {}) {
@@ -63,6 +68,9 @@ export class SoloFactory {
       await this.store.writeState(job);
       const appDir = this.store.appDir(jobId);
       const factoryDir = path.join(appDir, ".factory");
+      // A manifest already in the project means an earlier release shipped: spec and slice
+      // this brief as an increment on top of it. Stamped once so resumes stay consistent.
+      job.followOn ??= existsSync(path.join(appDir, "factory.json"));
       await mkdir(path.join(factoryDir, "logs"), { recursive: true });
       await writeFile(
         path.join(factoryDir, "requirements.json"),
@@ -71,7 +79,7 @@ export class SoloFactory {
 
       job = await this.stage(job, "specifying", "Writing PRD, plan, and acceptance contract");
       const before = await readdir(appDir);
-      await this.invoke(job, "specification", specificationPrompt(job.sdlc === "slices"), signal);
+      await this.invoke(job, "specification", specificationPrompt(job.sdlc === "slices", { followOn: job.followOn }), signal);
       await this.validateSpecification(appDir, before);
       await this.commit(job, "factory: specification");
 
@@ -119,7 +127,7 @@ export class SoloFactory {
       if (failedState === "specifying") {
         job = await this.stage(job, "specifying", "Finishing the interrupted specification");
         const before = await readdir(appDir);
-        await this.invoke(job, "specification-resume", continuationPrompt("specification", job.sdlc === "slices"), signal, { resumeSessionId });
+        await this.invoke(job, "specification-resume", continuationPrompt("specification", job.sdlc === "slices", { followOn: job.followOn }), signal, { resumeSessionId });
         await this.validateSpecification(appDir, before);
         await this.commit(job, "factory: specification");
         if (job.sdlc === "slices") {
@@ -185,7 +193,7 @@ export class SoloFactory {
     const scenarioCount = this.sliceScenarioCount(job);
     await this.loadSlicePlan(appDir, scenarioCount); // pre-check: don't spend a turn on garbage
     job = await this.stage(job, "specifying", "Auditing the slice plan (second opinion)");
-    await this.invoke(job, "plan-review", planReviewPrompt(), signal);
+    await this.invoke(job, "plan-review", planReviewPrompt({ followOn: job.followOn }), signal);
     await this.loadSlicePlan(appDir, scenarioCount); // revalidate after the reviewer's rewrite
     job.planReviewed = true;
     await this.store.writeState(job);
@@ -215,7 +223,7 @@ export class SoloFactory {
       const startedAtMs = Date.now();
       const resumed = resumeFrom != null && i === from;
       const label = resumed ? `slice-resume-${slice.id}` : `build-slice-${slice.id}`;
-      const prompt = resumed ? sliceContinuationPrompt(slice, ordered) : sliceBuildPrompt(slice, ordered);
+      const prompt = resumed ? sliceContinuationPrompt(slice, ordered) : sliceBuildPrompt(slice, ordered, { followOn: job.followOn });
       await this.invoke(job, label, prompt, signal, { resumeSessionId: this.resumeSessionFor(job, label) });
       job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: i === 0, slice });
       const repairs = job.attempt - attemptBefore;
@@ -453,7 +461,27 @@ export class SoloFactory {
     const command = manifest.commands.start;
     const port = await availablePort();
     const url = `http://127.0.0.1:${port}`;
-    const logPath = path.join(this.store.appDir(job.id), ".factory", "logs", "deployment.log");
+    const appDir = this.store.appDir(job.id);
+    const previous = liveByProject.get(appDir);
+    if (previous) {
+      liveByProject.delete(appDir);
+      if (previous.jobId !== job.id) {
+        try {
+          const old = await this.store.read(previous.jobId);
+          if (old.deployment?.status === "live") {
+            old.deployment.status = "replaced";
+            old.deployment.stoppedAt = new Date().toISOString();
+            old.deployment.replacedBy = job.id;
+            await this.store.writeState(old);
+            await this.emit(old.id, { type: "deployment.replaced", state: old.state, message: `Replaced by run ${job.id}.` });
+          }
+        } catch {
+          // A missing old run record must not block the new release from deploying.
+        }
+      }
+      previous.child.kill("SIGTERM");
+    }
+    const logPath = path.join(appDir, ".factory", "logs", "deployment.log");
     const log = createWriteStream(logPath, { flags: "a" });
     const child = spawn(command[0], command.slice(1), {
       cwd: this.store.appDir(job.id),
@@ -463,10 +491,12 @@ export class SoloFactory {
     child.stdout.pipe(log);
     child.stderr.pipe(log);
     this.deployments.set(job.id, child);
+    liveByProject.set(appDir, { jobId: job.id, child });
     signal.addEventListener("abort", () => child.kill("SIGTERM"), { once: true });
     child.once("exit", async (code) => {
       log.end();
       this.deployments.delete(job.id);
+      if (liveByProject.get(appDir)?.child === child) liveByProject.delete(appDir);
       try {
         const latest = await this.store.read(job.id);
         if (latest.deployment?.status === "live") {

@@ -108,10 +108,12 @@ test("startup recovery makes in-flight state explicitly interrupted", async () =
   const job = await store.create({ brief, transcript, provider: "fixture" });
   job.state = "building";
   await store.writeState(job);
+  const waiting = await store.create({ brief, transcript, provider: "fixture" });
   await store.recoverInterrupted();
   const recovered = await store.read(job.id);
   assert.equal(recovered.state, "interrupted");
   assert.equal(recovered.error.code, "process_restarted");
+  assert.equal((await store.read(waiting.id)).state, "queued", "a queued job never started, so a restart leaves it queued");
 });
 
 test("artifact access is an explicit allowlist", async () => {
@@ -379,4 +381,77 @@ test("init scaffolds project context once and never overwrites it", async () => 
   const agents = await readFile(path.join(root, "AGENTS.md"), "utf8");
   assert.ok(agents.startsWith("# theirs\n") && agents.includes("ambient folder"));
   assert.equal(agents.split("ambient folder").length, 2, "anchor appended exactly once");
+});
+
+test("a project with a shipped manifest specs and slices the brief as a follow-on release", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-followon-"));
+  const store = new JobStore(root);
+  await store.init();
+  // An earlier release left its manifest at the project root.
+  await writeFile(path.join(root, "factory.json"), `${JSON.stringify({ version: 1 })}\n`);
+  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  const fixture = createFixtureProvider();
+  const prompts = {};
+  const factory = new SoloFactory({
+    store,
+    provider: {
+      id: "fixture",
+      async run(options) {
+        prompts[options.context.stage] ??= options.prompt;
+        return fixture.run(options);
+      },
+    },
+    commandRunner: async () => ({ code: 0, output: "passed" }),
+    deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9975" }),
+  });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(result.followOn, true);
+  assert.match(prompts.specification, /follow-on release/);
+  assert.match(prompts.specification, /cumulative/);
+  assert.doesNotMatch(prompts.specification, /Slice 1 must be a thin walking skeleton/);
+  assert.match(prompts["plan-review"], /no\s+skeleton slice is needed/);
+  const firstSlice = Object.keys(prompts).find((stage) => stage.startsWith("build-slice-"));
+  assert.ok(firstSlice, JSON.stringify(Object.keys(prompts)));
+  assert.doesNotMatch(prompts[firstSlice], /walking-skeleton slice/);
+  assert.match(prompts[firstSlice], /Earlier releases already built this app/);
+
+  const greenfield = await mkdtemp(path.join(os.tmpdir(), "solo-factory-greenfield-"));
+  const freshStore = new JobStore(greenfield);
+  await freshStore.init();
+  const fresh = await freshStore.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  const freshPrompts = {};
+  const freshResult = await new SoloFactory({
+    store: freshStore,
+    provider: { id: "fixture", async run(options) { freshPrompts[options.context.stage] ??= options.prompt; return fixture.run(options); } },
+    commandRunner: async () => ({ code: 0, output: "passed" }),
+    deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9976" }),
+  }).start(fresh.id);
+  assert.equal(freshResult.followOn, false);
+  assert.match(freshPrompts.specification, /Slice 1 must be a thin walking skeleton/);
+});
+
+test("a project's next release replaces its previous live deployment", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-replace-"));
+  const store = new JobStore(root);
+  await store.init();
+  const factories = [];
+  t.after(() => Promise.all(factories.map((factory) => factory.shutdown())));
+  const release = async () => {
+    const job = await store.create({ brief, transcript, provider: "fixture" });
+    const factory = new SoloFactory({ store, provider: createFixtureProvider() });
+    factories.push(factory);
+    const result = await factory.start(job.id);
+    assert.equal(result.state, "completed", result.error?.message);
+    return result;
+  };
+  const first = await release();
+  const second = await release();
+  const old = await store.read(first.id);
+  assert.equal(old.deployment.status, "replaced");
+  assert.equal(old.deployment.replacedBy, second.id);
+  await assert.rejects(fetch(`${first.deployment.url}/health`), "the replaced app must be stopped");
+  assert.equal((await fetch(`${second.deployment.url}/health`)).ok, true);
+  const live = factories.flatMap((factory) => [...factory.deployments.values()]);
+  assert.equal(live.length, 1, "exactly one live child per project");
 });

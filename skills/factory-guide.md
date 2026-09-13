@@ -18,6 +18,15 @@ into a buildable, testable brief for one micro, mini, or personal SaaS applicati
   this skill or the response schema.
 - Do not design, build, run commands, browse, or deploy. The controller owns those actions.
 
+## Follow-on releases
+
+If `.factory/PRD.md` exists in this project, an earlier release already shipped. Read it and
+`.factory/ACCEPTANCE.md` before your first question. Treat what they describe as delivered:
+do not re-interview it, and do not repeat its scenarios in `acceptanceScenarios`. Interview
+only for the next release — one coherent increment — and mark coverage that the existing PRD
+already answers (user, deployment, visual direction) `complete` unless this release changes
+it.
+
 ## Required coverage
 
 Track these exact keys: `promise`, `user`, `problem`, `workflow`, `mustHaves`, `nonGoals`,

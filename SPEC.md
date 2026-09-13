@@ -111,6 +111,19 @@ reports the subscription/login problem; it never falls back to an API key.
 | Deploy | local controller | process stays alive and `/health` returns HTTP 2xx |
 | Complete | controller only | deployment URL and evidence are persisted |
 
+### Run queue
+
+Submitting a brief queues a run in the viewed project and returns the owner to a fresh
+interview. Runs are serial within a project, because each release builds on the tree the
+previous one left, and parallel across projects up to `SOLOFACTORY_MAX_ACTIVE_RUNS`
+(default 1). The FIFO skips busy projects rather than waiting on them. A project's most
+recent failed, interrupted, or cancelled run holds its queue (`blockedBy`) until it is
+resumed, started over, or dismissed. Resume and start-over go to the front. Queued runs
+survive a restart. When a project already has `factory.json`, the run is a follow-on
+release: the PRD is updated cumulatively, the plan and acceptance contract cover only the
+increment, no walking-skeleton slice is required, and deploying it stops the previous
+release's app (`deployment.status: "replaced"`). Switching projects never cancels a run.
+
 The worker may edit only the generated app workspace. It cannot change job state directly.
 Commands are spawned as argument arrays, never interpolated into a shell. The environment
 passed to workers removes common API-key variables so subscription authentication remains
@@ -235,21 +248,24 @@ Only one job may be active because the target user does not benefit from resourc
 
 ## 9. HTTP surface
 
-- `GET /api/health` — factory health, active project, busy run.
-- `GET /api/projects` — discovered projects with run count and last run; the active one.
+- `GET /api/health` — factory health, active project, busy run, `activeRuns`, `maxActiveRuns`.
+- `GET /api/projects` — discovered projects with run count, last run, `activeJobId`, and
+  `queued` count; the active one.
 - `POST /api/projects` — create `projects/<slug>` (`git init`) and select it.
 - `POST /api/projects/select` — switch the active project (initialising it: `git init`, `.aai/`
-  scaffold, anchors); `409 { busyJobId }` while a run is active unless `cancel: true`, which
-  cancels it and waits before switching.
+  scaffold, anchors). Never interrupts a run.
 - `GET /api/config` — intake questions and available subscription providers.
 - `POST /api/interview/turn` — run one Factory Guide turn inside the active project and return
   structured coverage; the transcript is appended to that project's `.aai/memory/interviews/guide.log`.
-- `POST /api/jobs` — validate intake, freeze input, queue a run.
-- `GET /api/jobs/:id` — current state and bounded event history.
-- `POST /api/jobs/:id/cancel` — cancel active work.
-- `POST /api/jobs/:id/resume` — continue a failed/interrupted run in its existing workspace.
+- `POST /api/jobs` — validate intake, freeze input, queue a run; `202` with `queuePosition`.
+- `GET /api/jobs/:id` — current state, `queuePosition`/`blockedBy` while queued, and bounded
+  event history.
+- `POST /api/jobs/:id/cancel` — cancel active work, or remove a queued run (`dequeued: true`).
+- `POST /api/jobs/:id/dismiss` — mark a parked run dismissed so its project's queue proceeds.
+- `POST /api/jobs/:id/resume` — queue a failed/interrupted run, at the front, to continue in
+  its existing workspace.
 - `GET /api/jobs/:id/recovery-packet` — return the HITL recovery handoff as plain text.
-- `POST /api/jobs/:id/retry` — explicitly start over as a new run.
+- `POST /api/jobs/:id/retry` — explicitly start over as a new run, queued at the front.
 - `GET /api/jobs/:id/artifacts/:name` — fetch an allowlisted factory artifact.
 - `GET /api/jobs/:id/telemetry` — combine lifecycle timing with the deployed app's local
   metrics response.

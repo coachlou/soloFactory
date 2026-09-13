@@ -22,7 +22,12 @@ npm start
 ```
 
 Open <http://127.0.0.1:4173>. Answer the Factory Guide one turn at a time, review the
-compiled brief, and choose **Start the factory**.
+compiled brief, and choose **Queue for the factory**. The brief joins that project's run
+queue and you land back in a fresh interview, so the next release can be shaped while this
+one builds. Runs in one project go one after another, each building on the last; runs in
+different projects can overlap when `SOLOFACTORY_MAX_ACTIVE_RUNS` is above 1 (default 1).
+A brief for a project that already shipped is specified as a follow-on release, and deploying
+it stops the previous release's app.
 
 A **project** is the workspace the factory builds into. Projects are discovered under
 `SOLOFACTORY_ROOT` (default: the home, `.solofactory/`): any directory in `<root>/projects/`,
@@ -30,8 +35,8 @@ or a `<root>/<name>/` that contains `.git/`. The header selector switches projec
 one; a folder you make by hand under `projects/` shows up too. Selecting a project makes it
 the current workspace: it is `git init`ed if needed, gets a project-owned `.aai/` (identity,
 context, instructions — scaffolded once, yours to edit) plus `CLAUDE.md`/`AGENTS.md` anchors,
-and both the Factory Guide and the build agents run inside it. Switching while a build is
-running asks before cancelling it. The app lives at the repo root; the factory commits after
+and both the Factory Guide and the build agents run inside it. Switching projects never
+cancels a run. The app lives at the repo root; the factory commits after
 the specification and after every passed gate set; the guide transcript
 (`.aai/memory/interviews/guide.log`) and run evidence (`.solofactory/runs/<id>/`) are
 gitignored along with `.factory/logs/`.
@@ -94,7 +99,11 @@ title. The report body always travels through your clipboard.
   are never blindly retried. The dashboard explains the blocker and preserves a recovery
   packet that can be pasted into Codex for human-guided recovery.
 - **Resume current run** continues the existing run ID and files from the failed stage.
-  **Start over** remains an explicit secondary action that creates a new run.
+  **Start over** remains an explicit secondary action that creates a new run. Both go to the
+  front of the queue.
+- A failed, interrupted, or cancelled run holds its project's queue so nothing builds on a
+  half-repaired tree. Resume it, start it over, or **Dismiss** it to let queued briefs run.
+  **Remove from queue** drops a brief that has not started.
 - A restart changes ambiguous in-flight runs to `interrupted`; they can be resumed from the
   preserved workspace.
 - App telemetry is local aggregate data only: uptime, request/error counts, latency, and
