@@ -259,3 +259,16 @@ created `projects/second-app` and switched; a build started there; switching bac
 `default` mid-build raised the confirm, cancelled the run (`second-app` last run =
 cancelled), and showed `default`'s completed run. On disk each project has the app at the
 root, three `factory:` commits, a clean tree, and gitignored `.solofactory/runs/`.
+
+## Project workspaces (2026-09-12)
+
+Spec: `docs/project-workspaces-spec.md`. Selecting `projects/<name>` makes it the current
+workspace: any directory under `projects/` is a project (`git init` on first open), it gets a
+project-owned `.aai/` scaffolded once from `templates/project/` plus `CLAUDE.md`/`AGENTS.md`
+anchors, the Factory Guide runs inside it with its transcript in
+`.aai/memory/interviews/guide.log` (ignored), and context is committed at stage boundaries.
+Installed folders on 0.1.0 predate the selector; the 0.3.0 sync delivers both.
+
+Observed: `npm test` → **61/61** (new: scaffold-once/never-overwrite store test; e2e asserts
+the guide's cwd/logPath are the active project and a hand-seeded `projects/seeded/` is
+listed and initialised on select).

@@ -363,3 +363,20 @@ test("a project is a git repo: app at the root, evidence gitignored, commits at 
   assert.equal(await store.git("status", "--porcelain"), "", "evidence and logs must be ignored");
   assert.equal(await store.git("ls-files", ".solofactory"), "");
 });
+
+test("init scaffolds project context once and never overwrites it", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solofactory-context-"));
+  const store = new JobStore(root);
+  await store.init();
+  const identity = path.join(root, ".aai", "identity.md");
+  assert.match(await readFile(identity, "utf8"), new RegExp(`\\*\\*Name:\\*\\* ${path.basename(root)}`));
+  assert.match(await readFile(path.join(root, "CLAUDE.md"), "utf8"), /Read `\.aai\/instructions\.md`/);
+  assert.match(await readFile(path.join(root, ".gitignore"), "utf8"), /^\.aai\/memory\/$/m);
+  await writeFile(identity, "# mine\n");
+  await writeFile(path.join(root, "AGENTS.md"), "# theirs\n");
+  await store.init();
+  assert.equal(await readFile(identity, "utf8"), "# mine\n");
+  const agents = await readFile(path.join(root, "AGENTS.md"), "utf8");
+  assert.ok(agents.startsWith("# theirs\n") && agents.includes("ambient folder"));
+  assert.equal(agents.split("ambient folder").length, 2, "anchor appended exactly once");
+});

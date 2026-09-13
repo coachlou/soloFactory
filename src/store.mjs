@@ -3,8 +3,17 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
+const templatesRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "project");
+// Discovery anchor appended to the project's CLAUDE.md/AGENTS.md; the "ambient folder" marker is what makes it idempotent.
+const ANCHOR = `## Ambient folder
+
+This project is an ambient folder: SoloFactory builds it.
+**Read \`.aai/instructions.md\` and follow it before acting.** "Ambient folder"
+means a folder with an \`.aai/\` behavior layer.
+`;
 
 // A JobStore is rooted in one project: a git repo the factory builds into.
 // The app lives at the repo root; run evidence lives in .solofactory/runs/<id>/ (gitignored).
@@ -20,8 +29,28 @@ export class JobStore {
     // ponytail: append-only ignore rules; a hand-edited .gitignore keeps its own lines
     const ignoreFile = path.join(this.project, ".gitignore");
     const current = await readFile(ignoreFile, "utf8").catch(() => "");
-    const missing = [".solofactory/", ".factory/logs/"].filter((rule) => !current.split("\n").includes(rule));
+    const missing = [".solofactory/", ".factory/logs/", ".aai/memory/"].filter((rule) => !current.split("\n").includes(rule));
     if (missing.length) await writeFile(ignoreFile, `${current}${current && !current.endsWith("\n") ? "\n" : ""}${missing.join("\n")}\n`);
+    await this.scaffoldContext();
+  }
+
+  // Project-owned context: written once from templates/project/, never overwritten, so the
+  // owner and agents can edit it. Memory is gitignored; the anchors let Claude/Codex find .aai/.
+  async scaffoldContext() {
+    await mkdir(path.join(this.project, ".aai", "memory", "interviews"), { recursive: true });
+    const name = path.basename(this.project);
+    for (const file of ["identity.md", "context.md", "instructions.md"]) {
+      const target = path.join(this.project, ".aai", file);
+      if (await stat(target).catch(() => null)) continue;
+      const body = await readFile(path.join(templatesRoot, file), "utf8");
+      await writeFile(target, body.replaceAll("{{NAME}}", name));
+    }
+    for (const file of ["CLAUDE.md", "AGENTS.md"]) {
+      const target = path.join(this.project, file);
+      const current = await readFile(target, "utf8").catch(() => "");
+      if (current.includes("ambient folder")) continue;
+      await writeFile(target, `${current}${current && !current.endsWith("\n") ? "\n" : ""}${current ? "\n" : ""}${ANCHOR}`);
+    }
   }
 
   jobsRoot() {

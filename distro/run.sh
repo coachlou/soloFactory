@@ -7,7 +7,7 @@
 #
 # Resolves the folder by walking up to the nearest .aai/, so it works from
 # .ailib/solofactory/ and from a fork in .aai/skills/solofactory/ alike.
-# Projects are git repos in <folder>/projects/<name>; the interview log in <folder>/.aai/memory/solofactory/.
+# Projects live in <folder>/projects/<name> (each with its own .aai/); <folder>/.aai/memory/solofactory/ only remembers the active one.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FOLDER="$HERE"

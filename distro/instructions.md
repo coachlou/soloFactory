@@ -49,14 +49,15 @@ bash "${CLAUDE_PLUGIN_ROOT}/library/ambient-folder/install.sh" solofactory <targ
 │   ├── identity.md            #   the workspace's identity
 │   ├── instructions.md        #   behavior: build/resume/inspect/report; layers ~/.aai if present
 │   ├── context.md             #   routing map
-│   └── memory/solofactory/    #   interview log (created on first run)
+│   └── memory/solofactory/    #   which project is active (created on first run)
 ├── .ailib/                    # VENDORED — re-synced on every install
 │   ├── manifest.yaml
 │   ├── ambient-folder/        #   generic install/update script (dependency)
 │   ├── ambient-folder/        #   generic install/update script (dependency)
 │   └── solofactory/           #   this capability: run.sh, app/, templates/
 ├── start.sh                   #   root-level launcher → .ailib/solofactory/run.sh
-├── projects/                  # one git repo per project (created from the app)
+├── projects/                  # one workspace per project (from the app, or a folder you make)
+│   └── <name>/.aai/           #   the project's own context + memory/interviews/guide.log
 ├── CLAUDE.md, AGENTS.md       # discovery anchors (appended, never replaced)
 ```
 
@@ -74,9 +75,11 @@ The folder's own `.aai/instructions.md` governs; it was written from
 `templates/aai/instructions.md` here. In short: `start.sh` (at the folder root)
 runs `run.sh`, which starts the factory
 with `SOLOFACTORY_HOME=<folder>/.aai/memory/solofactory` and
-`SOLOFACTORY_ROOT=<folder>` (projects are discovered in `<folder>/*` and
-`<folder>/projects/*` — any child with `.git/`); inspect a project by reading its
-`.factory/*.md`, `git log`, and `.solofactory/runs/<id>/{state.json,events.jsonl}`.
+`SOLOFACTORY_ROOT=<folder>` (projects are any `<folder>/projects/*` directory, or a
+`<folder>/*` child with `.git/`). Selecting one in the header makes it the current
+workspace — the guide and builders run in it and it gets its own `.aai/` on first open.
+Inspect a project by reading its `.aai/*.md`, `.factory/*.md`, `git log`, and
+`.solofactory/runs/<id>/{state.json,events.jsonl}`.
 
 ## Maintain — refresh the library copy (library maintainers)
 

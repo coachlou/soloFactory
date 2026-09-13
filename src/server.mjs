@@ -21,7 +21,7 @@ const publicRoot = path.join(projectRoot, "public");
 
 export async function createSoloFactoryServer(options = {}) {
   const home = options.home ?? process.env.SOLOFACTORY_HOME ?? path.join(projectRoot, ".solofactory");
-  // Projects are git repos under root/ or root/projects/. The source checkout keeps them in
+  // Projects are dirs under root/projects/ or git repos directly under root/. The source checkout keeps them in
   // .solofactory/; the distro points SOLOFACTORY_ROOT at the ambient folder.
   const root = path.resolve(options.root ?? process.env.SOLOFACTORY_ROOT ?? home);
   const activeFile = path.join(home, "active-project");
@@ -116,11 +116,13 @@ export async function createSoloFactoryServer(options = {}) {
         const provider = requireProvider(body.provider, fixtureMode);
         const messages = validateMessages(body.messages);
         const result = await providerFactory(provider).run({
-          cwd: path.join(home, "interviews"),
+          // The guide runs inside the active project so its transcript is that project's memory
+          // and the CLI picks up the project's own CLAUDE.md/.aai.
+          cwd: active.dir,
           prompt: buildInterviewPrompt({ skill, messages }),
           schema: INTERVIEW_RESPONSE_SCHEMA,
           mode: "read",
-          logPath: path.join(home, "interviews", "guide.log"),
+          logPath: path.join(active.dir, ".aai", "memory", "interviews", "guide.log"),
           context: { stage: "interview" },
         });
         return json(response, 200, validateInterviewResult(result));
@@ -257,7 +259,9 @@ async function discoverProjects(root) {
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith(".") || (parent === "" && entry.name === "projects")) continue;
       const id = parent ? `${parent}/${entry.name}` : entry.name;
-      if (!(await stat(path.join(root, id, ".git")).catch(() => null))) continue;
+      // Anything under projects/ counts (a hand-seeded folder is initialised on first open);
+      // directly under root only git repos do, so .aai/, .ailib/, node_modules/ never appear.
+      if (!parent && !(await stat(path.join(root, id, ".git")).catch(() => null))) continue;
       const runs = await new JobStore(path.join(root, id)).list();
       const last = runs[0];
       projects.push({ id, name: entry.name, runCount: runs.length, lastRun: last ? { id: last.id, state: last.state, createdAt: last.createdAt, workingName: last.brief?.workingName ?? null } : null });

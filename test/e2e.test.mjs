@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { createSoloFactoryServer } from "../src/server.mjs";
+import { createFixtureProvider } from "../src/fixture-provider.mjs";
 import { COVERAGE_KEYS } from "../src/interview.mjs";
 
 test("HTTP journey goes from Guide turn to a reachable generated app", async (t) => {
@@ -237,7 +238,10 @@ test("feedback preview works without an issues URL and rejects bad input with cl
 
 test("projects are discovered git repos; switching while busy needs an explicit cancel", async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-projects-"));
-  const app = await createSoloFactoryServer({ home, fixtureMode: true });
+  const interviewCalls = [];
+  const fixture = createFixtureProvider();
+  const providerFactory = () => ({ ...fixture, run: (args) => (args.context?.stage === "interview" && interviewCalls.push(args), fixture.run(args)) });
+  const app = await createSoloFactoryServer({ home, fixtureMode: true, providerFactory });
   await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
   t.after(() => app.close());
   const base = `http://127.0.0.1:${app.server.address().port}`;
@@ -263,5 +267,15 @@ test("projects are discovered git repos; switching while busy needs an explicit 
 
   const back = await postJson(`${base}/api/projects/select`, { id: "projects/default" });
   assert.equal(back.projects.find((p) => p.id === "projects/default").lastRun.state, "cancelled");
+  const projectDir = path.join(home, "projects", "default");
+  assert.equal(interviewCalls.at(-1).cwd, projectDir, "the guide runs inside the active project");
+  assert.equal(interviewCalls.at(-1).logPath, path.join(projectDir, ".aai", "memory", "interviews", "guide.log"));
+
+  // A folder seeded by hand (no .git) is a project; selecting it initialises the repo and context.
+  await mkdir(path.join(home, "projects", "seeded", "docs"), { recursive: true });
+  assert.ok((await getJson(`${base}/api/projects`)).projects.some((p) => p.id === "projects/seeded"));
+  await postJson(`${base}/api/projects/select`, { id: "projects/seeded" });
+  assert.ok(await stat(path.join(home, "projects", "seeded", ".git")).catch(() => null));
+  assert.ok(await stat(path.join(home, "projects", "seeded", ".aai", "identity.md")).catch(() => null));
   assert.equal((await fetch(`${base}/api/projects/select`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "../etc" }) })).status, 404);
 });

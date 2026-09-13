@@ -15,15 +15,18 @@ app". SoloFactory is this folder's agentic function; projects are its output.
 | `.aai/references/*.md` | reference — folder-level rules | always, if present |
 | `.ailib/solofactory/` | vendored — resolve `.aai/skills/solofactory/` first (shadowing) | any factory operation |
 | `.ailib/solofactory/app/README.md` | reference — how the app runs and its boundaries | before starting or troubleshooting the factory |
-| `projects/<name>/.factory/*.md`, `.solofactory/runs/<id>/{state.json,events.jsonl}` | working — one project's state, log, PRD/PLAN/ACCEPTANCE | when the request names or implies that project |
+| `projects/<name>/.aai/*.md`, `.factory/*.md`, `.solofactory/runs/<id>/{state.json,events.jsonl}` | working — one project's context, contract, state, log | when the request names or implies that project |
 
 ## Process
 
 1. **Start the factory** (deterministic): `bash start.sh` at the folder root
    (resolves to the `.aai/skills/solofactory/run.sh` fork if one exists, else
    `.ailib/solofactory/run.sh`). It serves
-   <http://127.0.0.1:4173>, builds projects in `projects/<name>/` (git repos), and keeps the
-   interview log in `.aai/memory/solofactory/`. `SOLOFACTORY_DEMO=1` gives a
+   <http://127.0.0.1:4173> and builds projects in `projects/<name>/`. Selecting a project in the
+   header makes it the current workspace: the guide and the builders run inside it, and it
+   carries its own `.aai/` (scaffolded once; edit freely) and `.aai/memory/interviews/guide.log`.
+   A folder created by hand under `projects/` is picked up and initialised on first select.
+   `SOLOFACTORY_DEMO=1` gives a
    deterministic demo that spends no quota.
 2. **New project**: the owner answers the Factory Guide in the browser, reviews
    the compiled brief, and chooses *Start the factory*. Do not drive the
@@ -43,7 +46,8 @@ app". SoloFactory is this folder's agentic function; projects are its output.
 - `projects/<name>/.solofactory/runs/<id>/{state.json,events.jsonl}` → run state and lifecycle log
 - `projects/<name>/` → the generated application (git repo, `git log` = build history), deployed on a loopback port
 - `projects/<name>/.factory/{PRD,PLAN,ACCEPTANCE}.md` → the frozen contract
-- `.aai/memory/solofactory/` → interview log, runtime state across runs
+- `projects/<name>/.aai/` → the project's own context (committed) and `memory/interviews/guide.log` (ignored)
+- `.aai/memory/solofactory/` → which project is active
 
 ## Rules
 

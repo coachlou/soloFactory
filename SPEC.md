@@ -171,14 +171,20 @@ recorded. In-memory aggregates reset on app restart in v0.1.
 
 ## 6. State and evidence
 
-A project is a git repo the factory builds into, discovered as `<root>/<name>/` or
-`<root>/projects/<name>/` (any child containing `.git/`; `root` = `SOLOFACTORY_ROOT`, default
-the factory home). One project is active at a time; every run belongs to it. The factory
-commits after the specification and after each passed gate set (`factory: <stage> passed
-gates`), so `git log` is the build history.
+A project is a workspace the factory builds into: any directory under `<root>/projects/`, or a
+git repo directly under `<root>/` (`root` = `SOLOFACTORY_ROOT`, default the factory home). One
+project is active at a time; every run and every agent session (Factory Guide included) runs
+inside it. Opening a project initialises it: `git init` if needed, `.gitignore` rules, a
+project-owned `.aai/` scaffolded once from `templates/project/` and never overwritten, and
+`CLAUDE.md`/`AGENTS.md` anchors pointing at it. The factory commits after the specification
+and after each passed gate set (`factory: <stage> passed gates`), so `git log` is the build
+history; `.aai/*.md` and the anchors are committed with it.
 
 ```text
 <project>/                 git repo; generated application at the root
+  CLAUDE.md, AGENTS.md     discovery anchors → .aai/ (appended, never replaced)
+  .aai/                    project context, written once: identity.md, context.md, instructions.md
+    memory/interviews/     gitignored; guide.log = this project's Factory Guide transcript
   .factory/
     requirements.json
     PRD.md
