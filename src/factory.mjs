@@ -8,7 +8,9 @@ import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./pro
 import { buildPrompt, continuationPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
 import { orderSlices, validateSlicePlan } from "./wbs.mjs";
 
-const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted"]);
+const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted", "paused"]);
+// A pause lands only where the tree is green and committed: before a stage that follows a passed gate.
+const PAUSE_POINTS = new Set(["specifying", "building", "reviewing", "deploying"]);
 
 export class FactoryError extends Error {
   constructor(code, message, details = {}) {
@@ -58,6 +60,12 @@ export class SoloFactory {
   async cancel(jobId) {
     if (this.active?.jobId !== jobId) throw new FactoryError("not_active", "That run is not active.");
     this.active.controller.abort();
+  }
+
+  // Takes effect at the next stage boundary (between slices in slice mode), never mid-turn.
+  async pause(jobId) {
+    if (this.active?.jobId !== jobId) throw new FactoryError("not_active", "That run is not active.");
+    this.active.pauseRequested = true;
   }
 
   async run(jobId, signal) {
@@ -289,6 +297,7 @@ export class SoloFactory {
 
   async fail(jobId, signal, error) {
     const job = await this.store.read(jobId);
+    if (error.code === "paused") return this.park(job, error.details.before);
     const cancelled = signal.aborted;
     job.failedState = inferFailedState(job);
     const previous = job.stageHistory.at(-1);
@@ -310,7 +319,25 @@ export class SoloFactory {
     return job;
   }
 
+  async park(job, before) {
+    const previous = job.stageHistory.at(-1);
+    if (previous && !previous.endedAt) previous.endedAt = new Date().toISOString();
+    await this.commit(job, "factory: paused");
+    job.failedState = before;
+    job.state = "paused";
+    job.stage = `Paused before ${before}`;
+    job.error = null;
+    job.recovery = { ...buildRecovery(job, this.store.appDir(job.id)), title: "Paused by the owner", summary: `The tree is committed and green. Resume continues from ${before}.` };
+    await this.store.writeState(job);
+    await this.emit(job.id, { type: "job.paused", state: job.state, message: job.stage });
+    return job;
+  }
+
   async stage(job, state, label) {
+    if (this.active?.pauseRequested && PAUSE_POINTS.has(state)) {
+      this.active.pauseRequested = false;
+      throw new FactoryError("paused", `Paused before ${state}`, { before: state });
+    }
     const now = new Date().toISOString();
     const previous = job.stageHistory.at(-1);
     if (previous && !previous.endedAt) previous.endedAt = now;

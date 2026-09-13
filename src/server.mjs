@@ -16,7 +16,7 @@ import { createFixtureProvider } from "./fixture-provider.mjs";
 import { REPORTABLE_STATES, buildDiagnostics, issuesConfig, renderReport, validateFeedback } from "./feedback.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const PARKED = new Set(["failed", "interrupted", "cancelled"]);
+const PARKED = new Set(["failed", "interrupted", "cancelled", "paused"]);
 const projectRoot = path.dirname(here);
 const publicRoot = path.join(projectRoot, "public");
 
@@ -317,12 +317,19 @@ export async function createSoloFactoryServer(options = {}) {
         await run.factory.cancel(id);
         return json(response, 202, { ok: true });
       }
+      const pauseMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/pause$/);
+      if (request.method === "POST" && pauseMatch) {
+        const run = [...runs.values()].find((item) => item.jobId === pauseMatch[1]);
+        if (!run) return json(response, 409, { error: "That run is not active." });
+        await run.factory.pause(pauseMatch[1]);
+        return json(response, 202, { ok: true, pausing: true });
+      }
       const dismissMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/dismiss$/);
       if (request.method === "POST" && dismissMatch) {
         // Owner accepts a parked run as-is, which releases its project's queue.
         const jobStore = storeOfJob(dismissMatch[1]);
         const job = await jobStore.read(dismissMatch[1]);
-        if (!PARKED.has(job.state)) return json(response, 409, { error: "Only a failed, interrupted, or cancelled run can be dismissed." });
+        if (!PARKED.has(job.state)) return json(response, 409, { error: "Only a parked run can be dismissed." });
         job.dismissed = true;
         await jobStore.writeState(job);
         await jobStore.appendEvent(job.id, { type: "job.dismissed", state: job.state, message: "Dismissed by owner; queued runs may proceed" });
@@ -334,7 +341,7 @@ export async function createSoloFactoryServer(options = {}) {
         const projectId = jobProject.get(resumeMatch[1]) ?? active.id;
         const jobStore = storeFor(projectId);
         const job = await ensureRecovery(await jobStore.read(resumeMatch[1]), jobStore);
-        if (!job.recovery?.canResume || !["failed", "interrupted"].includes(job.state) || queue.some((entry) => entry.jobId === job.id)) {
+        if (!job.recovery?.canResume || !["failed", "interrupted", "paused"].includes(job.state) || queue.some((entry) => entry.jobId === job.id)) {
           return json(response, 409, { error: "That run cannot be resumed from its current state." });
         }
         // Front of the queue: resolving a parked run is what unblocks everything behind it.

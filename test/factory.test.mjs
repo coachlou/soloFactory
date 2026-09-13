@@ -455,3 +455,31 @@ test("a project's next release replaces its previous live deployment", async (t)
   const live = factories.flatMap((factory) => [...factory.deployments.values()]);
   assert.equal(live.length, 1, "exactly one live child per project");
 });
+
+test("pause during slice 1 parks before slice 2 on a committed tree; resume replays nothing", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-pause-"));
+  const store = new JobStore(root);
+  await store.init();
+  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  const fixture = createFixtureProvider();
+  const options = { commandRunner: async () => ({ code: 0, output: "passed" }), deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9975" }) };
+  const factory = new SoloFactory({ ...options, store, provider: { id: "fixture", run: async (args) => {
+    if (args.context.stage === "build-slice-SLICE-SKELETON") await factory.pause(job.id);
+    return fixture.run(args);
+  } } });
+  await assert.rejects(factory.pause(job.id), /not active/);
+  const paused = await factory.start(job.id);
+  assert.equal(paused.state, "paused");
+  assert.equal(paused.failedState, "building");
+  assert.deepEqual(paused.sliceDone, ["SLICE-SKELETON"]);
+  assert.equal(paused.error, null);
+  assert.equal(paused.recovery.canResume, true);
+  assert.equal(await store.git("status", "--porcelain"), "", "the tree is committed at the pause point");
+
+  const resumed = await new SoloFactory({ ...options, store, provider: fixture }).resume(job.id);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+  assert.deepEqual(resumed.sliceDone, ["SLICE-SKELETON", "SLICE-UI"]);
+  const events = await store.events(job.id, 500);
+  assert.equal(events.filter((event) => event.type === "job.paused").length, 1);
+  assert.equal(events.filter((event) => event.type === "agent.started" && event.message.includes("SLICE-SKELETON")).length, 1, "slice 1 ran exactly once");
+});
