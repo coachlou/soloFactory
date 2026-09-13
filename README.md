@@ -27,7 +27,8 @@ queue and you land back in a fresh interview, so the next release can be shaped 
 one builds. Runs in one project go one after another, each building on the last; runs in
 different projects can overlap when `SOLOFACTORY_MAX_ACTIVE_RUNS` is above 1 (default 1).
 A brief for a project that already shipped is specified as a follow-on release, and deploying
-it stops the previous release's app.
+it stops the previous release's app. **Factory** in the top bar opens the board: every run
+of every project by column, with slice progress; click a card to open that run.
 
 A **project** is the workspace the factory builds into. Projects are discovered under
 `SOLOFACTORY_ROOT` (default: the home, `.solofactory/`): any directory in `<root>/projects/`,
@@ -101,9 +102,13 @@ title. The report body always travels through your clipboard.
 - **Resume current run** continues the existing run ID and files from the failed stage.
   **Start over** remains an explicit secondary action that creates a new run. Both go to the
   front of the queue.
-- A failed, interrupted, or cancelled run holds its project's queue so nothing builds on a
-  half-repaired tree. Resume it, start it over, or **Dismiss** it to let queued briefs run.
-  **Remove from queue** drops a brief that has not started.
+- **Pause** lets the run finish the stage it is in, commit the green tree, and park before
+  the next one; **Resume** picks up there with nothing replayed. **Cancel run** stops now.
+- A parked slice run offers **Restart from slice** for every completed slice after the
+  first: the tree is rewound to the commit before that slice and it is rebuilt from there.
+- A failed, interrupted, cancelled, or paused run holds its project's queue so nothing
+  builds on a half-repaired tree. Resume it, start it over, or **Dismiss** it to let queued
+  briefs run. **Remove from queue** drops a brief that has not started.
 - A restart changes ambiguous in-flight runs to `interrupted`; they can be resumed from the
   preserved workspace.
 - App telemetry is local aggregate data only: uptime, request/error counts, latency, and

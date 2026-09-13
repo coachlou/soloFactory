@@ -119,7 +119,21 @@ previous one left, and parallel across projects up to `SOLOFACTORY_MAX_ACTIVE_RU
 (default 1). The FIFO skips busy projects rather than waiting on them. A project's most
 recent failed, interrupted, or cancelled run holds its queue (`blockedBy`) until it is
 resumed, started over, or dismissed. Resume and start-over go to the front. Queued runs
-survive a restart. When a project already has `factory.json`, the run is a follow-on
+survive a restart.
+
+### Owner controls
+
+The owner can pause, resume, cancel, and restart a run from a slice; the controller never
+does any of these on its own. Pause is a request, not an interrupt: the run finishes the
+stage it is in, commits the green tree, and parks as `paused` before the next stage
+(specifying, building, reviewing, or deploying). A paused run holds its queue like any
+parked run and resumes from that stage with nothing replayed. Cancel stops work
+immediately and leaves the tree as it was. Restart from slice N is legal only on a parked
+slice run in which N completed: the controller hard-resets the tree to the commit recorded
+after slice N-1 and replays N onward exactly once; slices before N keep their commits and
+stats. Restarting from the first slice is a fresh run and is refused in favour of start-over.
+The Factory board (`GET /api/board`) shows every run of every project by column, collapsing
+`repairing` into building and every parked state into one column. When a project already has `factory.json`, the run is a follow-on
 release: the PRD is updated cumulatively, the plan and acceptance contract cover only the
 increment, no walking-skeleton slice is required, and deploying it stops the previous
 release's app (`deployment.status: "replaced"`). Switching projects never cancels a run.
@@ -211,7 +225,9 @@ history; `.aai/*.md` and the anchors are committed with it.
 ```
 
 Canonical states are `queued`, `specifying`, `building`, `verifying`, `repairing`,
-`reviewing`, `deploying`, `completed`, `failed`, `cancelled`, and `interrupted`. On startup,
+`reviewing`, `deploying`, `completed`, `failed`, `cancelled`, `interrupted`, and `paused`.
+Slice runs record the commit each slice left behind in `sliceStats[<id>].commit`; that is
+what restart-from-slice resets to. On startup,
 any persisted nonterminal job is changed to `interrupted`; it may be resumed explicitly.
 Only one job may be active because the target user does not benefit from resource races.
 
@@ -249,6 +265,9 @@ Only one job may be active because the target user does not benefit from resourc
 ## 9. HTTP surface
 
 - `GET /api/health` — factory health, active project, busy run, `activeRuns`, `maxActiveRuns`.
+- `GET /api/board` — every run of every project grouped by column (queued, specifying,
+  building, reviewing, deploying, parked, completed; completed capped at five per project)
+  with slice progress and `blockedBy`, plus `active`/`maxActiveRuns`.
 - `GET /api/projects` — discovered projects with run count, last run, `activeJobId`, and
   `queued` count; the active one.
 - `POST /api/projects` — create `projects/<slug>` (`git init`) and select it.
@@ -262,8 +281,13 @@ Only one job may be active because the target user does not benefit from resourc
   event history.
 - `POST /api/jobs/:id/cancel` — cancel active work, or remove a queued run (`dequeued: true`).
 - `POST /api/jobs/:id/dismiss` — mark a parked run dismissed so its project's queue proceeds.
-- `POST /api/jobs/:id/resume` — queue a failed/interrupted run, at the front, to continue in
-  its existing workspace.
+- `POST /api/jobs/:id/pause` — ask the active run to park at its next stage boundary;
+  `202 { pausing: true }`, `409` if the run is not active.
+- `POST /api/jobs/:id/resume` — queue a failed/interrupted/paused run, at the front, to
+  continue in its existing workspace.
+- `POST /api/jobs/:id/restart` — `{ fromSlice }`: rewind a parked slice run to the commit
+  before that slice and queue it, at the front, to replay from there; `409` unless parked,
+  `400` unless that slice completed and is not the first.
 - `GET /api/jobs/:id/recovery-packet` — return the HITL recovery handoff as plain text.
 - `POST /api/jobs/:id/retry` — explicitly start over as a new run, queued at the front.
 - `GET /api/jobs/:id/artifacts/:name` — fetch an allowlisted factory artifact.

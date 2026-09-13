@@ -1,5 +1,7 @@
 # Run board and run controls — spec
 
+**Status: implemented in 0.7.0.** Kept as design record; SPEC.md §4 (Owner controls), §6 and §9 are the source of truth.
+
 Companion to `run-queue-spec.md`. Part A (the board) depends on nothing and can ship
 first. Part B (controls) depends on the scheduler from the queue spec.
 
