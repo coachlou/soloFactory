@@ -127,6 +127,44 @@ export async function createSoloFactoryServer(options = {}) {
     }));
   }
 
+  // Board (docs/run-board-and-controls-spec.md): every project's jobs bucketed by state.
+  // ponytail: re-lists each project's jobs per poll on top of discoverProjects; cache if it shows.
+  const BOARD_COLUMN = { repairing: "building", failed: "parked", interrupted: "parked", cancelled: "parked", paused: "parked" };
+  async function board() {
+    const columns = { queued: [], specifying: [], building: [], reviewing: [], deploying: [], parked: [], completed: [] };
+    for (const project of await discoverProjects(root)) {
+      const jobs = await annotateJobs(project.id, await storeFor(project.id).list());
+      let completed = 0;
+      for (const job of jobs) {
+        const column = BOARD_COLUMN[job.state] ?? job.state;
+        if (!columns[column] || (column === "completed" && completed++ >= 5)) continue;
+        const card = {
+          jobId: job.id,
+          project: project.name,
+          projectId: project.id,
+          promise: job.brief?.promise ?? null,
+          state: job.state,
+          stage: job.stage ?? null,
+          startedAt: job.startedAt ?? null,
+          elapsedMs: job.startedAt ? new Date(job.stageHistory?.at(-1)?.endedAt ?? Date.now()) - new Date(job.startedAt) : null,
+        };
+        if (job.sdlc === "slices") {
+          const total = (job.slicePlanIds ?? []).length;
+          const done = (job.sliceDone ?? []).length;
+          card.slices = {
+            done,
+            total,
+            current: job.slicePlanIds?.[job.sliceIndex] ?? null,
+            repairs: Object.values(job.sliceStats ?? {}).reduce((sum, s) => sum + (s.repairs ?? 0), 0),
+          };
+        }
+        if (job.blockedBy) card.blockedBy = job.blockedBy;
+        columns[column].push(card);
+      }
+    }
+    return { columns, maxActiveRuns, active: runs.size };
+  }
+
   // Switching only changes what the owner is viewing; runs in other projects keep going.
   async function selectProject(response, id) {
     if (!(await discoverProjects(root)).some((p) => p.id === id)) return json(response, 404, { error: `Unknown project: ${id}.` });
@@ -143,6 +181,9 @@ export async function createSoloFactoryServer(options = {}) {
       const url = new URL(request.url, "http://127.0.0.1");
       if (request.method === "GET" && url.pathname === "/api/health") {
         return json(response, 200, { ok: true, project: active.id, ...schedulerStatus() });
+      }
+      if (request.method === "GET" && url.pathname === "/api/board") {
+        return json(response, 200, await board());
       }
       if (request.method === "GET" && url.pathname === "/api/projects") {
         return json(response, 200, { projects: await listProjects(), active: active.id, ...schedulerStatus() });

@@ -160,6 +160,8 @@ test("HTTP journey with the vertical-slice strategy completes and serves the fin
   }
   assert.equal(job.state, "completed", job.error?.message);
   assert.deepEqual(job.sliceDone, ["SLICE-SKELETON", "SLICE-UI"]);
+  const card = (await getJson(`${base}/api/board`)).columns.completed.find((c) => c.jobId === job.id);
+  assert.deepEqual(card.slices, { done: 2, total: 2, current: null, repairs: 0 });
 
   const telemetry = await getJson(`${base}/api/jobs/${job.id}/telemetry`);
   assert.equal(telemetry.summary.strategy, "slices");
@@ -323,6 +325,13 @@ test("briefs queue per project, overlap across projects, and wait behind a parke
   assert.equal(projects.find((p) => p.id === "projects/default").queued, 1);
   assert.equal(projects.find((p) => p.id === "projects/default").activeJobId, a1.id);
 
+  const board = await getJson(`${base}/api/board`);
+  assert.equal(board.active, 2);
+  assert.deepEqual(board.columns.specifying.map((c) => c.jobId).sort(), [a1.id, b1.id].sort());
+  const queuedCard = board.columns.queued.find((c) => c.jobId === a2.id);
+  assert.equal(queuedCard.project, "default", "a queued card names its project");
+  assert.equal(queuedCard.startedAt, null);
+
   release(dirA);
   assert.equal((await waitForJob(base, a1.id, ["completed"])).state, "completed");
   assert.equal((await waitForJob(base, a2.id, ["completed"])).state, "completed", "the queued brief starts when its project frees up");
@@ -339,6 +348,9 @@ test("briefs queue per project, overlap across projects, and wait behind a parke
   const waiting = (await getJson(`${base}/api/jobs/${a4.id}`)).job;
   assert.equal(waiting.state, "queued");
   assert.equal(waiting.blockedBy, a3.id);
+  const parkedBoard = await getJson(`${base}/api/board`);
+  assert.ok(parkedBoard.columns.parked.some((c) => c.jobId === a3.id), "a failed run sits in parked");
+  assert.equal(parkedBoard.columns.queued.find((c) => c.jobId === a4.id).blockedBy, a3.id);
 
   const dequeued = await postJson(`${base}/api/jobs/${a4.id}/cancel`, {});
   assert.equal(dequeued.dequeued, true);
