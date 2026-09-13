@@ -47,6 +47,33 @@ export class SoloFactory {
     return this.activate(jobId, (signal) => this.runResume(jobId, signal));
   }
 
+  // Rewinds a parked slice run to the commit before `sliceId` and rebuilds from there.
+  async restartFromSlice(jobId, sliceId) {
+    return this.activate(jobId, async (signal) => {
+      let job = await this.store.read(jobId);
+      if (!TERMINAL.has(job.state) || job.state === "completed") throw new FactoryError("not_parked", "Only a parked run can be restarted from a slice.");
+      const index = (job.sliceDone ?? []).indexOf(sliceId);
+      if (index < 1) throw new FactoryError("bad_slice", index === 0 ? "Restarting from the first slice is a fresh run; use start over." : `Slice ${sliceId} has not completed in this run.`);
+      const base = job.sliceStats?.[job.sliceDone[index - 1]]?.commit;
+      if (!base) throw new FactoryError("no_commit", `No commit is recorded before slice ${sliceId}; this run predates restart support.`);
+      try {
+        await this.store.reset(base);
+        job.sliceDone = job.sliceDone.slice(0, index);
+        job.sliceStats = Object.fromEntries(Object.entries(job.sliceStats).filter(([id]) => job.sliceDone.includes(id)));
+        job.sliceIndex = index;
+        job.attempt = 0;
+        job.error = null;
+        job.failedState = null;
+        job.recovery = null;
+        await this.store.writeState(job);
+        await this.emit(job.id, { type: "job.restarted", state: job.state, message: `Restarting from slice ${sliceId} at ${base.slice(0, 7)}` });
+        return await this.buildSlices(job, signal, { resumeFrom: index, fresh: true });
+      } catch (error) {
+        return this.fail(jobId, signal, error);
+      }
+    });
+  }
+
   async activate(jobId, runner) {
     if (this.active) throw new FactoryError("factory_busy", `Run ${this.active.jobId} is already active.`);
     const controller = new AbortController();
@@ -213,7 +240,7 @@ export class SoloFactory {
   // each slice (install once on the walking skeleton, test+build per slice),
   // bounded repairs scoped to the failing slice, then the whole-project gate
   // via finishFromBuild with install disabled.
-  async buildSlices(job, signal, { resumeFrom = null } = {}) {
+  async buildSlices(job, signal, { resumeFrom = null, fresh = false } = {}) {
     const appDir = this.store.appDir(job.id);
     const scenarioCount = Array.isArray(job.brief?.acceptanceScenarios) ? job.brief.acceptanceScenarios.length : 0;
     const plan = await this.loadSlicePlan(appDir, scenarioCount);
@@ -229,7 +256,7 @@ export class SoloFactory {
       await this.emit(job.id, { type: "slice.started", state: job.state, slice: slice.id, message: `Slice ${i + 1}/${ordered.length}: ${slice.title}` });
       const attemptBefore = job.attempt;
       const startedAtMs = Date.now();
-      const resumed = resumeFrom != null && i === from;
+      const resumed = !fresh && resumeFrom != null && i === from;
       const label = resumed ? `slice-resume-${slice.id}` : `build-slice-${slice.id}`;
       const prompt = resumed ? sliceContinuationPrompt(slice, ordered) : sliceBuildPrompt(slice, ordered, { followOn: job.followOn });
       await this.invoke(job, label, prompt, signal, { resumeSessionId: this.resumeSessionFor(job, label) });
@@ -241,6 +268,7 @@ export class SoloFactory {
         durationMs: Date.now() - startedAtMs,
         repairs,
         verifyRuns: repairs + 1,
+        commit: await this.store.git("rev-parse", "HEAD"),
       };
       job.sliceDone = [...(job.sliceDone ?? []), slice.id];
       job.sliceIndex = i + 1;

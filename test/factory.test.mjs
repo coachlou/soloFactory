@@ -483,3 +483,36 @@ test("pause during slice 1 parks before slice 2 on a committed tree; resume repl
   assert.equal(events.filter((event) => event.type === "job.paused").length, 1);
   assert.equal(events.filter((event) => event.type === "agent.started" && event.message.includes("SLICE-SKELETON")).length, 1, "slice 1 ran exactly once");
 });
+
+test("restart from slice 2 rewinds the tree to slice 1's commit and replays only slice 2", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-restart-"));
+  const store = new JobStore(root);
+  await store.init();
+  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  const fixture = createFixtureProvider();
+  const options = { commandRunner: async () => ({ code: 0, output: "passed" }), deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9976" }) };
+  const failAtReview = { id: "fixture", run: async (args) => {
+    if (args.context.stage === "review") throw Object.assign(new Error("reviewer crashed"), { code: "unexpected_error" });
+    return fixture.run(args);
+  } };
+  const parked = await new SoloFactory({ ...options, store, provider: failAtReview }).start(job.id);
+  assert.equal(parked.state, "failed");
+  assert.deepEqual(parked.sliceDone, ["SLICE-SKELETON", "SLICE-UI"]);
+  const firstCommit = parked.sliceStats["SLICE-SKELETON"].commit;
+  assert.match(firstCommit, /^[0-9a-f]{40}$/);
+  await writeFile(path.join(store.appDir(job.id), "stale.txt"), "left over from the parked attempt\n");
+  await store.commit("test: stale work after slice 2");
+
+  await assert.rejects(new SoloFactory({ ...options, store, provider: fixture }).restartFromSlice(job.id, "SLICE-SKELETON"), /first slice/);
+  const restarted = await new SoloFactory({ ...options, store, provider: fixture }).restartFromSlice(job.id, "SLICE-UI");
+  assert.equal(restarted.state, "completed", restarted.error?.message);
+  assert.deepEqual(restarted.sliceDone, ["SLICE-SKELETON", "SLICE-UI"]);
+  assert.equal(Object.keys(restarted.sliceStats).length, 2);
+  assert.equal(restarted.sliceStats["SLICE-SKELETON"].commit, firstCommit, "slice 1's commit survives untouched");
+  assert.ok(await store.git("merge-base", "--is-ancestor", firstCommit, "HEAD").then(() => true, () => false));
+  await assert.rejects(readFile(path.join(store.appDir(job.id), "stale.txt")), /ENOENT/, "the rewind dropped everything after slice 1");
+  const events = await store.events(job.id, 500);
+  const builds = (id) => events.filter((event) => event.type === "agent.started" && event.message.includes(`build-slice-${id}`)).length;
+  assert.equal(builds("SLICE-SKELETON"), 1);
+  assert.equal(builds("SLICE-UI"), 2);
+});

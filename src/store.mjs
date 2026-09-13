@@ -80,6 +80,12 @@ export class JobStore {
     return true;
   }
 
+  // Discards every commit and file after `hash`. Only ever pointed at a factory-made commit.
+  async reset(hash) {
+    await this.git("reset", "-q", "--hard", hash);
+    await this.git("clean", "-qfd");
+  }
+
   async create({ brief, transcript, provider, sdlc = "single" }) {
     const id = `${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
     const now = new Date().toISOString();

@@ -43,7 +43,7 @@ export async function createSoloFactoryServer(options = {}) {
   // Scheduler (docs/run-queue-spec.md): one active run per project, at most maxActiveRuns overall, FIFO otherwise.
   const maxActiveRuns = Math.max(1, Number(options.maxActiveRuns ?? process.env.SOLOFACTORY_MAX_ACTIVE_RUNS) || 1);
   const runs = new Map(); // projectId -> { jobId, factory, promise }
-  const queue = []; // { projectId, jobId, mode: "start" | "resume" }
+  const queue = []; // { projectId, jobId, mode: "start" | "resume" | "restart", fromSlice? }
   const jobProject = new Map(); // jobId -> projectId, for jobs the scheduler has touched
   const queuedJobs = [];
   {
@@ -87,7 +87,8 @@ export async function createSoloFactoryServer(options = {}) {
       factories.set(job.id, factory);
       const run = { jobId: job.id, factory };
       runs.set(entry.projectId, run);
-      run.promise = (entry.mode === "resume" ? factory.resume(job.id) : factory.start(job.id))
+      const launch = entry.mode === "resume" ? factory.resume(job.id) : entry.mode === "restart" ? factory.restartFromSlice(job.id, entry.fromSlice) : factory.start(job.id);
+      run.promise = launch
         .catch((error) => console.error(`run ${job.id}: ${error.message}`))
         .finally(() => {
           runs.delete(entry.projectId);
@@ -99,9 +100,9 @@ export async function createSoloFactoryServer(options = {}) {
   let draining = Promise.resolve();
   const drain = () => (draining = draining.then(drainOnce).catch((error) => console.error(`scheduler: ${error.message}`)));
 
-  function enqueue(projectId, jobId, mode = "start", { front = false } = {}) {
+  function enqueue(projectId, jobId, mode = "start", { front = false, ...extra } = {}) {
     jobProject.set(jobId, projectId);
-    queue[front ? "unshift" : "push"]({ projectId, jobId, mode });
+    queue[front ? "unshift" : "push"]({ projectId, jobId, mode, ...extra });
     return drain();
   }
   for (const { projectId, job } of queuedJobs.sort((a, b) => a.job.createdAt.localeCompare(b.job.createdAt))) enqueue(projectId, job.id);
@@ -347,6 +348,17 @@ export async function createSoloFactoryServer(options = {}) {
         // Front of the queue: resolving a parked run is what unblocks everything behind it.
         await enqueue(projectId, job.id, "resume", { front: true });
         return json(response, 202, { job, resumed: true, queued: queue.some((entry) => entry.jobId === job.id) });
+      }
+      const restartMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/restart$/);
+      if (request.method === "POST" && restartMatch) {
+        const projectId = jobProject.get(restartMatch[1]) ?? active.id;
+        const job = await storeFor(projectId).read(restartMatch[1]);
+        const { fromSlice } = await readJson(request);
+        if (!PARKED.has(job.state) || queue.some((entry) => entry.jobId === job.id)) return json(response, 409, { error: "Only a parked run can be restarted from a slice." });
+        const index = (job.sliceDone ?? []).indexOf(fromSlice);
+        if (index < 1) return json(response, 400, { error: index === 0 ? "Restarting from the first slice is a fresh run; use start over." : `Slice ${fromSlice} has not completed in this run.` });
+        await enqueue(projectId, job.id, "restart", { front: true, fromSlice });
+        return json(response, 202, { job, restartedFrom: fromSlice });
       }
       const recoveryMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/recovery-packet$/);
       if (request.method === "GET" && recoveryMatch) {
