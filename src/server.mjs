@@ -64,7 +64,12 @@ export async function createSoloFactoryServer(options = {}) {
   }
   const skill = await readFile(path.join(projectRoot, "skills", "factory-guide.md"), "utf8");
   const fixtureMode = options.fixtureMode ?? process.env.SOLOFACTORY_DEMO === "1";
-  const providerFactory = options.providerFactory ?? ((id) => (id === "fixture" && fixtureMode ? createFixtureProvider() : createProvider(id)));
+  const providerFactory = options.providerFactory ?? ((id) => {
+    if (id === "fixture" && fixtureMode) return createFixtureProvider();
+    // Runs made with SOLOFACTORY_DEMO=1 persist in the project; outside demo mode they can't run.
+    if (id === "fixture") throw new Error("This run was made in demo mode. Start SoloFactory with SOLOFACTORY_DEMO=1 to resume it, or Dismiss it.");
+    return createProvider(id);
+  });
   const factories = new Map();
   let closing = false;
 
