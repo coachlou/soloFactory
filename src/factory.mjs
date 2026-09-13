@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
@@ -63,6 +64,9 @@ export class SoloFactory {
       await this.store.writeState(job);
       const appDir = this.store.appDir(jobId);
       const factoryDir = path.join(appDir, ".factory");
+      // A manifest already in the project means an earlier release shipped: spec and slice
+      // this brief as an increment on top of it. Stamped once so resumes stay consistent.
+      job.followOn ??= existsSync(path.join(appDir, "factory.json"));
       await mkdir(path.join(factoryDir, "logs"), { recursive: true });
       await writeFile(
         path.join(factoryDir, "requirements.json"),
@@ -71,7 +75,7 @@ export class SoloFactory {
 
       job = await this.stage(job, "specifying", "Writing PRD, plan, and acceptance contract");
       const before = await readdir(appDir);
-      await this.invoke(job, "specification", specificationPrompt(job.sdlc === "slices"), signal);
+      await this.invoke(job, "specification", specificationPrompt(job.sdlc === "slices", { followOn: job.followOn }), signal);
       await this.validateSpecification(appDir, before);
       await this.commit(job, "factory: specification");
 
@@ -119,7 +123,7 @@ export class SoloFactory {
       if (failedState === "specifying") {
         job = await this.stage(job, "specifying", "Finishing the interrupted specification");
         const before = await readdir(appDir);
-        await this.invoke(job, "specification-resume", continuationPrompt("specification", job.sdlc === "slices"), signal, { resumeSessionId });
+        await this.invoke(job, "specification-resume", continuationPrompt("specification", job.sdlc === "slices", { followOn: job.followOn }), signal, { resumeSessionId });
         await this.validateSpecification(appDir, before);
         await this.commit(job, "factory: specification");
         if (job.sdlc === "slices") {
@@ -185,7 +189,7 @@ export class SoloFactory {
     const scenarioCount = this.sliceScenarioCount(job);
     await this.loadSlicePlan(appDir, scenarioCount); // pre-check: don't spend a turn on garbage
     job = await this.stage(job, "specifying", "Auditing the slice plan (second opinion)");
-    await this.invoke(job, "plan-review", planReviewPrompt(), signal);
+    await this.invoke(job, "plan-review", planReviewPrompt({ followOn: job.followOn }), signal);
     await this.loadSlicePlan(appDir, scenarioCount); // revalidate after the reviewer's rewrite
     job.planReviewed = true;
     await this.store.writeState(job);
@@ -215,7 +219,7 @@ export class SoloFactory {
       const startedAtMs = Date.now();
       const resumed = resumeFrom != null && i === from;
       const label = resumed ? `slice-resume-${slice.id}` : `build-slice-${slice.id}`;
-      const prompt = resumed ? sliceContinuationPrompt(slice, ordered) : sliceBuildPrompt(slice, ordered);
+      const prompt = resumed ? sliceContinuationPrompt(slice, ordered) : sliceBuildPrompt(slice, ordered, { followOn: job.followOn });
       await this.invoke(job, label, prompt, signal, { resumeSessionId: this.resumeSessionFor(job, label) });
       job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: i === 0, slice });
       const repairs = job.attempt - attemptBefore;
