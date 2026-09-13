@@ -108,10 +108,12 @@ test("startup recovery makes in-flight state explicitly interrupted", async () =
   const job = await store.create({ brief, transcript, provider: "fixture" });
   job.state = "building";
   await store.writeState(job);
+  const waiting = await store.create({ brief, transcript, provider: "fixture" });
   await store.recoverInterrupted();
   const recovered = await store.read(job.id);
   assert.equal(recovered.state, "interrupted");
   assert.equal(recovered.error.code, "process_restarted");
+  assert.equal((await store.read(waiting.id)).state, "queued", "a queued job never started, so a restart leaves it queued");
 });
 
 test("artifact access is an explicit allowlist", async () => {

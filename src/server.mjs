@@ -16,6 +16,7 @@ import { createFixtureProvider } from "./fixture-provider.mjs";
 import { REPORTABLE_STATES, buildDiagnostics, issuesConfig, renderReport, validateFeedback } from "./feedback.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const PARKED = new Set(["failed", "interrupted", "cancelled"]);
 const projectRoot = path.dirname(here);
 const publicRoot = path.join(projectRoot, "public");
 
@@ -25,20 +26,33 @@ export async function createSoloFactoryServer(options = {}) {
   // .solofactory/; the distro points SOLOFACTORY_ROOT at the ambient folder.
   const root = path.resolve(options.root ?? process.env.SOLOFACTORY_ROOT ?? home);
   const activeFile = path.join(home, "active-project");
-  let active; // { id, dir, store } — every job endpoint works on this project's store
+  let active; // { id, dir } — the project the owner is viewing; job endpoints default to its store
   let store;
+  const stores = new Map();
+  const storeFor = (id) => stores.get(id) ?? stores.set(id, new JobStore(path.join(root, id))).get(id);
   async function openProject(id) {
-    const next = new JobStore(path.join(root, id));
+    const next = storeFor(id);
     await next.init();
-    await next.recoverInterrupted();
+    // No recoverInterrupted here: another project's run may be live. Restart recovery runs once, at startup.
     for (const job of await next.list()) await ensureRecovery(job, next);
     active = { id, dir: next.project };
     store = next;
     await mkdir(home, { recursive: true });
     await writeFile(activeFile, `${id}\n`);
   }
+  // Scheduler (docs/run-queue-spec.md): one active run per project, at most maxActiveRuns overall, FIFO otherwise.
+  const maxActiveRuns = Math.max(1, Number(options.maxActiveRuns ?? process.env.SOLOFACTORY_MAX_ACTIVE_RUNS) || 1);
+  const runs = new Map(); // projectId -> { jobId, factory, promise }
+  const queue = []; // { projectId, jobId, mode: "start" | "resume" }
+  const jobProject = new Map(); // jobId -> projectId, for jobs the scheduler has touched
+  const queuedJobs = [];
   {
     const projects = await discoverProjects(root);
+    for (const project of projects) {
+      const projectStore = storeFor(project.id);
+      await projectStore.recoverInterrupted();
+      for (const job of await projectStore.list()) if (job.state === "queued") queuedJobs.push({ projectId: project.id, job });
+    }
     const remembered = (await readFile(activeFile, "utf8").catch(() => "")).trim();
     await openProject(projects.find((p) => p.id === remembered)?.id ?? projects[0]?.id ?? "projects/default");
   }
@@ -46,26 +60,73 @@ export async function createSoloFactoryServer(options = {}) {
   const fixtureMode = options.fixtureMode ?? process.env.SOLOFACTORY_DEMO === "1";
   const providerFactory = options.providerFactory ?? ((id) => (id === "fixture" && fixtureMode ? createFixtureProvider() : createProvider(id)));
   const factories = new Map();
-  let busyJobId = null;
-  let busyRun = null; // promise of the active run, awaited when a switch cancels it
+  let closing = false;
 
-  function launch(job, run) {
-    busyJobId = job.id;
-    busyRun = run().finally(() => {
-      if (busyJobId === job.id) busyJobId = busyRun = null;
+  // A project's queue waits while its most recently started run is parked and unresolved:
+  // the tree may be mid-repair, and the next release must not build on it.
+  async function blockerFor(projectId) {
+    const started = (await storeFor(projectId).list()).filter((job) => job.startedAt);
+    const last = started.sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+    return last && PARKED.has(last.state) && !last.dismissed && !queue.some((entry) => entry.jobId === last.id) ? last.id : null;
+  }
+
+  async function drainOnce() {
+    for (let i = 0; i < queue.length && runs.size < maxActiveRuns && !closing; ) {
+      const entry = queue[i];
+      if (runs.has(entry.projectId) || (entry.mode === "start" && (await blockerFor(entry.projectId)))) { i += 1; continue; }
+      queue.splice(i, 1);
+      const projectStore = storeFor(entry.projectId);
+      await projectStore.init();
+      const job = await projectStore.read(entry.jobId);
+      const factory = new SoloFactory({ store: projectStore, provider: providerFactory(job.provider) });
+      factories.set(job.id, factory);
+      const run = { jobId: job.id, factory };
+      runs.set(entry.projectId, run);
+      run.promise = (entry.mode === "resume" ? factory.resume(job.id) : factory.start(job.id))
+        .catch((error) => console.error(`run ${job.id}: ${error.message}`))
+        .finally(() => {
+          runs.delete(entry.projectId);
+          drain();
+        });
+    }
+  }
+  // Serialised so concurrent enqueues and settlements never double-start a project.
+  let draining = Promise.resolve();
+  const drain = () => (draining = draining.then(drainOnce).catch((error) => console.error(`scheduler: ${error.message}`)));
+
+  function enqueue(projectId, jobId, mode = "start", { front = false } = {}) {
+    jobProject.set(jobId, projectId);
+    queue[front ? "unshift" : "push"]({ projectId, jobId, mode });
+    return drain();
+  }
+  for (const { projectId, job } of queuedJobs.sort((a, b) => a.job.createdAt.localeCompare(b.job.createdAt))) enqueue(projectId, job.id);
+
+  const storeOfJob = (id) => storeFor(jobProject.get(id) ?? active.id);
+  const busyJobId = () => runs.get(active.id)?.jobId ?? null;
+  const schedulerStatus = () => ({ busyJobId: busyJobId(), maxActiveRuns, activeRuns: [...runs].map(([projectId, run]) => ({ projectId, jobId: run.jobId })) });
+
+  async function annotateJobs(projectId, jobs) {
+    const blockedBy = runs.has(projectId) ? null : await blockerFor(projectId);
+    return jobs.map((job) => {
+      const position = queue.findIndex((entry) => entry.jobId === job.id);
+      if (position < 0) return job;
+      return { ...job, queuePosition: position + 1, queuedFor: queue[position].mode, blockedBy: queue[position].mode === "start" ? blockedBy : null };
     });
   }
 
-  // Selecting a project while a run is active is refused unless the caller opts into cancelling it.
-  async function selectProject(response, id, { cancel = false } = {}) {
+  async function listProjects() {
+    return (await discoverProjects(root)).map((project) => ({
+      ...project,
+      activeJobId: runs.get(project.id)?.jobId ?? null,
+      queued: queue.filter((entry) => entry.projectId === project.id).length,
+    }));
+  }
+
+  // Switching only changes what the owner is viewing; runs in other projects keep going.
+  async function selectProject(response, id) {
     if (!(await discoverProjects(root)).some((p) => p.id === id)) return json(response, 404, { error: `Unknown project: ${id}.` });
-    if (busyJobId && id !== active.id) {
-      if (!cancel) return json(response, 409, { error: `Run ${busyJobId} is still active.`, busyJobId });
-      await factories.get(busyJobId)?.cancel(busyJobId);
-      await busyRun;
-    }
     if (id !== active.id) await openProject(id);
-    return json(response, 200, { active: active.id, projects: await discoverProjects(root) });
+    return json(response, 200, { active: active.id, projects: await listProjects(), ...schedulerStatus() });
   }
   const { version } = JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8"));
   const issuesUrl = options.issuesUrl ?? process.env.SOLOFACTORY_ISSUES_URL;
@@ -76,24 +137,23 @@ export async function createSoloFactoryServer(options = {}) {
     try {
       const url = new URL(request.url, "http://127.0.0.1");
       if (request.method === "GET" && url.pathname === "/api/health") {
-        return json(response, 200, { ok: true, busyJobId, project: active.id });
+        return json(response, 200, { ok: true, project: active.id, ...schedulerStatus() });
       }
       if (request.method === "GET" && url.pathname === "/api/projects") {
-        return json(response, 200, { projects: await discoverProjects(root), active: active.id, busyJobId });
+        return json(response, 200, { projects: await listProjects(), active: active.id, ...schedulerStatus() });
       }
       if (request.method === "POST" && url.pathname === "/api/projects") {
         const body = await readJson(request);
         const slug = String(body.name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
         if (!slug) return json(response, 400, { error: "Project name must contain letters or digits." });
         const id = `projects/${slug}`;
-        if (busyJobId && body.cancel !== true) return json(response, 409, { error: `Run ${busyJobId} is still active.`, busyJobId });
         if (await stat(path.join(root, id)).catch(() => null)) return json(response, 409, { error: `Project ${slug} already exists.` });
         await new JobStore(path.join(root, id)).init();
-        return selectProject(response, id, { cancel: body.cancel === true });
+        return selectProject(response, id);
       }
       if (request.method === "POST" && url.pathname === "/api/projects/select") {
         const body = await readJson(request);
-        return selectProject(response, String(body.id ?? ""), { cancel: body.cancel === true });
+        return selectProject(response, String(body.id ?? ""));
       }
       if (request.method === "GET" && url.pathname === "/api/config") {
         const providers = fixtureMode
@@ -138,20 +198,20 @@ export async function createSoloFactoryServer(options = {}) {
         let diagnostics = null;
         if (feedback.includeDiagnostics && feedback.jobId) {
           // store.read, not ensureRecovery: previewing a report must never mutate run evidence.
-          const job = await store.read(feedback.jobId);
+          const jobStore = storeOfJob(feedback.jobId);
+          const job = await jobStore.read(feedback.jobId);
           if (!REPORTABLE_STATES.includes(job.state)) return json(response, 409, { error: "Diagnostics are only available for failed, interrupted, or cancelled runs.", code: "feedback_not_reportable" });
-          const factory = factories.get(job.id) ?? new SoloFactory({ store, provider: providerFactory(job.provider) });
+          const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider) });
           const { summary } = await factory.telemetry(job.id);
-          diagnostics = buildDiagnostics({ job, events: await store.events(job.id, 500), summary, version });
+          diagnostics = buildDiagnostics({ job, events: await jobStore.events(job.id, 500), summary, version });
         }
         return json(response, 200, renderReport(feedback.mode, feedback.fields, diagnostics));
       }
 
       if (request.method === "GET" && url.pathname === "/api/jobs") {
-        return json(response, 200, { jobs: await store.list(), busyJobId, project: active.id });
+        return json(response, 200, { jobs: await annotateJobs(active.id, await store.list()), project: active.id, ...schedulerStatus() });
       }
       if (request.method === "POST" && url.pathname === "/api/jobs") {
-        if (busyJobId) return json(response, 409, { error: `Run ${busyJobId} is already active.` });
         const body = await readJson(request);
         const provider = requireProvider(body.provider, fixtureMode);
         const sdlc = body.sdlc ?? "single";
@@ -164,51 +224,81 @@ export async function createSoloFactoryServer(options = {}) {
           brief: body.brief,
         });
         const job = await store.create({ brief: validated.brief, transcript: body.transcript, provider, sdlc });
-        const factory = new SoloFactory({ store, provider: providerFactory(provider) });
-        factories.set(job.id, factory);
-        launch(job, () => factory.start(job.id));
-        return json(response, 202, { job });
+        await enqueue(active.id, job.id);
+        const [annotated] = await annotateJobs(active.id, [await store.read(job.id)]);
+        return json(response, 202, { job: annotated });
       }
 
       const jobMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)$/);
       if (request.method === "GET" && jobMatch) {
-        const job = await ensureRecovery(await store.read(jobMatch[1]), store);
-        return json(response, 200, { job, events: await store.events(job.id) });
+        const jobStore = storeOfJob(jobMatch[1]);
+        const job = await ensureRecovery(await jobStore.read(jobMatch[1]), jobStore);
+        const [annotated] = await annotateJobs(jobProject.get(job.id) ?? active.id, [job]);
+        return json(response, 200, { job: annotated, events: await jobStore.events(job.id) });
       }
       const telemetryMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/telemetry$/);
       if (request.method === "GET" && telemetryMatch) {
-        const job = await store.read(telemetryMatch[1]);
-        const factory = factories.get(job.id) ?? new SoloFactory({ store, provider: providerFactory(job.provider) });
+        const jobStore = storeOfJob(telemetryMatch[1]);
+        const job = await jobStore.read(telemetryMatch[1]);
+        const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider) });
         return json(response, 200, await factory.telemetry(job.id));
       }
       const artifactMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/artifacts\/([a-z]+)$/);
       if (request.method === "GET" && artifactMatch) {
-        const artifact = await store.artifact(artifactMatch[1], artifactMatch[2]);
+        const artifact = await storeOfJob(artifactMatch[1]).artifact(artifactMatch[1], artifactMatch[2]);
         response.writeHead(200, { "content-type": artifact.file.endsWith(".json") ? "application/json; charset=utf-8" : "text/markdown; charset=utf-8" });
         return response.end(artifact.content);
       }
       const cancelMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/cancel$/);
       if (request.method === "POST" && cancelMatch) {
-        const factory = factories.get(cancelMatch[1]);
-        if (!factory) return json(response, 409, { error: "That run is not active." });
-        await factory.cancel(cancelMatch[1]);
+        const id = cancelMatch[1];
+        const position = queue.findIndex((entry) => entry.jobId === id);
+        if (position >= 0) {
+          // Dequeue. A queued start never ran, so it is simply cancelled; a queued resume stays parked.
+          const [entry] = queue.splice(position, 1);
+          const jobStore = storeFor(entry.projectId);
+          const job = await jobStore.read(id);
+          if (job.state === "queued") {
+            Object.assign(job, { state: "cancelled", stage: "Removed from queue", completedAt: new Date().toISOString() });
+            await jobStore.writeState(job);
+            await jobStore.appendEvent(id, { type: "job.dequeued", state: job.state, message: "Removed from queue" });
+          }
+          drain();
+          return json(response, 202, { ok: true, dequeued: true });
+        }
+        const run = [...runs.values()].find((item) => item.jobId === id);
+        if (!run) return json(response, 409, { error: "That run is not active." });
+        await run.factory.cancel(id);
         return json(response, 202, { ok: true });
+      }
+      const dismissMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/dismiss$/);
+      if (request.method === "POST" && dismissMatch) {
+        // Owner accepts a parked run as-is, which releases its project's queue.
+        const jobStore = storeOfJob(dismissMatch[1]);
+        const job = await jobStore.read(dismissMatch[1]);
+        if (!PARKED.has(job.state)) return json(response, 409, { error: "Only a failed, interrupted, or cancelled run can be dismissed." });
+        job.dismissed = true;
+        await jobStore.writeState(job);
+        await jobStore.appendEvent(job.id, { type: "job.dismissed", state: job.state, message: "Dismissed by owner; queued runs may proceed" });
+        await drain();
+        return json(response, 202, { job });
       }
       const resumeMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/resume$/);
       if (request.method === "POST" && resumeMatch) {
-        if (busyJobId) return json(response, 409, { error: `Run ${busyJobId} is already active.` });
-        const job = await ensureRecovery(await store.read(resumeMatch[1]), store);
-        if (!job.recovery?.canResume || !["failed", "interrupted"].includes(job.state)) {
+        const projectId = jobProject.get(resumeMatch[1]) ?? active.id;
+        const jobStore = storeFor(projectId);
+        const job = await ensureRecovery(await jobStore.read(resumeMatch[1]), jobStore);
+        if (!job.recovery?.canResume || !["failed", "interrupted"].includes(job.state) || queue.some((entry) => entry.jobId === job.id)) {
           return json(response, 409, { error: "That run cannot be resumed from its current state." });
         }
-        const factory = new SoloFactory({ store, provider: providerFactory(job.provider) });
-        factories.set(job.id, factory);
-        launch(job, () => factory.resume(job.id));
-        return json(response, 202, { job, resumed: true });
+        // Front of the queue: resolving a parked run is what unblocks everything behind it.
+        await enqueue(projectId, job.id, "resume", { front: true });
+        return json(response, 202, { job, resumed: true, queued: queue.some((entry) => entry.jobId === job.id) });
       }
       const recoveryMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/recovery-packet$/);
       if (request.method === "GET" && recoveryMatch) {
-        const job = await ensureRecovery(await store.read(recoveryMatch[1]), store);
+        const jobStore = storeOfJob(recoveryMatch[1]);
+        const job = await ensureRecovery(await jobStore.read(recoveryMatch[1]), jobStore);
         if (!job.recovery || !["failed", "interrupted", "cancelled"].includes(job.state)) {
           return json(response, 409, { error: "That run does not need recovery." });
         }
@@ -217,12 +307,17 @@ export async function createSoloFactoryServer(options = {}) {
       }
       const retryMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/retry$/);
       if (request.method === "POST" && retryMatch) {
-        if (busyJobId) return json(response, 409, { error: `Run ${busyJobId} is already active.` });
-        const original = await store.read(retryMatch[1]);
-        const job = await store.create({ brief: original.brief, transcript: original.transcript, provider: original.provider, sdlc: original.sdlc ?? "single" });
-        const factory = new SoloFactory({ store, provider: providerFactory(job.provider) });
-        factories.set(job.id, factory);
-        launch(job, () => factory.start(job.id));
+        const projectId = jobProject.get(retryMatch[1]) ?? active.id;
+        const jobStore = storeFor(projectId);
+        const original = await jobStore.read(retryMatch[1]);
+        if (runs.get(projectId)?.jobId === original.id) return json(response, 409, { error: "That run is still active." });
+        const job = await jobStore.create({ brief: original.brief, transcript: original.transcript, provider: original.provider, sdlc: original.sdlc ?? "single" });
+        // Starting over replaces the original, so it no longer holds the queue, and the new run goes first.
+        if (PARKED.has(original.state)) {
+          original.dismissed = true;
+          await jobStore.writeState(original);
+        }
+        await enqueue(projectId, job.id, "start", { front: true });
         return json(response, 202, { job, retriedFrom: original.id });
       }
 
@@ -240,10 +335,12 @@ export async function createSoloFactoryServer(options = {}) {
       return store;
     },
     async close() {
-      if (busyJobId) {
-        await factories.get(busyJobId)?.cancel(busyJobId);
-        await busyRun;
-      }
+      closing = true;
+      queue.length = 0;
+      const live = [...runs.values()];
+      await Promise.all(live.map((run) => run.factory.cancel(run.jobId).catch(() => {})));
+      await Promise.all(live.map((run) => run.promise));
+      await draining;
       await Promise.all([...factories.values()].map((factory) => factory.shutdown()));
       await new Promise((resolve) => server.close(resolve));
     },
