@@ -74,18 +74,53 @@ SoloFactory installer → start it.**
 
 ---
 
-## Step 0 — Ask which computer
+## Step 0 — New install, or an update?
 
-This is your first question. Ask exactly this, and nothing else:
+Two different jobs share this runbook. A **new install** walks Track A or B, then Part C.
+An **update** skips all of that: the machinery is already there and the only work is one
+command, a restart, and a check. Sending an existing owner through the full track is the
+most common way to waste twenty minutes and rattle them, so settle this first.
 
-> Quick first question: are you on a Mac, or on Windows?
+Ask exactly this:
 
-- **Mac** → go to **Track A**.
-- **Windows** → go to **Track B**.
-- If they don't know: ask if the machine has an Apple logo on it. Apple logo → Mac.
+> Two quick questions before we start. Have you set up SoloFactory on this computer
+> before? And are you on a Mac, or on Windows?
 
-Do not ask about versions, chips, terminals, or anything else yet. You will detect all of
-that yourself.
+Then route:
+
+| They say | Go to |
+|---|---|
+| Never installed, Mac | **Track A** |
+| Never installed, Windows | **Track B** |
+| Already installed, or "I think so", or "not sure" | **Detect it** — below |
+
+- If they don't know Mac vs Windows: ask if the machine has an Apple logo on it. Apple
+  logo → Mac.
+- Do not ask about versions, chips, terminals, or anything else. You will detect all of that.
+
+### Detect an existing install
+
+Have them open the text window (Terminal on a Mac — see A1; the Ubuntu window on Windows —
+see B1e; if there is no Ubuntu window at all, it is a new install: go to **Track B**) and
+paste:
+
+```sh
+[ -f ~/solofactory/start.sh ] && { echo "INSTALLED at ~/solofactory"; grep -m1 'app:' ~/solofactory/.ailib/manifest.yaml; } || echo "NOT INSTALLED"
+```
+
+> This just checks whether SoloFactory is already on this computer. It changes nothing.
+> Copy back what it prints.
+
+| It prints | Meaning | Go to |
+|---|---|---|
+| `NOT INSTALLED` | Nothing at the default place | **Track A** or **Track B**. If they insist they installed it somewhere else, ask them for the folder name and re-run the check with that path; do not go hunting. |
+| `INSTALLED ...` and an `app:` line | A real install; the `app:` line is the version they have | **Updating an existing install** |
+| `INSTALLED ...` and **no** `app:` line | A folder exists but the install is incomplete | **Updating an existing install** — the update command repairs it |
+
+Read the `app:` line yourself. It looks like `app: "solofactory 0.1.0 (a19fda4) synced
+2026-09-07"`. Anything below **0.3.0** predates the project selector in the header; after
+the update, point that out to the owner (see the update section) because the page will
+look different.
 
 ---
 
@@ -602,32 +637,85 @@ If they say yes to building something, that is a separate conversation — the f
 
 # Updating an existing install
 
-Updating is the same command as installing. It refreshes the machinery and leaves all their
-work and settings untouched.
+You arrive here from **Step 0** with a confirmed install at `~/solofactory` (or the folder
+the owner named — substitute it throughout). Nothing from Tracks A/B or Part C is needed;
+git, Node, and the coding agent are already in place. Updating is the same command as
+installing: it refreshes the machinery and leaves all their work untouched.
 
-Make sure the server is **stopped** first (`Control` + `C` in the window running it) —
-updating underneath a running server leaves it serving stale code until restarted.
+## U1. Stop the server
+
+Updating underneath a running server leaves it serving stale code until restarted.
+
+> If SoloFactory is running right now, go to the text window it's running in and press
+> `Control` and `C` together once. If it isn't running, nothing to do. Tell me either way.
+
+## U2. Run the update
 
 ```sh
 cd ~ && curl -fsSL https://raw.githubusercontent.com/coachlou/ambient-library/main/library/ambient-folder/bootstrap.sh | bash -s -- solofactory solofactory
 ```
 
 > This updates SoloFactory to the latest version. Your projects and settings are left exactly
-> as they are.
+> as they are. It prints a short list of what it did — send me all of it.
 
-What updates and what does not:
+Read the output yourself. Every line is `keep`, `sync`, `write`, `run`, or `start:`. What
+each means, so you can tell the owner in plain words if they ask:
 
-- **Refreshed:** `.ailib/` — the vendored app and machinery. `start.sh` is rewritten too.
-- **Never touched:** `.aai/` (their settings and interview history) and `projects/` (all
-  their work).
+- **`sync .ailib/...`** — the vendored app and machinery were refreshed. `start.sh` is
+  rewritten too. This is the update.
+- **`keep .aai/`** — their folder-level settings were left alone, by design.
+- **`keep CLAUDE.md` / `keep AGENTS.md`** — the discovery notes were already in place.
+- **`projects/`** never appears, because the installer never touches it: every project's
+  code, contract, own context, and interview history live inside `projects/<name>/` and
+  survive every update.
 
-Re-check Node after any update, since a stale Node is the most common post-update failure:
+Treat any line beginning with `warn` as a failure to fix, not a note to pass along — see
+**Fixing a bad install**. `warn node 22+ not found` after an update almost always means a
+stale window: fresh window, then A4 / B3 only if it persists.
+
+Confirm the version actually moved:
 
 ```sh
-node --version
+grep -m1 'app:' ~/solofactory/.ailib/manifest.yaml
 ```
 
-Then start it and confirm the page loads before telling them the update is done.
+It must now print a newer version than the one you read in Step 0. If it prints the same
+line, the update did not happen — the usual cause is that the command was pasted into a
+different folder or the wrong window; re-run U2 exactly.
+
+## U3. Start it and prove it
+
+```sh
+cd ~/solofactory && bash start.sh
+```
+
+> Same as always: it prints a web address and then looks frozen — that's it running. Leave
+> that window alone, open **http://127.0.0.1:4173** in your browser, and tell me what you see.
+
+Check two things on the page yourself, through what they report:
+
+1. The page loads and shows a provider as signed in (if not, **C2**).
+2. The header shows a **project selector** with their existing projects in it. Every
+   project they built before is still there — the update changes nothing inside
+   `projects/`.
+
+**If they were below 0.3.0 before the update**, the header is new to them. Say so, in one
+breath:
+
+> One thing looks different: there's now a project menu at the top of the page. Everything
+> you built before is in it, and you can add a new project from that menu instead of
+> restarting anything. A folder you drop into the `projects` folder yourself shows up there
+> too.
+
+## U4. Update done means all of this
+
+1. The server was stopped before the update, and started again after it.
+2. The `app:` line in `.ailib/manifest.yaml` shows a newer version than before.
+3. `node --version` still prints v22 or higher.
+4. The page loads at `http://127.0.0.1:4173` with a provider signed in.
+5. The project selector lists the projects they had before.
+
+If any one of these fails, you are not done. Fix it.
 
 ---
 
@@ -672,7 +760,8 @@ yourself; do not ask the owner to confirm them.
 3. `command -v claude` (or `codex`) prints a path, in the same window the server starts from.
 4. `~/solofactory/start.sh` exists.
 5. `bash start.sh` prints the `SoloFactory → http://127.0.0.1:4173` line and keeps running.
-6. The owner has loaded that address in their browser and seen the page.
+6. The owner has loaded that address in their browser and seen the page, with the project
+   selector in the header.
 7. The page shows a provider as signed in — not "Select an authenticated subscription
    provider."
 8. The owner has been given the restart command, in a copy/paste box.

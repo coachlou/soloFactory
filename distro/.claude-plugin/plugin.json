@@ -1,7 +1,7 @@
 {
   "name": "solofactory",
-  "description": "Installs and operates SoloFactory, a local-first software factory (interview → PRD → subscription-backed build → gates → local deploy) as a folder's agentic function with each project a git repo under projects/ or the root; use for \"set up solofactory here\", \"make this folder a software factory\", \"start the factory\", \"update my solofactory\".",
-  "version": "1.2.0",
+  "description": "Installs and operates SoloFactory, a local-first software factory (interview \u2192 PRD \u2192 subscription-backed build \u2192 gates \u2192 local deploy) as a folder's agentic function with each project a git repo under projects/ or the root; use for \"set up solofactory here\", \"make this folder a software factory\", \"start the factory\", \"update my solofactory\".",
+  "version": "1.3.0",
   "author": {
     "name": "Coach Lou"
   },

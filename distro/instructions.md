@@ -64,7 +64,8 @@ bash "${CLAUDE_PLUGIN_ROOT}/library/ambient-folder/install.sh" solofactory <targ
 3. Verify: `ls <target>/.aai <target>/.ailib/solofactory <target>/projects`.
 4. Tell the user: start with `bash <target>/start.sh`, open
    <http://127.0.0.1:4173>, answer the guide, review the brief, start the
-   factory. Each project is a git repo in `projects/<name>/`; the app is at its root.
+   factory. Each project is a workspace in `projects/<name>/` — selected in the header, with
+   its own `.aai/` and the generated app at its root.
 
 Re-running the installer (or `bash <target>/.ailib/ambient-folder/install.sh solofactory <target>`) is the **update** path: `.ailib/` is refreshed,
 `.aai/` and `projects/` are untouched.
@@ -84,8 +85,11 @@ Inspect a project by reading its `.aai/*.md`, `.factory/*.md`, `git log`, and
 ## Maintain — refresh the library copy (library maintainers)
 
 This capability is owned by the soloFactory repo (`distro/` + `APP_FILES`).
-`library/solofactory/` is a build output — never hand-edit it. After an app
-change is committed there:
+`library/solofactory/` is a build output — never hand-edit it. In soloFactory,
+`npm run distro` rebuilds `distro/INSTALL.md` from `docs/` and verifies that every
+directory the app reads at runtime is listed in `APP_FILES` (`npm test` runs the
+same check, so a missing runtime asset fails the suite). After an app change is
+committed there:
 
 ```bash
 scripts/sync-distro.sh solofactory /path/to/soloFactory   # in the ambient-library dev workspace

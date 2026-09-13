@@ -1,6 +1,6 @@
 {
   "name": "solo-factory",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "A local-first software factory for micro, mini, and personal SaaS apps.",
   "type": "module",
@@ -8,7 +8,9 @@
     "start": "node src/server.mjs",
     "dev": "node --watch src/server.mjs",
     "test": "node --test test/*.test.mjs",
-    "test:e2e": "node test/e2e.test.mjs"
+    "test:e2e": "node test/e2e.test.mjs",
+    "pretest": "bash scripts/build-distro.sh --check",
+    "distro": "bash scripts/build-distro.sh"
   },
   "engines": {
     "node": ">=22"

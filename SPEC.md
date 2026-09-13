@@ -238,10 +238,12 @@ Only one job may be active because the target user does not benefit from resourc
 - `GET /api/health` — factory health, active project, busy run.
 - `GET /api/projects` — discovered projects with run count and last run; the active one.
 - `POST /api/projects` — create `projects/<slug>` (`git init`) and select it.
-- `POST /api/projects/select` — switch the active project; `409 { busyJobId }` while a run is
-  active unless `cancel: true`, which cancels it and waits before switching.
+- `POST /api/projects/select` — switch the active project (initialising it: `git init`, `.aai/`
+  scaffold, anchors); `409 { busyJobId }` while a run is active unless `cancel: true`, which
+  cancels it and waits before switching.
 - `GET /api/config` — intake questions and available subscription providers.
-- `POST /api/interview/turn` — run one Factory Guide turn and return structured coverage.
+- `POST /api/interview/turn` — run one Factory Guide turn inside the active project and return
+  structured coverage; the transcript is appended to that project's `.aai/memory/interviews/guide.log`.
 - `POST /api/jobs` — validate intake, freeze input, queue a run.
 - `GET /api/jobs/:id` — current state and bounded event history.
 - `POST /api/jobs/:id/cancel` — cancel active work.

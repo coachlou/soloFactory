@@ -272,3 +272,12 @@ Installed folders on 0.1.0 predate the selector; the 0.3.0 sync delivers both.
 Observed: `npm test` → **61/61** (new: scaffold-once/never-overwrite store test; e2e asserts
 the guide's cwd/logPath are the active project and a hand-seeded `projects/seeded/` is
 listed and initialised on select).
+
+## Distro verification + install/update runbook (2026-09-13, 0.4.0)
+
+`scripts/build-distro.sh` (was `build-distro-docs.sh`) now verifies the package, not just
+copies INSTALL.md: required distro files exist, every `APP_FILES` path exists, and every
+directory `src/` reads from the app root is shipped (dot-paths are runtime state and skipped).
+`npm test` runs it as `pretest`; `npm run distro` rebuilds. `docs/INSTALL.md` gained a Step 0
+fork (new install vs update, with a detection one-liner reading `.ailib/manifest.yaml`) and a
+self-contained update path U1–U4 with its own done-list.
