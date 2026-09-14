@@ -71,7 +71,9 @@ run, opens a short form and previews a markdown report. Copy it and paste it int
 The report contains what you typed plus, only when you tick the box, an allowlisted run
 summary: version, platform, error code, failed stage, gate, counts, and recent lifecycle
 event types. Your brief, transcript, agent output, and file paths are never included, and
-nothing is sent anywhere until you copy the report or open GitHub yourself.
+nothing is sent anywhere until you send it yourself. **Copy & open email** copies the report and
+opens a message to support@coachlou.com with the subject "SoloFactory Feedback"; paste the
+report into the body.
 
 To enable the **Search existing issues** and **Open GitHub** buttons, point SoloFactory at
 your issue tracker:

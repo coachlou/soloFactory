@@ -299,3 +299,16 @@ every other gate; unrelated deploy failures (crash, timeout) still park immediat
 Observed: `npm test` → **70/70** (new: prompts assert the field names are present; a deployer
 stub that fails once with `invalid_metrics` then succeeds reaches `completed` after exactly
 one `repair-1` turn, with the failure file recording the received keys).
+
+## Feedback by email (2026-09-14, 0.8.3)
+
+Member installs never set `SOLOFACTORY_ISSUES_URL`, so the feedback dialog's GitHub buttons
+were hidden and a copied report had nowhere obvious to go. The dialog now names
+support@coachlou.com with the subject "SoloFactory Feedback", and a **Copy & open email**
+button copies the server-rendered report and opens a `mailto:` with address and subject only
+(the body stays on the clipboard — mailto length limits). GitHub buttons still appear when the
+variable is set.
+
+Observed: `npm test` → **70/70**. In the browser, preview enables the button; clicking it
+copied the report and relabelled to "Copied — paste into the email" with no console errors
+(an initial `event.currentTarget`-after-`await` null bug was caught here and fixed).

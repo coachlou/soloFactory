@@ -648,8 +648,7 @@ function openFeedback(trigger, { mode, jobId = null }) {
   // Cancelled runs are reportable, but the user chose to stop, so diagnostics start unticked.
   $("#feedback-diagnostics").checked = Boolean(jobId) && state.job?.state !== "cancelled";
   const issues = state.config?.issues;
-  $("#feedback-privacy").textContent = "Nothing is sent anywhere until you copy the report or open GitHub yourself."
-    + (issues ? "" : " GitHub links are off because SOLOFACTORY_ISSUES_URL is not set.");
+  $("#feedback-privacy").textContent = `Nothing is sent anywhere until you send the email${issues ? " or open GitHub" : ""} yourself.`;
   $("#feedback-search-button").classList.toggle("hidden", !issues);
   $("#feedback-github-button").classList.toggle("hidden", !issues);
   setFeedbackPreview(null);
@@ -674,8 +673,9 @@ function setFeedbackPreview(result) {
   feedback.fingerprint = result?.fingerprint ?? null;
   $("#feedback-preview").textContent = feedback.markdown ?? "Choose Preview report to see exactly what will be copied.";
   $("#feedback-redacted").classList.toggle("hidden", !result?.redacted);
-  for (const id of ["copy", "search", "github"]) $(`#feedback-${id}-button`).disabled = !feedback.markdown;
+  for (const id of ["email", "copy", "search", "github"]) $(`#feedback-${id}-button`).disabled = !feedback.markdown;
   $("#feedback-copy-button").textContent = "Copy report";
+  $("#feedback-email-button").innerHTML = "Copy &amp; open email <span>↗</span>";
 }
 
 $("#feedback-form").addEventListener("submit", async (event) => {
@@ -696,16 +696,28 @@ $("#feedback-form").addEventListener("submit", async (event) => {
   }
 });
 
-$("#feedback-copy-button").addEventListener("click", async () => {
-  if (!feedback.markdown) return;
+async function copyFeedback(button) {
+  if (!feedback.markdown) return false;
   try {
     await navigator.clipboard.writeText(feedback.markdown);
-    $("#feedback-copy-button").textContent = "Copied";
+    button.textContent = "Copied";
+    return true;
   } catch {
     // Clipboard API needs a secure context; a LAN-hosted http:// page falls back to selecting the preview.
     window.getSelection().selectAllChildren($("#feedback-preview"));
-    $("#feedback-copy-button").textContent = "Press ⌘C / Ctrl+C to copy";
+    button.textContent = "Press ⌘C / Ctrl+C to copy";
+    return false;
   }
+}
+
+$("#feedback-copy-button").addEventListener("click", (event) => copyFeedback(event.currentTarget));
+
+$("#feedback-email-button").addEventListener("click", async (event) => {
+  // Subject only; the body goes via the clipboard because reports can exceed mailto length limits.
+  const button = event.currentTarget; // currentTarget is null after the await
+  if (!(await copyFeedback(button))) return;
+  button.textContent = "Copied — paste into the email";
+  window.location.href = `mailto:support@coachlou.com?subject=${encodeURIComponent("SoloFactory Feedback")}`;
 });
 
 $("#feedback-search-button").addEventListener("click", () => {

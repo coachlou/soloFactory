@@ -150,10 +150,13 @@ absolute paths and the raw error message.
 - Buttons: `#report-run-button` in the recovery action row; `#feedback-button` in the top bar.
 - Preview into a `<pre>` via `textContent`.
 - **Copy report** copies the exact `markdown` string last received from the server.
+- **Copy & open email** (added 0.8.3) copies the same string, then opens
+  `mailto:support@coachlou.com?subject=SoloFactory%20Feedback`. Body never in the mailto URL
+  (length limits); if the clipboard write fails it selects the preview and does not open mail.
 - **Search existing issues** → `window.open(search(fingerprint ?? title.slice(0,100)), "_blank", "noopener")`.
 - **Open GitHub** → `window.open(newX(title), "_blank", "noopener")`.
-- GitHub buttons hidden when `config.issues` is null; privacy notice appends: *GitHub links are
-  off because `SOLOFACTORY_ISSUES_URL` is not set.*
+- GitHub buttons hidden when `config.issues` is null. (0.8.3: the "GitHub links are off"
+  notice was dropped — members never set the variable, so email is the default route.)
 
 **Repo**
 
