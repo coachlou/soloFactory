@@ -3,6 +3,13 @@
 // plan (.factory/slices.json) at specification time and per-slice build/
 // continuation/repair prompts that preserve earlier completed slices.
 
+// The deployer's validateMetrics() rejects any other shape, so every prompt that asks for
+// the endpoint spells the field names out. Keep this in sync with validateMetrics().
+export const METRICS_SCHEMA = `The metrics JSON must contain exactly these fields: uptimeSeconds (number),
+requests.total (number), requests.errors (number), latencyMs.average (number), and routes
+(an array of per-route aggregates, or an object keyed by normalized route path). Extra
+aggregate fields are fine; different names for these are a deployment failure.`;
+
 export function specificationPrompt(sliceMode = false, { followOn = false } = {}) {
   const sliceContract = sliceMode
     ? `
@@ -88,7 +95,7 @@ Rewrite exactly these three substantive files and no application code yet:
   failure cases. Each must be testable.`}${sliceContract}
 The future app must expose GET /health and privacy-preserving GET /_factory/metrics. Metrics
 include uptime, request/error/active counts, aggregate latency, and normalized route counts;
-never request bodies, headers, IPs, identifiers, or query strings.
+never request bodies, headers, IPs, identifiers, or query strings. ${METRICS_SCHEMA}
 
 Do not create or modify package.json, factory.json, source files, tests, or configuration
 outside .factory. End with a short summary of what you wrote.`;
@@ -104,8 +111,8 @@ working.`;
 factory.json (version 1, commands.install/test/build/start as argument arrays, healthPath
 "/health", metricsPath "/_factory/metrics"), a production build, GET /health, and
 privacy-preserving GET /_factory/metrics (aggregate counters only — never retain bodies,
-headers, IPs, identifiers, or query strings). Each command must begin with npm, node, or
-npx; the start command must honor PORT.`
+headers, IPs, identifiers, or query strings). ${METRICS_SCHEMA} Each command must begin
+with npm, node, or npx; the start command must honor PORT.`
       : `Dependencies already completed in this workspace: ${slice.dependsOn.join(", ")}. Use their
 outputs; do not re-implement or modify them.`;
   const acceptance = slice.acceptance.map((item) => `  - ${item}`).join("\n");
@@ -199,7 +206,7 @@ Build the complete smallest reliable application in this directory. Use Node 22+
 proven maintained packages only when they earn their place. Include meaningful automated
 tests for the core acceptance scenarios, a production build, GET /health, and
 GET /_factory/metrics. The metrics endpoint must use local aggregate counters only and must
-not retain bodies, headers, IPs, identifiers, or query strings.
+not retain bodies, headers, IPs, identifiers, or query strings. ${METRICS_SCHEMA}
 
 Create factory.json with version 1, commands.install/test/build/start as argument arrays,
 healthPath '/health', and metricsPath '/_factory/metrics'. Each command must begin with npm,

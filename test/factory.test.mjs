@@ -4,8 +4,9 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { JobStore } from "../src/store.mjs";
-import { buildRecoveryPacket, SoloFactory, validateMetrics } from "../src/factory.mjs";
+import { buildRecoveryPacket, FactoryError, SoloFactory, validateMetrics } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
+import { buildPrompt, sliceBuildPrompt, specificationPrompt } from "../src/prompts.mjs";
 
 const brief = {
   workingName: "Pocket Pulse",
@@ -20,7 +21,14 @@ test("metrics validation accepts route lists and aggregate route maps", () => {
   const base = { uptimeSeconds: 1, requests: { total: 2, errors: 0 }, latencyMs: { average: 3 } };
   assert.equal(validateMetrics({ ...base, routes: [] }).routes.length, 0);
   assert.deepEqual(validateMetrics({ ...base, routes: { "/health": 1 } }).routes, { "/health": 1 });
-  assert.throws(() => validateMetrics({ ...base, routes: "private-path" }), /invalid schema/);
+  assert.throws(() => validateMetrics({ ...base, routes: "private-path" }), /invalid schema.*routes/);
+  assert.throws(() => validateMetrics({ uptime: 1, requests: { count: 2 } }), /uptimeSeconds, requests.total, requests.errors, latencyMs.average, routes/);
+});
+
+test("build prompts spell out the metrics field names the deployer validates", () => {
+  for (const prompt of [buildPrompt(), specificationPrompt(), sliceBuildPrompt({ id: "S1", title: "Skeleton", dependsOn: [], acceptance: ["/health answers"] }, {})]) {
+    for (const field of ["uptimeSeconds", "requests.total", "requests.errors", "latencyMs.average", "routes"]) assert.match(prompt, new RegExp(field.replace(".", "\\.")));
+  }
 });
 
 test("full lifecycle reaches completed only after real health and metrics checks", async (t) => {
@@ -74,6 +82,34 @@ test("deployment-only recovery does not replay agent work", async () => {
   assert.equal(resumed.state, "completed");
   assert.equal(resumed.failedState, null);
   assert.equal(agentTurns, turnsBeforeResume);
+});
+
+test("a metrics contract failure at deploy self-heals through one repair turn", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-deploy-heal-"));
+  const store = new JobStore(root);
+  await store.init();
+  const job = await store.create({ brief, transcript, provider: "fixture" });
+  const fixture = createFixtureProvider();
+  const labels = [];
+  const provider = { id: "fixture", run(options) { labels.push(options.context.stage); return fixture.run(options); } };
+  let deploys = 0;
+  const factory = new SoloFactory({
+    store,
+    provider,
+    commandRunner: async () => ({ code: 0, output: "passed" }),
+    deployer: async () => {
+      deploys += 1;
+      if (deploys === 1) throw new FactoryError("invalid_metrics", "The app metrics endpoint returned an invalid schema.", { missing: ["uptimeSeconds"], received: ["uptime"] });
+      return { mode: "fixture", status: "live", url: "http://127.0.0.1:9970" };
+    },
+  });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(result.attempt, 1);
+  assert.equal(deploys, 2);
+  assert.deepEqual(labels.filter((label) => label.startsWith("repair")), ["repair-1"]);
+  const failure = await readFile(path.join(root, ".factory", "last-failure-1.txt"), "utf8");
+  assert.match(failure, /Received top-level keys: uptime/);
 });
 
 test("a failed gate triggers bounded repair and a complete gate rerun", async () => {

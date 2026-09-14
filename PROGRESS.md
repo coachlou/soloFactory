@@ -281,3 +281,21 @@ directory `src/` reads from the app root is shipped (dot-paths are runtime state
 `npm test` runs it as `pretest`; `npm run distro` rebuilds. `docs/INSTALL.md` gained a Step 0
 fork (new install vs update, with a detection one-liner reading `.ailib/manifest.yaml`) and a
 self-contained update path U1–U4 with its own done-list.
+
+## Metrics schema self-heal at deploy (2026-09-14, 0.8.2)
+
+The generated app's build/test/build gates never see the metrics endpoint's field names —
+only the deploy step's `validateMetrics` did, and it wasn't in the repair loop. A generated
+app naming a field `uptime` instead of `uptimeSeconds` passed every gate, then failed at
+deploy with an error too vague to act on, parking the run for the owner to fix by hand.
+
+`METRICS_SCHEMA` (a single constant in `src/prompts.mjs`) now spells out the exact field
+names in the specification, walking-skeleton, and single-mode build prompts. `validateMetrics`
+names which fields are missing or non-numeric and returns the received top-level keys in
+`error.details`. A metrics schema mismatch at deploy now runs one repair turn against that
+detail, reruns install/test/build, and redeploys — sharing the same bounded repair budget as
+every other gate; unrelated deploy failures (crash, timeout) still park immediately.
+
+Observed: `npm test` → **70/70** (new: prompts assert the field names are present; a deployer
+stub that fails once with `invalid_metrics` then succeeds reaches `completed` after exactly
+one `repair-1` turn, with the failure file recording the received keys).

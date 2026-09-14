@@ -49,8 +49,10 @@ failure I can recover from without discarding completed work.
 - Deterministic `install`, `test`, `build`, `start`, and `/health` checks supplied through a
   validated `factory.json` manifest.
 - At most two repair attempts with the exact failed command and output fed back to the
-  coding agent.
-- Local deployment on an unused loopback port, followed by a real HTTP health check.
+  coding agent. A deployed app's metrics response failing the schema contract counts as a
+  repairable gate failure and shares this same budget.
+- Local deployment on an unused loopback port, followed by a real HTTP health check and a
+  metrics schema check.
 - Live build telemetry and privacy-preserving generated-app metrics for uptime, requests,
   errors, and latency. Metrics remain local and contain no request bodies or personal data.
 - Atomic state snapshots, append-only event history, bounded logs, cancellation, same-run
@@ -108,7 +110,7 @@ reports the subscription/login problem; it never falls back to an API key.
 | Verify | local controller | install, test, and build each exit 0 within timeout |
 | Repair | subscription CLI | bounded attempt completes; controller reruns all gates |
 | Review | subscription CLI | review completes; controller reruns tests and build |
-| Deploy | local controller | process stays alive and `/health` returns HTTP 2xx |
+| Deploy | local controller | process stays alive, `/health` returns HTTP 2xx, and `/_factory/metrics` matches the schema (repaired, bounded, on mismatch) |
 | Complete | controller only | deployment URL and evidence are persisted |
 
 ### Run queue

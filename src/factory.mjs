@@ -308,11 +308,27 @@ export class SoloFactory {
 
   async deployAndComplete(job, signal) {
     const appDir = this.store.appDir(job.id);
-    job = await this.stage(job, "deploying", "Launching and checking the application");
-    const manifest = await this.readManifest(appDir);
-    const deployment = this.deployer
-      ? await this.deployer({ job, appDir, manifest, signal, emit: (event) => this.emit(job.id, event) })
-      : await this.deployLocal(job, manifest, signal);
+    let deployment;
+    for (;;) {
+      job = await this.stage(job, "deploying", "Launching and checking the application");
+      const manifest = await this.readManifest(appDir);
+      try {
+        deployment = this.deployer
+          ? await this.deployer({ job, appDir, manifest, signal, emit: (event) => this.emit(job.id, event) })
+          : await this.deployLocal(job, manifest, signal);
+        break;
+      } catch (error) {
+        // The app runs but breaks the metrics contract: that is a code defect the repair worker can fix,
+        // unlike a crash or port problem. Same bounded repair budget as the deterministic gates.
+        if (error.code !== "invalid_metrics") throw error;
+        this.deployments.get(job.id)?.kill("SIGTERM");
+        await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "deploy", message: error.message });
+        const received = error.details?.received ? `\nReceived top-level keys: ${error.details.received.join(", ")}` : "";
+        error.details = { ...error.details, gate: "deploy", output: `GET ${manifest.metricsPath} failed the controller's metrics contract.\n${error.message}${received}` };
+        job = await this.repair(job, error, signal);
+        job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: true });
+      }
+    }
     job.deployment = deployment;
     job.recovery = null;
     job.failedState = null;
@@ -467,16 +483,22 @@ export class SoloFactory {
         await this.commit(current, `factory: ${passed} passed gates`);
         return current;
       }
-      if (current.attempt >= this.maxRepairs) throw failure;
-      current.attempt += 1;
-      await this.store.writeState(current);
-      const failureRelative = `.factory/last-failure-${current.attempt}.txt`;
-      await writeFile(path.join(this.store.appDir(current.id), failureRelative), failure.details.output ?? failure.message);
-      current = await this.stage(current, "repairing", `Repairing failed ${failure.details.gate} gate`);
-      await this.invoke(current, `repair-${current.attempt}`, repairPrompt(failureRelative, slice), signal);
+      current = await this.repair(current, failure, signal, slice);
       manifest = await this.readManifest(this.store.appDir(current.id));
       includeInstall = true;
     }
+  }
+
+  // One repair turn against a recorded failure. Throws the failure itself once the budget is spent.
+  async repair(job, failure, signal, slice = null) {
+    if (job.attempt >= this.maxRepairs) throw failure;
+    job.attempt += 1;
+    await this.store.writeState(job);
+    const failureRelative = `.factory/last-failure-${job.attempt}.txt`;
+    await writeFile(path.join(this.store.appDir(job.id), failureRelative), failure.details?.output ?? failure.message);
+    job = await this.stage(job, "repairing", `Repairing failed ${failure.details?.gate ?? "unknown"} gate`);
+    await this.invoke(job, `repair-${job.attempt}`, repairPrompt(failureRelative, slice), signal);
+    return job;
   }
 
   async verify(job, manifest, signal, { includeInstall }) {
@@ -717,15 +739,20 @@ async function fetchJson(url) {
 }
 
 export function validateMetrics(value) {
-  if (
-    !value ||
-    typeof value.uptimeSeconds !== "number" ||
-    typeof value.requests?.total !== "number" ||
-    typeof value.requests?.errors !== "number" ||
-    typeof value.latencyMs?.average !== "number" ||
-    !(Array.isArray(value.routes) || (value.routes && typeof value.routes === "object" && !Array.isArray(value.routes)))
-  ) {
-    throw new FactoryError("invalid_metrics", "The app metrics endpoint returned an invalid schema.");
+  const routesOk = Array.isArray(value?.routes) || (value?.routes && typeof value.routes === "object");
+  const problems = [
+    ["uptimeSeconds", typeof value?.uptimeSeconds === "number"],
+    ["requests.total", typeof value?.requests?.total === "number"],
+    ["requests.errors", typeof value?.requests?.errors === "number"],
+    ["latencyMs.average", typeof value?.latencyMs?.average === "number"],
+    ["routes", routesOk],
+  ].filter(([, ok]) => !ok).map(([field]) => field);
+  if (problems.length) {
+    throw new FactoryError(
+      "invalid_metrics",
+      `The app metrics endpoint returned an invalid schema. Missing or non-numeric: ${problems.join(", ")}.`,
+      { missing: problems, received: value === undefined ? undefined : Object.keys(value ?? {}) },
+    );
   }
   return value;
 }
