@@ -250,7 +250,9 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
       hardTimeoutMs: minutesFromEnv("SOLOFACTORY_AGENT_HARD_MINUTES", 45),
     });
   }
-  const envelope = JSON.parse(result.output);
+  // ponytail: the CLI can print a plain-text line ("Background tasks still running after
+  // 600s; terminating.") before its JSON envelope (seen 2026-09-18); the envelope is the last `{` line.
+  const envelope = JSON.parse(result.output.split("\n").filter((line) => line.startsWith("{")).at(-1) ?? result.output);
   const final = envelope.structured_output ?? envelope.result;
   return schema ? (typeof final === "string" ? JSON.parse(final) : final) : { message: String(final ?? "").trim() };
 }
