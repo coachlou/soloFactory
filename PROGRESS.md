@@ -371,3 +371,50 @@ turn, so another project's run can take its Claude turn in the meantime.
   genuinely different "machine".
 - Watch for: slot reacquisition ordering (a run mid-gates should not starve behind newly
   queued starts) and the evidence stream showing the wait.
+
+### Patch lane: quick fixes without the release ceremony (idea, 2026-09-18)
+
+Not implemented. Every brief today pays for specification, plan review, the review audit,
+and a deploy. Right for a release, wrong for a bug fix: the 2026-09-18 Assay follow-on ran
+17+ minutes and two one-file fixes in chat took ten each. Real practice is two lanes: patches
+accumulate with unit coverage on what they touch, then one release pass runs end-to-end.
+
+- Entry: "+ Quick fix" in the run dropdown. The coach asks only what you did, what happened,
+  what should have happened; the card is a one-paragraph reproduction. Button: "Queue fix".
+- Stages: build, gates, commit. No spec, no plan review, no review audit, no deploy. Three
+  board columns (queued, building, completed); parked still applies.
+- Reproduce first: the agent writes a test that fails for the stated reason before touching
+  code. Cannot reproduce → park with "could not reproduce" and what was tried. The test is
+  the review; that rule is what makes skipping the audit safe.
+- Fix until the new test and the whole suite pass, same two bounded repairs. Commit with the
+  reproduction card as the message. Live app untouched.
+- Project shows "N fixes unreleased". Any full brief picks them up (builds on the tree);
+  "Release pending fixes" runs a full release with an auto-brief listing the fix cards as
+  must-haves and their tests as scenarios.
+- Coach may escalate: "this is a release" hands the conversation to the full interview
+  prefilled. Fix cards can carry gate env vars (e.g. a judge API key).
+- Cost: one spec-free session plus a gate pass, roughly a third of a run. Still never beats
+  a human-triaged chat fix for a one-liner; it is for walking away.
+
+### Triage session: one engine under ask, triage, and patch (idea, 2026-09-18)
+
+Not implemented. The ask pane, human-in-the-loop triage, and the patch lane are one
+mechanism at three trust levels: the existing provider (`claude -p` with session
+resumption, already how every stage runs) with the prompt coming from the owner instead of
+a stage template, streamed into a pane.
+
+1. Ask: run evidence plus tree as context, read-only tools. (The ask pane above.)
+2. Triage with the owner: writes allowed, owner drives ("check why review queued everything",
+   "make faithful a substring check", "commit"). Today's Claude Code session, inside the app.
+3. Fix without the owner: same session, headless, reproduce-first prompt, suite as gate.
+   (The patch lane above.) HITL only changes who writes the next prompt.
+
+Must enforce, both partly exist:
+- One writer per tree: a triage session takes the project's run lock; queued runs wait and
+  the queue hint says so.
+- Provenance: every session commit files an evidence record (transcript, diff, gate result)
+  like a run. A commit without a story turns the project into an ordinary repo.
+
+Not embedding a Claude Code terminal: the value is shared context, the lock, and evidence,
+not the terminal. Build order: ask, then triage, then headless fix; each is the previous
+plus one permission.
