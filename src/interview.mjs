@@ -76,20 +76,30 @@ export const INTERVIEW_RESPONSE_SCHEMA = {
   },
 };
 
+export const MAX_TRANSCRIPT_CHARS = 400_000;
+
 export function validateMessages(messages) {
   if (!Array.isArray(messages) || messages.length === 0 || messages.length > 80) {
     throw new Error("Interview transcript must contain between 1 and 80 messages.");
   }
-  return messages.map((message) => {
+  let total = 0;
+  const transcript = messages.map((message) => {
     if (!message || !["assistant", "user"].includes(message.role)) {
       throw new Error("Every interview message needs an assistant or user role.");
     }
     const content = String(message.content ?? "").trim();
-    if (!content || content.length > 12_000) {
-      throw new Error("Interview messages must be between 1 and 12,000 characters.");
+    if (!content) {
+      throw new Error("Interview messages cannot be empty.");
     }
+    total += content.length;
     return { role: message.role, content };
   });
+  // No per-message cap: members paste whole spec files. The transcript as a
+  // whole is capped so one interview cannot exceed the provider's context.
+  if (total > MAX_TRANSCRIPT_CHARS) {
+    throw new Error(`Interview transcript is too long (${total.toLocaleString()} characters, max ${MAX_TRANSCRIPT_CHARS.toLocaleString()}). Trim attached documents.`);
+  }
+  return transcript;
 }
 
 export function validateInterviewResult(result) {

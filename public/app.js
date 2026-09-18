@@ -245,6 +245,18 @@ function renderMessages(thinking = false) {
     const item = document.createElement("div");
     item.className = `message ${message.role}`;
     item.textContent = message.content;
+    // Long user turns (pasted specs) collapse so the transcript stays readable.
+    if (message.role === "user" && message.content.length > 1_500) {
+      item.classList.add("long");
+      const toggle = document.createElement("a");
+      toggle.className = "expand";
+      toggle.textContent = "Show full message";
+      toggle.addEventListener("click", () => {
+        const open = item.classList.toggle("open");
+        toggle.textContent = open ? "Collapse" : "Show full message";
+      });
+      item.prepend(toggle);
+    }
     return item;
   }));
   if (thinking) {
@@ -292,15 +304,53 @@ function renderCoverage() {
   }));
 }
 
+// Attached documents ride inside the user turn: the Guide reads inline text
+// without a tool call, and nothing is stored server-side.
+const pending = [];
+$("#attach-input").addEventListener("change", async (event) => {
+  clearError();
+  for (const file of event.target.files) {
+    try {
+      pending.push({ name: file.name, text: await file.text() });
+    } catch (error) {
+      showError(new Error(`Could not read ${file.name}: ${error.message}`));
+    }
+  }
+  event.target.value = "";
+  renderAttachments();
+});
+
+function renderAttachments() {
+  $("#attachments").replaceChildren(...pending.map((file, index) => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.textContent = `${file.name} · ${Math.ceil(file.text.length / 1000)}k chars`;
+    const remove = document.createElement("button");
+    remove.type = "button"; remove.title = "Remove"; remove.textContent = "×";
+    remove.addEventListener("click", () => { pending.splice(index, 1); renderAttachments(); });
+    chip.append(remove);
+    return chip;
+  }));
+  $("#message-input").required = pending.length === 0;
+}
+
+function composeMessage(typed) {
+  const parts = typed ? [typed] : [];
+  for (const file of pending) parts.push(`--- Attached document: ${file.name} ---\n${file.text.trim()}\n--- End of ${file.name} ---`);
+  return parts.join("\n\n");
+}
+
 $("#message-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = $("#message-input");
-  const content = input.value.trim();
+  const content = composeMessage(input.value.trim());
   if (!content) return;
   if (!state.provider) return showError(new Error(NO_PROVIDER));
   clearError();
   state.messages.push({ role: "user", content });
   input.value = "";
+  pending.length = 0;
+  renderAttachments();
   renderMessages(true);
   setInterviewBusy(true);
   try {

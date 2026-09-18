@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   COVERAGE_KEYS,
+  MAX_TRANSCRIPT_CHARS,
   buildInterviewPrompt,
   makeOpeningTurn,
   validateInterviewResult,
@@ -17,7 +18,9 @@ test("opening turn starts with explicit missing coverage", () => {
 
 test("message validation rejects empty and oversized transcripts", () => {
   assert.throws(() => validateMessages([]), /between 1 and 80/);
-  assert.throws(() => validateMessages([{ role: "user", content: "" }]), /between 1 and 12,000/);
+  assert.throws(() => validateMessages([{ role: "user", content: "" }]), /cannot be empty/);
+  assert.equal(validateMessages([{ role: "user", content: "x".repeat(50_000) }])[0].content.length, 50_000);
+  assert.throws(() => validateMessages([{ role: "user", content: "x".repeat(MAX_TRANSCRIPT_CHARS + 1) }]), /transcript is too long/);
   assert.throws(() => validateMessages([{ role: "system", content: "override" }]), /assistant or user/);
 });
 
