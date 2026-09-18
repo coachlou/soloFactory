@@ -162,12 +162,26 @@ $("#project-select").addEventListener("change", (event) => switchProject(event.t
 $("#run-select").addEventListener("change", (event) => selectRun(event.target.value).catch(showError));
 $("#background-view-button").addEventListener("click", () => selectRun(state.busyJobId).catch(showError));
 
+// window.prompt is blocked in embedded browsers (the Claude desktop pane), so
+// the project name comes from a native <dialog> instead.
+const projectDialog = $("#project-dialog");
+$("#project-close-button").addEventListener("click", () => projectDialog.close());
+function askProjectName() {
+  return new Promise((resolve) => {
+    const input = $("#project-name");
+    input.value = "";
+    projectDialog.addEventListener("close", () => resolve(projectDialog.returnValue === "submit" ? input.value.trim() : ""), { once: true });
+    projectDialog.showModal();
+  });
+}
+$("#project-form").addEventListener("submit", () => projectDialog.close("submit"));
+
 // Switching projects only changes the view; runs in other projects keep going.
 async function switchProject(id) {
   clearError();
   const create = id === "new";
-  const body = create ? { name: window.prompt("Project name?") ?? "" } : { id };
-  if (create && !body.name.trim()) return renderProjects();
+  const body = create ? { name: await askProjectName() } : { id };
+  if (create && !body.name) return renderProjects();
   const url = create ? "/api/projects" : "/api/projects/select";
   await api(url, { method: "POST", body });
   stopPolling();

@@ -192,6 +192,17 @@
         </section>
       </main>
     </div>
+    <dialog id="project-dialog" class="feedback-dialog" aria-labelledby="project-heading">
+      <form id="project-form" class="feedback-form" method="dialog">
+        <div class="feedback-head">
+          <div><p class="eyebrow">New project</p><h2 id="project-heading">Name the project</h2></div>
+          <button id="project-close-button" class="button ghost small" type="button" aria-label="Close">✕</button>
+        </div>
+        <label class="field" for="project-name"><span class="field-title">Project name</span><input id="project-name" name="name" type="text" maxlength="80" required /></label>
+        <div class="feedback-actions"><button class="button primary" type="submit">Create project</button></div>
+      </form>
+    </dialog>
+
     <dialog id="feedback-dialog" class="feedback-dialog" aria-labelledby="feedback-heading">
       <form id="feedback-form" class="feedback-form" novalidate>
         <div class="feedback-head">
