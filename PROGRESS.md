@@ -332,3 +332,26 @@ with 400. Not yet observed: a live Guide turn actually opening an attached image
 
 - `docs/manual/index.html`: fresh interview screenshot from the demo instance showing the **Attach files** button; new paragraph in "Shape the brief" on attaching specs and mockups, the removed per-message limit, and folded long pastes; "Projects" now mentions the name dialog.
 - No code changes. Released as 0.8.5 so the shipped manual matches 0.8.4's interview.
+
+## Backlog
+
+### Ask pane: run-aware questions while the factory turns (idea, 2026-09-18)
+
+Not implemented. A chat pane beside a run that answers questions about it, read-only:
+"why did review send everything to the queue", "what did the last repair change". Context
+is the frozen brief, the evidence stream, the gate logs, and the diff, sent through the
+existing provider (`claude -p`), so no new state or provider surface.
+
+- Read-only by design. It never steers a running job: the brief is frozen at queue time and
+  the acceptance scenarios are the contract review checks against, so mid-run steering would
+  either mutate the contract or duplicate the interview.
+- Hand-fixing a parked workspace stays with the recovery packet and Claude Code / Codex,
+  which already have editing, shell, and permissions.
+- One action: **Turn into follow-on brief**, which opens a new interview pre-filled from the
+  conversation. That is where the value compounds; the chat about a misbehaving run becomes
+  the next brief without retyping.
+- Cost guard: summarize the evidence stream once per run and cache it rather than resending
+  raw logs each turn. Slice runs produce long streams.
+
+Prompted by the 2026-09-18 Assay IEW recovery, where diagnosing the run took a separate
+Claude Code session reading `.factory/` files by hand.
