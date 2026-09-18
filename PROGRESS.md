@@ -333,6 +333,19 @@ with 400. Not yet observed: a live Guide turn actually opening an attached image
 - `docs/manual/index.html`: fresh interview screenshot from the demo instance showing the **Attach files** button; new paragraph in "Shape the brief" on attaching specs and mockups, the removed per-message limit, and folded long pastes; "Projects" now mentions the name dialog.
 - No code changes. Released as 0.8.5 so the shipped manual matches 0.8.4's interview.
 
+## Queue hint and a tolerant Claude parser (2026-09-18, 0.8.6)
+
+- `src/providers.mjs`: the Claude CLI can print a plain-text line before its JSON envelope
+  ("Background tasks still running after 600s; terminating."); the envelope is now the last
+  `{` line, so a stray warning no longer fails a run at the parse step. Seen on the Assay IEW
+  recovery run.
+- `public/app.js`, `public/index.html`: the interview shows a hint under **Queue for the
+  factory** when the selected project already has a run active, queued, or parked, saying
+  same-project runs serialize and independent fixes are cheaper as one brief.
+- Manual: one sentence in "Queue a run" for the hint.
+
+Observed: `npm test` → **70/70**; hint verified live against a building follow-on run.
+
 ## Backlog
 
 ### Ask pane: run-aware questions while the factory turns (idea, 2026-09-18)

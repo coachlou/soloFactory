@@ -76,7 +76,7 @@
   <h2 id="queue">4. Queue a run</h2>
   <p><b class="btn">Queue for the factory</b> freezes the brief and puts the run in the project's queue. You land back in a fresh interview, so you can shape the next release while this one builds.</p>
   <ul>
-    <li>Runs in one project go one after another, each building on the tree the last one left.</li>
+    <li>Runs in one project go one after another, each building on the tree the last one left. A hint under the queue button says so when the project already has a run active, queued, or parked, since independent fixes for one app are cheaper as a single brief.</li>
     <li>Runs in different projects can overlap when <code>SOLOFACTORY_MAX_ACTIVE_RUNS</code> is above 1.</li>
     <li>A second brief for a project that already shipped becomes a follow-on release. Deploying it stops the previous release's app.</li>
     <li><b class="btn">Remove from queue</b> drops a brief that has not started.</li>
