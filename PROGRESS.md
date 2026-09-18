@@ -327,3 +327,8 @@ browsers (the Claude desktop preview pane) block `window.prompt`.
 Observed: `npm test` → **70/70**. In the preview pane, attaching a PNG and a markdown file
 produced both chips, the PNG landed on disk as a valid image, and a `.sh` upload was refused
 with 400. Not yet observed: a live Guide turn actually opening an attached image.
+
+## Manual catches up with attachments (2026-09-18, 0.8.5)
+
+- `docs/manual/index.html`: fresh interview screenshot from the demo instance showing the **Attach files** button; new paragraph in "Shape the brief" on attaching specs and mockups, the removed per-message limit, and folded long pastes; "Projects" now mentions the name dialog.
+- No code changes. Released as 0.8.5 so the shipped manual matches 0.8.4's interview.
