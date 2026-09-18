@@ -140,6 +140,21 @@ function renderProjects() {
     return option(project.id, `${marker}${project.name} · ${last}${queued}`);
   }));
   select.value = state.project;
+  renderQueueHint();
+}
+
+// Runs in one project share a tree, so they serialize whatever the active-run limit says;
+// say so at the moment a second brief is about to be queued instead of after it waits.
+function renderQueueHint() {
+  const project = state.projects.find((entry) => entry.id === state.project);
+  const parked = Boolean(project?.lastRun && PARKED.includes(project.lastRun.state) && !project.activeJobId);
+  const ahead = (project?.activeJobId ? 1 : 0) + (project?.queued ?? 0) + (parked ? 1 : 0);
+  $("#queue-hint").classList.toggle("hidden", !ahead);
+  if (!ahead) return;
+  const holding = parked
+    ? `a parked run, which holds the queue until you resume, restart, or dismiss it${ahead > 1 ? `, plus ${ahead - 1} queued` : ""}`
+    : `${ahead} run${ahead === 1 ? "" : "s"} ${project.activeJobId ? "active or " : ""}queued`;
+  $("#queue-hint").textContent = `${project.name} already has ${holding}. Runs in one project go one after another, each on the tree the last one leaves, so this brief waits for them whatever the active-run limit is. Independent fixes for the same app are cheaper as one brief with a must-have and an acceptance scenario each.`;
 }
 
 function renderRuns() {
