@@ -355,3 +355,19 @@ existing provider (`claude -p`), so no new state or provider surface.
 
 Prompted by the 2026-09-18 Assay IEW recovery, where diagnosing the run took a separate
 Claude Code session reading `.factory/` files by hand.
+
+### Gates do not hold a Claude slot (idea, 2026-09-18)
+
+Not implemented. `SOLOFACTORY_MAX_ACTIVE_RUNS` caps runs, but a run holds its slot through
+the deterministic gates (install, build, tests, health and metrics checks), which use CPU and
+no Claude session. Release the slot while gates run and reacquire it before the next agent
+turn, so another project's run can take its Claude turn in the meantime.
+
+- Per-project serialization stays: runs in one project share a tree.
+- Rejected alternative: one worker per pipeline stage with its own queue. Every stage here
+  uses the same resources (a Claude session plus the working tree), so stage queues cap
+  concurrency at the stage count and add head-of-line blocking behind a slow build. A
+  per-run cap is the more flexible schedule for the same resources; gates are the only
+  genuinely different "machine".
+- Watch for: slot reacquisition ordering (a run mid-gates should not starve behind newly
+  queued starts) and the evidence stream showing the wait.
