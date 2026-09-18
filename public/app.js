@@ -245,6 +245,11 @@ function renderMessages(thinking = false) {
     const item = document.createElement("div");
     item.className = `message ${message.role}`;
     item.textContent = message.content;
+    for (const src of message.images ?? []) {
+      const img = document.createElement("img");
+      img.src = src; img.alt = "Attached image"; img.className = "attachment-image";
+      item.append(img);
+    }
     // Long user turns (pasted specs) collapse so the transcript stays readable.
     if (message.role === "user" && message.content.length > 1_500) {
       item.classList.add("long");
@@ -311,7 +316,14 @@ $("#attach-input").addEventListener("change", async (event) => {
   clearError();
   for (const file of event.target.files) {
     try {
-      pending.push({ name: file.name, text: await file.text() });
+      if (file.type.startsWith("image/")) {
+        const response = await fetch(`/api/interview/upload?name=${encodeURIComponent(file.name)}`, { method: "POST", body: file });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || `Upload failed with HTTP ${response.status}.`);
+        pending.push({ name: file.name, path: body.path, url: URL.createObjectURL(file) });
+      } else {
+        pending.push({ name: file.name, text: await file.text() });
+      }
     } catch (error) {
       showError(new Error(`Could not read ${file.name}: ${error.message}`));
     }
@@ -324,7 +336,7 @@ function renderAttachments() {
   $("#attachments").replaceChildren(...pending.map((file, index) => {
     const chip = document.createElement("span");
     chip.className = "chip";
-    chip.textContent = `${file.name} · ${Math.ceil(file.text.length / 1000)}k chars`;
+    chip.textContent = file.path ? `${file.name} · image` : `${file.name} · ${Math.ceil(file.text.length / 1000)}k chars`;
     const remove = document.createElement("button");
     remove.type = "button"; remove.title = "Remove"; remove.textContent = "×";
     remove.addEventListener("click", () => { pending.splice(index, 1); renderAttachments(); });
@@ -336,7 +348,10 @@ function renderAttachments() {
 
 function composeMessage(typed) {
   const parts = typed ? [typed] : [];
-  for (const file of pending) parts.push(`--- Attached document: ${file.name} ---\n${file.text.trim()}\n--- End of ${file.name} ---`);
+  for (const file of pending) {
+    if (file.path) parts.push(`Attached image: ${file.path} (open this file to view it before answering)`);
+    else parts.push(`--- Attached document: ${file.name} ---\n${file.text.trim()}\n--- End of ${file.name} ---`);
+  }
   return parts.join("\n\n");
 }
 
@@ -347,7 +362,7 @@ $("#message-form").addEventListener("submit", async (event) => {
   if (!content) return;
   if (!state.provider) return showError(new Error(NO_PROVIDER));
   clearError();
-  state.messages.push({ role: "user", content });
+  state.messages.push({ role: "user", content, images: pending.filter((file) => file.url).map((file) => file.url) });
   input.value = "";
   pending.length = 0;
   renderAttachments();

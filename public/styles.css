@@ -83,6 +83,7 @@ h2 { font: 500 27px/1.08 var(--serif); margin: 0 0 14px; }
 .message.user.long::after { content: ""; position: absolute; inset: auto 0 0 0; height: 60px; background: linear-gradient(transparent, var(--panel-2)); }
 .message.user.long.open { max-height: none; }
 .message.user.long.open::after { display: none; }
+.message .attachment-image { display: block; max-width: 100%; max-height: 240px; margin-top: 10px; border-radius: 8px; border: 1px solid var(--line); }
 .message .expand { display: block; margin-top: 8px; font-size: 12px; text-decoration: underline; cursor: pointer; opacity: .8; }
 .button { border: 1px solid var(--line); border-radius: 10px; padding: 11px 15px; cursor: pointer; color: var(--ink); background: var(--panel-2); text-decoration: none; display: inline-flex; justify-content: center; align-items: center; gap: 12px; font-weight: 700; font-size: 12px; }
 .button:hover { filter: brightness(1.08); }

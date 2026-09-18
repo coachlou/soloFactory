@@ -224,6 +224,18 @@ export async function createSoloFactoryServer(options = {}) {
           ],
         });
       }
+      if (request.method === "POST" && url.pathname === "/api/interview/upload") {
+        // Images cannot ride inline in the transcript, so they land in the active
+        // project where the Guide's own Read tool can open them by path.
+        const name = String(url.searchParams.get("name") ?? "").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^[-.]+/, "");
+        if (!IMAGE_EXTENSIONS.test(name)) return json(response, 400, { error: "Only png, jpg, gif, and webp images can be uploaded." });
+        const bytes = await readBytes(request, MAX_UPLOAD_BYTES);
+        if (!bytes.length) return json(response, 400, { error: "Upload is empty." });
+        const relative = path.posix.join(".factory", "uploads", `${Date.now().toString(36)}-${name}`);
+        await mkdir(path.join(active.dir, ".factory", "uploads"), { recursive: true });
+        await writeFile(path.join(active.dir, relative), bytes);
+        return json(response, 200, { path: relative, bytes: bytes.length });
+      }
       if (request.method === "POST" && url.pathname === "/api/interview/turn") {
         const body = await readJson(request);
         const provider = requireProvider(body.provider, fixtureMode);
@@ -471,12 +483,22 @@ function requireProvider(id, fixtureMode) {
   return id;
 }
 
-async function readJson(request) {
-  let data = "";
+const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp)$/i;
+const MAX_UPLOAD_BYTES = 20_000_000;
+
+async function readBytes(request, limit) {
+  const chunks = [];
+  let size = 0;
   for await (const chunk of request) {
-    data += chunk;
-    if (data.length > 1_000_000) throw new Error("Request body is too large.");
+    size += chunk.length;
+    if (size > limit) throw new Error("Request body is too large.");
+    chunks.push(chunk);
   }
+  return Buffer.concat(chunks);
+}
+
+async function readJson(request) {
+  const data = (await readBytes(request, 1_000_000)).toString("utf8");
   try {
     return JSON.parse(data || "{}");
   } catch {
