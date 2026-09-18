@@ -23,7 +23,10 @@ npm start
 
 Open <http://127.0.0.1:4173>. The **Manual** button in the header opens the illustrated user
 manual (`docs/manual/index.html`, also served at `/manual`). Answer the Factory Guide one turn at a time, review the
-compiled brief, and choose **Queue for the factory**. The brief joins that project's run
+compiled brief, and choose **Queue for the factory**. **Attach files** drops an existing spec
+(markdown, text, JSON, YAML, CSV) straight into the conversation and lets the Guide open a
+mockup or screenshot (png, jpg, gif, webp); images are saved under the project's
+`.factory/uploads/`. The brief joins that project's run
 queue and you land back in a fresh interview, so the next release can be shaped while this
 one builds. Runs in one project go one after another, each building on the last; runs in
 different projects can overlap when `SOLOFACTORY_MAX_ACTIVE_RUNS` is above 1 (default 1).

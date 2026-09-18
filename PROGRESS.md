@@ -312,3 +312,18 @@ variable is set.
 Observed: `npm test` → **70/70**. In the browser, preview enables the button; clicking it
 copied the report and relabelled to "Copied — paste into the email" with no console errors
 (an initial `event.currentTarget`-after-`await` null bug was caught here and fixed).
+
+## Attach specs and mockups to the interview (2026-09-18, 0.8.4)
+
+Members with an existing spec had to retype it in 12,000-character pieces. The per-message cap
+is gone; the transcript as a whole is capped at 400,000 characters so one interview still fits
+the provider context. **Attach files** in the composer reads text documents in the browser and
+inlines them into the user turn under the filename (no server storage). Images upload to the
+active project's `.factory/uploads/` and the turn references the path; the Factory Guide skill
+now reads attached images before answering. Long pasted turns collapse in the chat with a
+"Show full message" toggle. Also: creating a project now uses a native dialog because embedded
+browsers (the Claude desktop preview pane) block `window.prompt`.
+
+Observed: `npm test` → **70/70**. In the preview pane, attaching a PNG and a markdown file
+produced both chips, the PNG landed on disk as a valid image, and a `.sh` upload was refused
+with 400. Not yet observed: a live Guide turn actually opening an attached image.
