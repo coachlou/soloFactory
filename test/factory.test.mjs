@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import http from "node:http";
 import { JobStore } from "../src/store.mjs";
 import { buildRecoveryPacket, FactoryError, SoloFactory, validateMetrics } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
@@ -150,6 +151,29 @@ test("startup recovery makes in-flight state explicitly interrupted", async () =
   assert.equal(recovered.state, "interrupted");
   assert.equal(recovered.error.code, "process_restarted");
   assert.equal((await store.read(waiting.id)).state, "queued", "a queued job never started, so a restart leaves it queued");
+});
+
+test("startup recovery marks a live app stopped only when nothing answers at its URL", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-stale-"));
+  const store = new JobStore(root);
+  await store.init();
+  const server = http.createServer((_, res) => res.end("up"));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  const alive = await store.create({ brief, transcript, provider: "fixture" });
+  alive.state = "completed";
+  alive.deployment = { status: "live", url: `http://127.0.0.1:${port}` };
+  await store.writeState(alive);
+  const dead = await store.create({ brief, transcript, provider: "fixture" });
+  dead.state = "completed";
+  dead.deployment = { status: "live", url: "http://127.0.0.1:1" };
+  await store.writeState(dead);
+  await store.recoverInterrupted();
+  server.close();
+  assert.equal((await store.read(alive.id)).deployment.status, "live");
+  const stopped = await store.read(dead.id);
+  assert.equal(stopped.deployment.status, "stopped");
+  assert.ok(stopped.deployment.stoppedAt);
 });
 
 test("artifact access is an explicit allowlist", async () => {
@@ -551,4 +575,29 @@ test("restart from slice 2 rewinds the tree to slice 1's commit and replays only
   const builds = (id) => events.filter((event) => event.type === "agent.started" && event.message.includes(`build-slice-${id}`)).length;
   assert.equal(builds("SLICE-SKELETON"), 1);
   assert.equal(builds("SLICE-UI"), 2);
+});
+
+test("relaunch starts a stopped app on a new URL, and telemetry marks a dead live app stopped", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-relaunch-"));
+  const store = new JobStore(root);
+  await store.init();
+  await writeFile(path.join(root, "app.mjs"), `import http from "node:http";
+http.createServer((q, r) => r.end(q.url === "/health" ? "ok" : JSON.stringify({ uptimeSeconds: 1, requests: { total: 0, errors: 0 }, latencyMs: { average: 0 }, routes: [] }))).listen(process.env.PORT);`);
+  const cmd = ["npm", "run", "x"];
+  await writeFile(path.join(root, "factory.json"), JSON.stringify({ version: 1, healthPath: "/health", metricsPath: "/_factory/metrics", commands: { install: cmd, test: cmd, build: cmd, start: ["node", "app.mjs"] } }));
+  const job = await store.create({ brief, transcript, provider: "fixture" });
+  job.state = "completed";
+  job.deployment = { mode: "local", status: "live", url: "http://127.0.0.1:1" };
+  await store.writeState(job);
+  const factory = new SoloFactory({ store, provider: createFixtureProvider() });
+  try {
+    await factory.telemetry(job.id);
+    assert.equal((await store.read(job.id)).deployment.status, "stopped");
+    const relaunched = await factory.relaunch(job.id);
+    assert.equal(relaunched.deployment.status, "live");
+    assert.notEqual(relaunched.deployment.url, "http://127.0.0.1:1");
+    await assert.rejects(factory.relaunch(job.id), /not running/);
+  } finally {
+    await factory.shutdown();
+  }
 });

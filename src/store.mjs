@@ -15,6 +15,15 @@ This project is an ambient folder: SoloFactory builds it.
 means a folder with an \`.aai/\` behavior layer.
 `;
 
+async function answers(url) {
+  try {
+    await fetch(url, { signal: AbortSignal.timeout(1000) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // A JobStore is rooted in one project: a git repo the factory builds into.
 // The app lives at the repo root; run evidence lives in .solofactory/runs/<id>/ (gitignored).
 export class JobStore {
@@ -192,6 +201,14 @@ export class JobStore {
         job.error = { code: "process_restarted", message: "The factory stopped during this run. Its files are preserved and can be resumed." };
         await this.writeState(job);
         await this.appendEvent(job.id, { type: "job.interrupted", state: job.state, message: job.error.message });
+      }
+      // A built app dies with the server that launched it, so a "live" link left behind is stale.
+      // Any HTTP answer means the app survived (orphaned) and its link is still good.
+      if (job.deployment?.status === "live" && !(await answers(job.deployment.url))) {
+        job.deployment.status = "stopped";
+        job.deployment.stoppedAt = new Date().toISOString();
+        await this.writeState(job);
+        await this.appendEvent(job.id, { type: "deployment.stopped", state: job.state, message: "App was not running after the restart." });
       }
     }
   }

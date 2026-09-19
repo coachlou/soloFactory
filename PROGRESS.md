@@ -346,6 +346,19 @@ with 400. Not yet observed: a live Guide turn actually opening an attached image
 
 Observed: `npm test` → **70/70**; hint verified live against a building follow-on run.
 
+## Relaunch app and honest live status (2026-09-18, 0.9.0)
+
+- A built app is a child of the SoloFactory server, so a restart killed it while the run kept
+  saying live and showed a dead URL. `src/store.mjs` `recoverInterrupted()` now marks a live
+  deployment stopped at startup when nothing answers at its URL; `telemetry()` does the same the
+  first time the activity card finds it dead.
+- The Live app activity card shows the app's URL, with "· not running" when stopped.
+- `POST /api/jobs/:id/relaunch` + **Relaunch app** button (`src/factory.mjs` `relaunch()`): reuses
+  `deployLocal` on a fresh port; newest run in the project only, since one app runs per project.
+- Manual and SPEC §9 updated.
+
+Observed: `npm test` → **72/72**. Not observed: clicking Relaunch in the browser.
+
 ## Backlog
 
 ### Ask pane: run-aware questions while the factory turns (idea, 2026-09-18)

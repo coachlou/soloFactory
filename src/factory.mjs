@@ -595,6 +595,20 @@ export class SoloFactory {
     return { mode: "local", status: "live", url, port, pid: child.pid, startedAt: new Date().toISOString() };
   }
 
+  // Starts a completed run's built app again on a fresh port; only the project's newest run may, since one app runs per project.
+  async relaunch(jobId) {
+    const job = await this.store.read(jobId);
+    if (job.state !== "completed" || job.deployment?.status === "live") throw new FactoryError("not_relaunchable", "Only a completed run whose app is not running can be relaunched.");
+    const [newest] = await this.store.list();
+    if (newest.id !== job.id) throw new FactoryError("not_relaunchable", "A newer run exists in this project; relaunch that one.");
+    const manifest = await this.readManifest(this.store.appDir(jobId));
+    await mkdir(path.join(this.store.appDir(jobId), ".factory", "logs"), { recursive: true }); // gitignored, so may be absent
+    job.deployment = await this.deployLocal(job, manifest, new AbortController().signal);
+    await this.store.writeState(job);
+    await this.emit(job.id, { type: "deployment.relaunched", state: job.state, message: `App relaunched: ${job.deployment.url}` });
+    return job;
+  }
+
   async telemetry(jobId) {
     const job = await this.store.read(jobId);
     const events = await this.store.events(jobId, 500);
@@ -619,7 +633,15 @@ export class SoloFactory {
     if (job.deployment?.url && job.deployment.status === "live") {
       try {
         const manifest = await this.readManifest(this.store.appDir(jobId));
-        app = await fetchJson(`${job.deployment.url}${manifest.metricsPath}`);
+        try {
+          app = await fetchJson(`${job.deployment.url}${manifest.metricsPath}`);
+        } catch (error) {
+          // Nothing answered: the app died after the record said live (e.g. the server restarted), so stop claiming it.
+          job.deployment.status = "stopped";
+          job.deployment.stoppedAt = new Date().toISOString();
+          await this.store.writeState(job);
+          throw error;
+        }
         validateMetrics(app);
       } catch (error) {
         app = { unavailable: true, message: error.message };

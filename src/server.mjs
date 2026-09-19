@@ -367,6 +367,19 @@ export async function createSoloFactoryServer(options = {}) {
         await enqueue(projectId, job.id, "resume", { front: true });
         return json(response, 202, { job, resumed: true, queued: queue.some((entry) => entry.jobId === job.id) });
       }
+      const relaunchMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/relaunch$/);
+      if (request.method === "POST" && relaunchMatch) {
+        const jobStore = storeOfJob(relaunchMatch[1]);
+        const job = await jobStore.read(relaunchMatch[1]);
+        const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider) });
+        factories.set(job.id, factory); // keeps the relaunched child reachable for shutdown
+        try {
+          return json(response, 200, { job: await factory.relaunch(job.id) });
+        } catch (error) {
+          if (error.code === "not_relaunchable") return json(response, 409, { error: error.message });
+          throw error;
+        }
+      }
       const restartMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/restart$/);
       if (request.method === "POST" && restartMatch) {
         const projectId = jobProject.get(restartMatch[1]) ?? active.id;

@@ -295,7 +295,10 @@ Only one job may be active because the target user does not benefit from resourc
 - `POST /api/jobs/:id/retry` — explicitly start over as a new run, queued at the front.
 - `GET /api/jobs/:id/artifacts/:name` — fetch an allowlisted factory artifact.
 - `GET /api/jobs/:id/telemetry` — combine lifecycle timing with the deployed app's local
-  metrics response.
+  metrics response. A live deployment that no longer answers is marked `stopped` here.
+- `POST /api/jobs/:id/relaunch` — start a completed run's built app again on a fresh port and
+  record the new deployment; `409` unless the run is completed with a non-live app and is the
+  newest run in its project.
 
 ## 10. Acceptance ledger
 

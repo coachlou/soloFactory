@@ -250,6 +250,8 @@ function resetRunPanels() {
   $("#app-live").textContent = "Waiting";
   $("#app-live").classList.add("muted");
   $("#open-app").classList.add("hidden");
+  $("#relaunch-button").classList.add("hidden");
+  $("#app-url").classList.add("hidden");
   $("#artifacts").replaceChildren(Object.assign(document.createElement("p"), { textContent: "Artifacts appear after specification." }));
 }
 
@@ -550,6 +552,10 @@ function renderJob() {
   $("#copy-recovery-button").classList.toggle("hidden", !job.recovery || !terminalFailure);
   $("#start-over-button").classList.toggle("hidden", !terminalFailure);
   $("#report-run-button").classList.toggle("hidden", !terminalFailure);
+  const url = $("#app-url");
+  url.classList.toggle("hidden", !job.deployment?.url);
+  url.textContent = job.deployment?.url ? `${job.deployment.url}${job.deployment.status === "live" ? "" : " · not running"}` : "";
+  $("#relaunch-button").classList.toggle("hidden", !(job.state === "completed" && job.deployment && job.deployment.status !== "live"));
   if (job.state === "completed" && job.deployment?.status === "live") {
     $("#open-app").href = job.deployment.url;
     $("#open-app").classList.remove("hidden");
@@ -655,6 +661,16 @@ $("#pause-button").addEventListener("click", async () => {
   } catch (error) {
     showError(error);
   }
+});
+
+$("#relaunch-button").addEventListener("click", async () => {
+  clearError();
+  $("#relaunch-button").disabled = true;
+  $("#relaunch-button").textContent = "Relaunching…";
+  await api(`/api/jobs/${state.job.id}/relaunch`, { method: "POST", body: {} }).catch(showError);
+  $("#relaunch-button").disabled = false;
+  $("#relaunch-button").textContent = "Relaunch app";
+  await poll();
 });
 
 $("#cancel-button").addEventListener("click", async () => {
