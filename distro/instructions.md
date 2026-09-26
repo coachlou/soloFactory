@@ -82,6 +82,9 @@ workspace — the guide and builders run in it and it gets its own `.aai/` on fi
 Inspect a project by reading its `.aai/*.md`, `.factory/*.md`, `git log`, and
 `.solofactory/runs/<id>/{state.json,events.jsonl}`.
 
+**Owner wants to work from the chat, not the browser** (interview, queue a build, watch it,
+recover a parked run): read `drive.md` in this directory and follow it.
+
 ## Maintain — refresh the library copy (library maintainers)
 
 This capability is owned by the soloFactory repo (`distro/` + `APP_FILES`).

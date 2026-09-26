@@ -359,6 +359,20 @@ Observed: `npm test` → **70/70**; hint verified live against a building follow
 
 Observed: `npm test` → **72/72**. Not observed: clicking Relaunch in the browser.
 
+## Drive the factory from the chat (2026-09-26, 0.9.1)
+
+- `distro/drive.md`: an agent runbook for using SoloFactory from Claude Code or Codex instead of
+  the browser. The agent runs the interview itself (per `skills/factory-guide.md`), posts the
+  brief to `POST /api/jobs` after the owner's explicit go, watches the run, and uses the recovery
+  endpoints. No server changes; it is the same JSON API the UI calls.
+- `distro/instructions.md` links to it, and the folder template no longer forbids driving the
+  interview (new installs only; existing `.aai/instructions.md` is never overwritten).
+- plugin.json 1.6.0, since the operating contract gained a mode.
+
+Observed: the drive.md flow end-to-end in demo mode (create project, queue brief, `completed`
+with a live URL, prd/plan/acceptance 200). A 2-character `primaryUser` was rejected as thin, as
+documented. Not observed: a real-provider run driven from chat.
+
 ## Backlog
 
 ### Ask pane: run-aware questions while the factory turns (idea, 2026-09-18)
