@@ -373,6 +373,12 @@ Observed: the drive.md flow end-to-end in demo mode (create project, queue brief
 with a live URL, prd/plan/acceptance 200). A 2-character `primaryUser` was rejected as thin, as
 documented. Not observed: a real-provider run driven from chat.
 
+## Manual: work from Claude Code or Codex (2026-09-26, 0.9.2)
+
+- `docs/manual/index.html` §11 tells owners the chat mode from 0.9.1 exists: what to ask, that
+  the agent interviews them and waits for their go, and that the run shows on the board. It also
+  covers the phrase to use in folders installed before 0.9.1, whose instructions still say browser.
+
 ## Backlog
 
 ### Ask pane: run-aware questions while the factory turns (idea, 2026-09-18)

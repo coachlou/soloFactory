@@ -47,6 +47,7 @@
       <li><a href="#recovery">When a run parks</a></li>
       <li><a href="#feedback">Report a problem</a></li>
       <li><a href="#settings">Settings</a></li>
+      <li><a href="#chat">Work from Claude Code or Codex</a></li>
     </ol>
   </nav>
 
@@ -139,6 +140,17 @@
     <tr><td><code>SOLOFACTORY_DEMO=1</code></td><td>Run with the deterministic fixture provider instead of a real agent.</td></tr>
     <tr><td><code>SOLOFACTORY_ISSUES_URL</code></td><td>Where feedback reports are filed.</td></tr>
   </table>
+  <h2 id="chat">11. Work from Claude Code or Codex</h2>
+  <p>You don't have to use the browser. Open Claude Code or Codex in your SoloFactory folder and ask for what you want, for example <em>"Build a habit tracker with the factory, from here in the chat."</em></p>
+  <ul>
+    <li><strong>It interviews you.</strong> The agent starts the factory if needed and asks the same questions the Factory Guide would, one at a time.</li>
+    <li><strong>You approve the brief.</strong> It shows you the finished brief in plain language. It queues the build only after you say go, because a real build spends your subscription.</li>
+    <li><strong>It watches the run.</strong> Ask <em>"How's my build doing?"</em> at any point. When the build finishes, the agent gives you the app's address.</li>
+    <li><strong>It asks before fixing.</strong> If a run parks, the agent reads the recovery checkpoint and explains what happened. It resumes, restarts or dismisses the run only after you agree.</li>
+  </ul>
+  <p>A run started from the chat is the same as one started in the browser. It shows up on the Factory board, and you can switch between the two at any time.</p>
+  <p class="muted">Folder set up before version 0.9.1? Its instructions still point the agent at the browser, so say which mode you want: <em>"Work from the chat, following SoloFactory's drive.md."</em></p>
+
   <p class="muted">Screenshots were taken from the demo mode (fixture provider), which is why every project is called Pocket Pulse.</p>
 </main>
 </body>
