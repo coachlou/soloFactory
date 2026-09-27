@@ -814,6 +814,7 @@ Work these yourself. Do not read this table out loud.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `warn  node 22+ not found on PATH` | Node missing, or installed in a stale window | Fresh terminal window first; if still missing, A4 / B3 |
+| `warn  node 26 is newer than SoloFactory supports` (any version above 24) | Node too new for some packages the factory builds with | A4 / B3 to install Node 24 |
 | `node 22+ is required` and it **exits** | Node not on PATH at all | A4 / B3 |
 | `no .aai/ above ...` | Running `start.sh` from the wrong folder, or a half-install | `cd ~/solofactory` first; if that fails, re-run the installer |
 | Page says *"Select an authenticated subscription provider"* | CLI missing or not signed in | C2 |

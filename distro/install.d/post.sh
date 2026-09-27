@@ -13,6 +13,11 @@ RUN="$HERE/.aai/skills/solofactory/run.sh"; [ -f "$RUN" ] || RUN="$HERE/.ailib/s
 exec bash "$RUN" "$@"
 SH
 chmod +x "$TARGET/start.sh"
-command -v node >/dev/null && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 22 ] \
-  || echo "  warn  node 22+ not found on PATH — SoloFactory will not start until it is installed"
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  echo "  warn  node 22+ not found on PATH — SoloFactory will not start until it is installed"
+elif [ "$NODE_MAJOR" -gt 24 ]; then
+  # ponytail: warn only; the app runs, but native packages (better-sqlite3) often lack prebuilds this new. Bump when 26 has them.
+  echo "  warn  node $NODE_MAJOR is newer than SoloFactory supports — install Node 24 LTS (see INSTALL.md A4 / B3)"
+fi
 echo "start:  bash '$TARGET/start.sh'   → http://127.0.0.1:4173"
