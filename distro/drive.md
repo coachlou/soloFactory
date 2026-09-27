@@ -56,7 +56,7 @@ solofactory", "what can I do", "how's my app"), or reply with a bare number, run
 | No projects, or none with a run | Start my first app · How does this work? | step 2 (new project) + step 3 · a 3-line explanation: you describe it, you approve the plan, it builds and checks it |
 | A completed app, nothing running | Add or change features · Start a new app · Open it | follow-on build (below) · step 2 + 3 · give `deployment.url`, `POST /relaunch` first if it doesn't load |
 | A card in `queued`…`deploying` | How far along is it? · Show me the plan · Pause it · Stop it | stage + `slices.done/total` in words · `artifacts/plan` summarized · `/pause` · `/cancel`, both after a yes |
-| A card in `parked` | What went wrong? · Pick up where it stopped · Go back to an earlier feature · Set it aside | read `recovery-packet`, explain it plainly · `/resume` (only if `recovery.canResume`) · `/restart` with a completed slice · `/dismiss`, all after a yes |
+| A card in `parked` | What went wrong? · Pick up where it stopped · Go back to an earlier feature · Set it aside | read `recovery-packet`, explain it plainly · `/resume` (only if `recovery.canResume`) · `/restart` with a completed slice · `/dismiss`, all after a yes. Before a set-aside or start over, on an app that already shipped, say the half-built changes will be dropped; resume keeps them |
 | A queued card with `blockedBy` | lead with "It's waiting behind a stopped build", then the `parked` row for that build | |
 | Two or more projects with runs | Which app? (list names) · Start a new app | `POST /api/projects/select`, then re-read the row |
 
@@ -163,7 +163,7 @@ of these actions:
 |---|---|
 | `/api/jobs/<id>/resume` | continues from the last good point (when `job.recovery.canResume`) |
 | `/api/jobs/<id>/restart` `{"fromSlice":"<slice id>"}` | re-runs from a completed slice onward |
-| `/api/jobs/<id>/dismiss` | accepts the run as-is and unblocks the project's queue |
+| `/api/jobs/<id>/dismiss` | sets the run aside and unblocks the project's queue; if the app shipped before, puts it back to that release (its `data/` is kept) |
 | `/api/jobs/<id>/pause`, `/cancel` | pauses or stops an active run, or dequeues a queued one |
 | `/api/jobs/<id>/relaunch` | restarts a completed app whose server stopped |
 | GET `/api/jobs/<id>/recovery-packet` | the diagnosis to read before suggesting a fix |

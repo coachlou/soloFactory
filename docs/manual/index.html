@@ -118,7 +118,7 @@
     <tr><td><b class="btn">Cancel run</b></td><td>While active</td><td>Stops work now. The workspace stays as it was.</td></tr>
     <tr><td><b class="btn">Restart from slice</b></td><td>On a parked slice run, for every completed slice after the first</td><td>Rewinds the tree to the commit before that slice and rebuilds it and everything after, exactly once. Earlier slices keep their commits.</td></tr>
     <tr><td><b class="btn">Start over</b></td><td>On a parked run</td><td>Creates a brand-new run from the same brief. Use it when the first slice itself is wrong.</td></tr>
-    <tr><td><b class="btn">Dismiss</b></td><td>On a parked run</td><td>Releases the project's queue without fixing this run.</td></tr>
+    <tr><td><b class="btn">Dismiss</b></td><td>On a parked run</td><td>Sets this run aside and releases the project's queue. If the app shipped before, it goes back to that release; its saved records are kept.</td></tr>
   </table>
 
   <h2 id="recovery">8. When a run parks</h2>
