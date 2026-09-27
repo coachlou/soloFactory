@@ -459,6 +459,13 @@ Relaunch works again on the restored release. Known gaps: an app that already st
 outside `data/` is still tracked; owner hand-edits made after a failure are dropped by the
 rollback. Verified: unit and e2e tests (76/76).
 
+## Run telemetry and repair fixes (2026-09-27, 0.9.6)
+
+Ships the token telemetry and the two repair fixes it exposed (see "Token telemetry and the
+runs log" and "Repair fixes found from the telemetry" above): cost per run on the build card
+and in `runs.jsonl`, headless Claude may run the npm gate commands, and a crash on launch gets
+one repair turn. Verified: 83/83.
+
 ## Backlog
 
 ### Ask pane: run-aware questions while the factory turns (idea, 2026-09-18)
