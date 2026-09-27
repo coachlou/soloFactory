@@ -141,15 +141,45 @@
     <tr><td><code>SOLOFACTORY_ISSUES_URL</code></td><td>Where feedback reports are filed.</td></tr>
   </table>
   <h2 id="chat">11. Work from Claude Code or Codex</h2>
-  <p>You don't have to use the browser. Open Claude Code or Codex in your SoloFactory folder and ask for what you want, for example <em>"Build a habit tracker with the factory, from here in the chat."</em></p>
+  <p>You don't have to use the browser. Open Claude Code or Codex in your SoloFactory folder and say <em>"hey solofactory"</em>. The agent checks where your apps stand, tells you in a sentence, and ends every reply with numbered options. Answer with a number or in your own words.</p>
+  <pre><code>You:   hey solofactory
+
+Agent: Your habit tracker is live at http://127.0.0.1:49762.
+       Nothing is building right now.
+
+       1. Add or change features in the habit tracker
+       2. Start a new app
+       3. Open the habit tracker
+       4. Report a problem with the factory
+
+You:   1 — I want reminders, a streak counter, and dark mode
+
+Agent: Got it, three changes. A few quick questions...
+       Here's the plan: ... This uses your subscription.
+
+       1. Go, build it
+       2. Change something first
+
+You:   1
+
+Agent: Queued. ... Reminders are built and passed their checks (1 of 3).
+       ... Done. All three work: http://127.0.0.1:49762</code></pre>
+  <p>The options change with where you are:</p>
+  <table>
+    <tr><th>Where you are</th><th>What you're offered</th></tr>
+    <tr><td>No apps yet</td><td>Start my first app · How does this work?</td></tr>
+    <tr><td>An app is live</td><td>Add or change features · Start a new app · Open it · Report a problem with the factory</td></tr>
+    <tr><td>A build is running</td><td>How far along is it? · Show me the plan · Pause it · Stop it</td></tr>
+    <tr><td>A build stopped with a problem</td><td>What went wrong? · Pick up where it stopped · Go back to an earlier feature · Set it aside</td></tr>
+    <tr><td>More than one app</td><td>Which app? · Start a new app</td></tr>
+  </table>
   <ul>
-    <li><strong>It interviews you.</strong> The agent starts the factory if needed and asks the same questions the Factory Guide would, one at a time.</li>
-    <li><strong>You approve the brief.</strong> It shows you the finished brief in plain language. It queues the build only after you say go, because a real build spends your subscription.</li>
-    <li><strong>It watches the run.</strong> Ask <em>"How's my build doing?"</em> at any point. When the build finishes, the agent gives you the app's address.</li>
-    <li><strong>It asks before fixing.</strong> If a run parks, the agent reads the recovery checkpoint and explains what happened. It resumes, restarts or dismisses the run only after you agree.</li>
+    <li><strong>Ask for several features at once.</strong> They go in as one request. The factory builds them one at a time and checks each before starting the next, so nothing reaches you untested.</li>
+    <li><strong>Nothing costs you without a yes.</strong> The agent shows the plan and builds only after you say go. It also asks before pausing, stopping, or fixing a run.</li>
+    <li><strong>Only real options.</strong> If you ask for something the factory can't do, the agent says so and shows your options again.</li>
   </ul>
-  <p>A run started from the chat is the same as one started in the browser. It shows up on the Factory board, and you can switch between the two at any time.</p>
-  <p class="muted">Folder set up before version 0.9.1? Its instructions still point the agent at the browser, so say which mode you want: <em>"Work from the chat, following SoloFactory's drive.md."</em></p>
+  <p>A build started from the chat also shows up on the Factory board, and you can switch between the chat and the browser at any time.</p>
+  <p class="muted">Folder set up before version 0.9.1? Its instructions still point the agent at the browser, so the first time say <em>"hey solofactory — work from the chat, following SoloFactory's drive.md."</em></p>
 
   <p class="muted">Screenshots were taken from the demo mode (fixture provider), which is why every project is called Pocket Pulse.</p>
 </main>

@@ -1,8 +1,8 @@
 # Drive SoloFactory from the chat
 
-Read this when the owner wants to use the factory from Claude Code (or Codex) instead of the
-browser: "build this with the factory from here", "run the factory in chat", "check on my
-build". The browser UI and this guide use the same local JSON API, so a run started here
+Read this when the owner uses the factory from Claude Code (or Codex) instead of the
+browser: "hey solofactory", "build this with the factory from here", "how's my app", "add
+dark mode to my app". Start at section 0. The browser UI and this guide use the same local JSON API, so a run started here
 shows up on the board, and a run started in the browser can be watched from here.
 
 ## Important
@@ -18,6 +18,51 @@ shows up on the board, and a run started in the browser can be watched from here
 - The server binds to `127.0.0.1` and dies with its terminal. Start it in the background and
   keep it running while the build or the built app is in use.
 - Never edit `state.json` or `events.jsonl` by hand. Every recovery action has an endpoint.
+
+## 0. Orchestrate: where they are, then what they can do
+
+Most owners never learn commands. When they mention the factory from the chat ("hey
+solofactory", "what can I do", "how's my app"), or reply with a bare number, run this loop:
+
+1. **Look before you talk.** Start the server (step 1) if needed, then read
+   `GET /api/board` (cards under `columns`), `GET /api/projects`, and `GET /api/config`.
+   Judge each project by its newest card only. `GET /api/jobs/<id>` gives
+   `job.deployment.url`, `job.brief`, and `job.dismissed`. A parked run with
+   `dismissed: true` was set aside, so skip it. Projects with `runCount: 0` (every folder has
+   an empty `default`) don't count as apps.
+2. **Say where they are in one or two plain sentences.** Name the app by its project name, and
+   give the link or the stage. Don't mention job ids, states, or endpoints.
+3. **End every reply with 2–4 numbered options** from the row below that matches, so they can
+   answer "2". Offer only options from this table. For anything else, say "The factory can't
+   do that yet" and show the options again.
+
+| Where they are (from the board) | Offer | Each option does |
+|---|---|---|
+| No projects, or none with a run | Start my first app · How does this work? | step 2 (new project) + step 3 · a 3-line explanation: you describe it, you approve the plan, it builds and checks it |
+| A completed app, nothing running | Add or change features · Start a new app · Open it · Report a problem with the factory | follow-on build (below) · step 2 + 3 · give `deployment.url`, `POST /relaunch` first if it doesn't load · feedback (below), only when `config.issues` is set |
+| A card in `queued`…`deploying` | How far along is it? · Show me the plan · Pause it · Stop it | stage + `slices.done/total` in words · `artifacts/plan` summarized · `/pause` · `/cancel`, both after a yes |
+| A card in `parked` | What went wrong? · Pick up where it stopped · Go back to an earlier feature · Set it aside | read `recovery-packet`, explain it plainly · `/resume` (only if `recovery.canResume`) · `/restart` with a completed slice · `/dismiss`, all after a yes |
+| A queued card with `blockedBy` | lead with "It's waiting behind a stopped build", then the `parked` row for that build | |
+| Two or more projects with runs | Which app? (list names) · Start a new app | `POST /api/projects/select`, then re-read the row |
+
+When the state changes (a build finishes or stops), re-read and offer the new row.
+
+**Add or change features (follow-on build).** This is how an owner adds things to an app that
+already works, including several features at once and fixes to it ("the streak counter is
+wrong"). Select the project and ask only about the change, one question at a time. Then write
+a brief for *this release only*. Copy the unchanged fields from the last completed job's
+`brief` and rewrite `promise`, `mustHaves`, `acceptanceScenarios`, and `nonGoals` for the
+change. The factory sees the existing app and keeps what's already delivered. Use
+`"sdlc": "slices"` when they ask for more than one feature, so each is built and checked
+before the next. Show the plan and queue only on "go", as in step 4. Features are never
+delivered before their checks pass. If an owner asks to skip testing, say so plainly.
+
+**Report a problem with the factory** (not with their app; that's a follow-on build). Ask
+what happened and what they expected. `POST /api/feedback/preview` with
+`{"mode":"problem","fields":{"title":"…","happened":"…","expected":"…"},"jobId":"<id>","includeDiagnostics":true}`
+(diagnostics only for a failed, interrupted, or cancelled run) returns redacted `markdown`.
+Show it, then give them `<config.issues.base>/new?template=problem.yml` to paste it into.
+Never file it yourself.
 
 ## 1. Start the server
 

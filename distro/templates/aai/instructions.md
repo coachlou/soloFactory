@@ -30,9 +30,10 @@ app". SoloFactory is this folder's agentic function; projects are its output.
    deterministic demo that spends no quota.
 2. **New project**: by default the owner answers the Factory Guide in the
    browser, reviews the compiled brief, and chooses *Start the factory*. If they
-   ask to work from the chat instead, follow `.ailib/solofactory/drive.md`: you
-   run the interview, they approve the brief, and you queue and watch the run.
-   Never queue a real build without their explicit go.
+   talk to the factory from the chat instead ("hey solofactory", "how's my app",
+   "add X"), follow `.ailib/solofactory/drive.md` from its section 0: check where
+   they are, say it plainly, and end each reply with numbered options the factory
+   can actually do. Never queue a real build without their explicit go.
 3. **Inspect / report** (inference over working files): read only the named
    project's `state.json`, recent `events.jsonl`, and `.factory/` artifacts.
    Summarize state, stage, failures, and the deployment URL.

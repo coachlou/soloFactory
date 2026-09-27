@@ -379,6 +379,19 @@ documented. Not observed: a real-provider run driven from chat.
   the agent interviews them and waits for their go, and that the run shows on the board. It also
   covers the phrase to use in folders installed before 0.9.1, whose instructions still say browser.
 
+## Chat orchestrator: where you are, what you can do (2026-09-26, 0.9.3)
+
+Owners who prefer the chat get a guided loop instead of commands. `distro/drive.md` §0: the
+agent reads board/projects/config, says where the owner is in plain words, and ends every
+reply with 2–4 numbered options from a state table (no apps · app live · building · parked ·
+blocked · several apps). Each option maps to an existing endpoint; anything else gets "the
+factory can't do that yet". Adds the follow-on flow (add/change features, several at once,
+checked one at a time) and chat-side problem reports via `/api/feedback/preview`.
+`instructions.md` and the folder template route "hey solofactory" etc. there; manual §11
+rewritten around a sample conversation. Demo-verified every row except live pause (demo runs
+finish too fast). Known demo limit: the fixture's slice plan covers only SC-1, so a
+multi-scenario `slices` follow-on parks with `invalid_slice_plan` in demo mode only.
+
 ## Backlog
 
 ### Ask pane: run-aware questions while the factory turns (idea, 2026-09-18)
