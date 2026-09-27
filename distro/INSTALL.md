@@ -74,6 +74,40 @@ SoloFactory installer → start it.**
 
 ---
 
+## The install command — online, or from a zip
+
+A6, B5 and U2 all run **the same install command**, and it is always safe on an existing
+install: it refreshes the machinery in `.ailib/` and `start.sh`, keeps `.aai/` if it is
+there, and never touches `projects/`. It comes in two forms:
+
+- **Online (default):** the `curl … bootstrap.sh` line shown in those steps. It downloads
+  the release from a private GitHub repo, so it needs the `gh` CLI signed in to an account
+  with access (`gh auth status`), or `GITHUB_TOKEN` set. Without that it stops with a line
+  saying to *ask for an invite* — that is not a broken machine; switch to the zip.
+- **From a zip:** if the owner was sent a `solofactory-<version>.zip` (testers are), have
+  them unzip it — double-clicking it is enough — and find the installer:
+
+  ```sh
+  find ~/Downloads /mnt/c/Users/*/Downloads -maxdepth 4 -path '*solofactory-*/library/ambient-folder/install.sh' 2>/dev/null
+  ```
+
+  > This finds the SoloFactory package you downloaded. It changes nothing. Copy back what
+  > it prints.
+
+  Use the newest path it prints (highest version) as `<installer>`; if it prints nothing,
+  ask where they saved the zip. Then, wherever a step shows the `curl` line, run this
+  instead:
+
+  ```sh
+  cd ~ && bash "<installer>" solofactory solofactory
+  ```
+
+  Its output is the same `keep` / `sync` / `write` / `start:` lines as the online form.
+  On Windows the zip sits on the Windows side (`/mnt/c/...`); that is fine to install
+  *from*, and the install itself still lands in the Ubuntu home folder.
+
+---
+
 ## Step 0 — New install, or an update?
 
 Two different jobs share this runbook. A **new install** walks Track A or B, then Part C.
@@ -267,6 +301,10 @@ Expect a path such as `/usr/local/bin/claude` or `/Users/<name>/.npm-global/bin/
 run it again.
 
 ## A6. Install SoloFactory
+
+If you skipped the Step 0 check, run it now: an existing `~/solofactory` means this is an
+update — go to **Updating an existing install** instead, so the owner gets the update checks.
+Sent a zip? Use the zip form from **The install command**.
 
 Ask where it should live. Default to a folder named `solofactory` in their home directory,
 and do not make them choose a path if they have no opinion.
@@ -519,6 +557,10 @@ command -v claude
 
 ## B5. Install SoloFactory
 
+If you skipped the Step 0 check, run it now: an existing `~/solofactory` means this is an
+update — go to **Updating an existing install** instead, so the owner gets the update checks.
+Sent a zip? Use the zip form from **The install command**.
+
 **It must live inside the Ubuntu home folder, never in `/mnt/c/`.** Windows drives mounted
 into Linux have different file permissions and are dramatically slower, and git behaves
 incorrectly on them. `cd ~` handles this; do not let the owner talk you into a Windows path
@@ -654,6 +696,8 @@ Updating underneath a running server leaves it serving stale code until restarte
 
 ## U2. Run the update
 
+Sent a zip? Use the zip form from **The install command** — same result.
+
 ```sh
 cd ~ && curl -fsSL https://raw.githubusercontent.com/coachlou/ambient-library/main/library/ambient-folder/bootstrap.sh | bash -s -- solofactory solofactory
 ```
@@ -720,6 +764,14 @@ breath:
 
 **If they were on 0.7.x**, the only visible change is the **Manual** button in the header.
 
+**If they were below 0.9.3 before the update**, they can now drive the factory from the
+chat instead of the browser. The update leaves their folder's own instructions alone, and
+those still point the agent at the browser, so tell them the first-time phrase:
+
+> New: you can run the whole factory from this chat instead of the browser. The first time,
+> say "hey solofactory — work from the chat, following SoloFactory's drive.md". After that,
+> "hey solofactory" is enough. The browser still works exactly as before.
+
 Do not walk an updating owner through Part C. They already know how to use the app; the
 update is finished once U4 holds.
 
@@ -751,6 +803,7 @@ Work these yourself. Do not read this table out loud.
 | `requires a newer version of Codex` | Codex CLI is out of date | Update the Codex CLI, then restart the server |
 | Browser shows "can't connect" / "site can't be reached" | The server window was closed or `Control`+`C`'d | Restart with `cd ~/solofactory && bash start.sh` and leave it running |
 | `EADDRINUSE` | Something else is on port 4173 | Start with a different port: `cd ~/solofactory && PORT=5000 bash start.sh`, then use `http://127.0.0.1:5000` |
+| `ask for an invite to that repo` right after the `curl` line | No GitHub access to the private release | `gh auth login` with an account that has access, or use a zip — see **The install command** |
 | `rsync: command not found` | Ubuntu missing rsync | B2 |
 | `curl: command not found` | Ubuntu missing curl | B2 |
 | `git: command not found` | git missing | A3 / B2 |
