@@ -489,6 +489,8 @@ test("a project with a shipped manifest specs and slices the brief as a follow-o
   const result = await factory.start(job.id);
   assert.equal(result.state, "completed", result.error?.message);
   assert.equal(result.followOn, true);
+  assert.match(result.baseCommit, /^[0-9a-f]{40}$/, "a follow-on records the shipped app's commit to rewind to");
+  assert.equal(await store.git("show", `${result.baseCommit}:factory.json`), '{"version":1}');
   assert.match(prompts.specification, /follow-on release/);
   assert.match(prompts.specification, /cumulative/);
   assert.doesNotMatch(prompts.specification, /Slice 1 must be a thin walking skeleton/);
@@ -510,6 +512,7 @@ test("a project with a shipped manifest specs and slices the brief as a follow-o
     deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9976" }),
   }).start(fresh.id);
   assert.equal(freshResult.followOn, false);
+  assert.equal(freshResult.baseCommit, undefined, "a first build has no good version to rewind to");
   assert.match(freshPrompts.specification, /Slice 1 must be a thin walking skeleton/);
 });
 

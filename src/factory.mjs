@@ -106,6 +106,13 @@ export class SoloFactory {
       // A manifest already in the project means an earlier release shipped: spec and slice
       // this brief as an increment on top of it. Stamped once so resumes stay consistent.
       job.followOn ??= existsSync(path.join(appDir, "factory.json"));
+      // The shipped app (plus anything attached since) is what "Set it aside" and "Start over"
+      // rewind a failed follow-on to; data/ is gitignored, so the rewind keeps owner data.
+      // Only a clean tree is a safe point: if the commit failed, record nothing and never rewind.
+      if (job.followOn && !job.baseCommit) {
+        await this.commit(job, "factory: before follow-on");
+        if (!(await this.store.git("status", "--porcelain").catch(() => "unknown"))) job.baseCommit = await this.store.git("rev-parse", "HEAD");
+      }
       await mkdir(path.join(factoryDir, "logs"), { recursive: true });
       await writeFile(
         path.join(factoryDir, "requirements.json"),

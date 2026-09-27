@@ -135,6 +135,13 @@ export async function createSoloFactoryServer(options = {}) {
   for (const { projectId, job } of queuedJobs.sort((a, b) => a.job.createdAt.localeCompare(b.job.createdAt))) enqueue(projectId, job.id);
 
   const storeOfJob = (id) => storeFor(jobProject.get(id) ?? active.id);
+  // Setting aside or starting over a parked follow-on puts the shipped app back. Runs once per job:
+  // the dismissed flag guards it, so a later build is never rewound. Resume keeps the half-built work.
+  const rollBack = async (job, jobStore) => {
+    if (!PARKED.has(job.state) || job.dismissed || !job.baseCommit) return;
+    await jobStore.reset(job.baseCommit);
+    await jobStore.appendEvent(job.id, { type: "job.rolled_back", state: job.state, message: `App restored to the release before this run (${job.baseCommit.slice(0, 7)})` });
+  };
   const busyJobId = () => runs.get(active.id)?.jobId ?? null;
   const schedulerStatus = () => ({ busyJobId: busyJobId(), maxActiveRuns, activeRuns: [...runs].map(([projectId, run]) => ({ projectId, jobId: run.jobId })) });
 
@@ -383,6 +390,7 @@ export async function createSoloFactoryServer(options = {}) {
         const jobStore = storeOfJob(dismissMatch[1]);
         const job = await jobStore.read(dismissMatch[1]);
         if (!PARKED.has(job.state)) return json(response, 409, { error: "Only a parked run can be dismissed." });
+        await rollBack(job, jobStore);
         job.dismissed = true;
         await jobStore.writeState(job);
         await jobStore.appendEvent(job.id, { type: "job.dismissed", state: job.state, message: "Dismissed by owner; queued runs may proceed" });
@@ -444,6 +452,7 @@ export async function createSoloFactoryServer(options = {}) {
         const job = await jobStore.create({ brief: original.brief, transcript: original.transcript, provider: original.provider, sdlc: original.sdlc ?? "single" });
         // Starting over replaces the original, so it no longer holds the queue, and the new run goes first.
         if (PARKED.has(original.state)) {
+          await rollBack(original, jobStore);
           original.dismissed = true;
           await jobStore.writeState(original);
         }

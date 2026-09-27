@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createSoloFactoryServer } from "../src/server.mjs";
@@ -359,7 +360,13 @@ test("briefs queue per project, overlap across projects, and wait behind a parke
   assert.equal(dequeued.dequeued, true);
   assert.equal((await getJson(`${base}/api/jobs/${a4.id}`)).job.state, "cancelled");
   const a5 = (await submit()).job;
+  // Setting aside a failed follow-on rewinds the app to the release before it, keeping owner data.
+  await writeFile(path.join(dirA, "half-built.js"), "// left by the failed run\n");
+  await mkdir(path.join(dirA, "data"), { recursive: true });
+  await writeFile(path.join(dirA, "data", "habits.json"), '["day 1"]');
   await postJson(`${base}/api/jobs/${a3.id}/dismiss`, {});
+  assert.equal(existsSync(path.join(dirA, "half-built.js")), false, "the failed run's work is rolled back");
+  assert.equal(await readFile(path.join(dirA, "data", "habits.json"), "utf8"), '["day 1"]', "owner data survives the rollback");
   assert.equal((await waitForJob(base, a5.id, ["completed"])).state, "completed", "dismissing the parked run releases the queue");
 });
 
