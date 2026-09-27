@@ -299,6 +299,12 @@ Only one job may be active because the target user does not benefit from resourc
 - `POST /api/jobs/:id/relaunch` — start a completed run's built app again on a fresh port and
   record the new deployment; `409` unless the run is completed with a non-live app and is the
   newest run in its project.
+- `POST /api/feedback/preview` — validate a problem or improvement report and return redacted
+  markdown, with an allowlisted run summary when asked for a failed, interrupted, or cancelled run.
+- `POST /api/errors` — `{ source: "browser" | "chat", message, action?, code?, jobId?, project? }`:
+  append a scrubbed entry to the factory home's `errors.jsonl`; `202`. The server also appends
+  its own failures (catch-all request errors, failed runs, scheduler errors).
+- `GET /api/errors?limit=N` — the latest `N` (default 50, max 500) error-log entries.
 
 ## 10. Acceptance ledger
 

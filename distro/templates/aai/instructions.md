@@ -36,7 +36,8 @@ app". SoloFactory is this folder's agentic function; projects are its output.
    can actually do. Never queue a real build without their explicit go.
 3. **Inspect / report** (inference over working files): read only the named
    project's `state.json`, recent `events.jsonl`, and `.factory/` artifacts.
-   Summarize state, stage, failures, and the deployment URL.
+   Summarize state, stage, failures, and the deployment URL. For errors across runs, the
+   browser, and chat, read `.aai/memory/solofactory/errors.jsonl` (newest last).
 4. **Resume / recover**: interrupted runs are recoverable from the UI; point the
    owner there rather than editing `state.json` by hand.
 5. **Update the factory**: re-run the installer from the library
@@ -49,7 +50,7 @@ app". SoloFactory is this folder's agentic function; projects are its output.
 - `projects/<name>/` → the generated application (git repo, `git log` = build history), deployed on a loopback port
 - `projects/<name>/.factory/{PRD,PLAN,ACCEPTANCE}.md` → the frozen contract
 - `projects/<name>/.aai/` → the project's own context (committed) and `memory/interviews/guide.log` (ignored)
-- `.aai/memory/solofactory/` → which project is active
+- `.aai/memory/solofactory/` → which project is active, and `errors.jsonl` (the scrubbed operational error log)
 
 ## Rules
 

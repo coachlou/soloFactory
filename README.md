@@ -89,6 +89,19 @@ The value must be exactly that shape, with no query string or fragment; anything
 treated as unset and the buttons stay hidden. GitHub links carry only the issue template and
 title. The report body always travels through your clipboard.
 
+From Claude Code or Codex, *Report a problem with the factory* is always the last numbered
+option: the agent drafts the same report and gives you the email route (or the issue link when
+`SOLOFACTORY_ISSUES_URL` is set). It never sends anything itself.
+
+### Error log
+
+Every operational error is appended to `errors.jsonl` in the factory home
+(`SOLOFACTORY_HOME`; `.aai/memory/solofactory/` in an installed folder), one JSON line each
+with `at`, `version`, and `source`: `server` (a failed request), `run` (a run that failed),
+`scheduler`, `browser` (every error notice the UI shows, plus uncaught errors), or `chat` (a
+failed call the chat agent made). Messages are capped and scrubbed of paths and secrets. The
+file never leaves your machine; `GET /api/errors?limit=50` returns the latest entries.
+
 ## Operational boundaries
 
 - SoloFactory binds to `127.0.0.1` by default and handles one active build at a time.
