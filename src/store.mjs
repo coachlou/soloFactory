@@ -60,6 +60,12 @@ export class JobStore {
       if (current.includes("ambient folder")) continue;
       await writeFile(target, `${current}${current && !current.endsWith("\n") ? "\n" : ""}${current ? "\n" : ""}${ANCHOR}`);
     }
+    // Appended by heading rather than templated, so projects scaffolded before 0.9.5 get it too.
+    const instructions = path.join(this.project, ".aai", "instructions.md");
+    const rules = await readFile(instructions, "utf8");
+    if (!rules.includes("## The app is live")) {
+      await writeFile(instructions, `${rules}${rules.endsWith("\n") ? "" : "\n"}${await readFile(path.join(templatesRoot, "live-app.md"), "utf8")}`);
+    }
   }
 
   jobsRoot() {

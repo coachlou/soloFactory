@@ -450,6 +450,21 @@ test("init scaffolds project context once and never overwrites it", async () => 
   assert.equal(agents.split("ambient folder").length, 2, "anchor appended exactly once");
 });
 
+test("init adds the live-app rules once, including to projects scaffolded before them", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solofactory-live-"));
+  const instructions = path.join(root, ".aai", "instructions.md");
+  await mkdir(path.dirname(instructions), { recursive: true });
+  await writeFile(instructions, "# old project — Behavior\n\n- owner's own rule\n");
+  const store = new JobStore(root);
+  await store.init();
+  await store.init();
+  const text = await readFile(instructions, "utf8");
+  assert.ok(text.startsWith("# old project — Behavior\n\n- owner's own rule\n"), "existing rules kept");
+  assert.equal(text.split("## The app is live").length, 2, "section appended exactly once");
+  assert.match(text, /data\//);
+  assert.match(text, /hey solofactory/);
+});
+
 test("a project with a shipped manifest specs and slices the brief as a follow-on release", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-followon-"));
   const store = new JobStore(root);
