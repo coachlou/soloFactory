@@ -772,6 +772,16 @@ those still point the agent at the browser, so tell them the first-time phrase:
 > say "hey solofactory — work from the chat, following SoloFactory's drive.md". After that,
 > "hey solofactory" is enough. The browser still works exactly as before.
 
+**If they were below 0.9.5 before the update** and any `projects/<name>/` holds a
+`factory.json` (a finished app), tell them this. Apps built from 0.9.5 on keep their saved
+records in a `data/` folder the factory never touches, but an older app may keep them
+somewhere the factory can't tell apart from its code, so a new feature build or a set-aside
+could change or remove them:
+
+> One thing to do before you ask for your next feature: if you've been saving real records
+> in an app you built before today, copy that app's folder somewhere safe first. Apps built
+> from now on keep their records where the factory never touches them.
+
 Do not walk an updating owner through Part C. They already know how to use the app; the
 update is finished once U4 holds.
 
