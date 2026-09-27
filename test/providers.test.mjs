@@ -70,3 +70,22 @@ test("each unusable Claude state names its own fix", () => {
   assert.equal(helper.authenticated, false);
   assert.match(helper.detail, /API key/);
 });
+
+// Shapes captured from the real CLIs on 2026-09-26 (claude 'reply with ok', codex exec --json).
+test("usage parses both CLIs into one shape and sums without inventing a cost", async () => {
+  const { claudeUsage, codexUsage, addUsage } = await import("../src/providers.mjs");
+  const claude = claudeUsage({
+    total_cost_usd: 0.1325718,
+    usage: { input_tokens: 2, cache_creation_input_tokens: 31783, cache_read_input_tokens: 26979, output_tokens: 4 },
+    modelUsage: { "claude-sonnet-5": {} },
+  });
+  assert.deepEqual(claude, { inputTokens: 58764, cachedInputTokens: 26979, cacheWriteTokens: 31783, outputTokens: 4, costUsd: 0.1325718, models: ["claude-sonnet-5"] });
+
+  const codex = codexUsage({ input_tokens: 23152, cached_input_tokens: 12032, cache_write_input_tokens: 0, output_tokens: 5, reasoning_output_tokens: 0 }, "gpt-5.6-sol");
+  assert.equal(codex.inputTokens, 23152);
+  assert.equal(codex.costUsd, null);
+  assert.equal(addUsage(codex, codex).costUsd, null);
+  assert.equal(addUsage(codex, codex).outputTokens, 10);
+  assert.equal(addUsage(null, claude), claude);
+  assert.equal(claudeUsage({ result: "no usage block" }), null);
+});

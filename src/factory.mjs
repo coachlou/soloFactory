@@ -1,12 +1,30 @@
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./process.mjs";
 import { buildPrompt, continuationPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
 import { orderSlices, validateSlicePlan } from "./wbs.mjs";
+import { addUsage } from "./providers.mjs";
+
+// Which harness produced a run, so runs.jsonl can compare harness changes. Read once at load.
+const harnessRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+const HARNESS = {
+  version: JSON.parse(await readFile(path.join(harnessRoot, "package.json"), "utf8")).version,
+  commit: (() => {
+    try {
+      const sha = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: harnessRoot, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+      const dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { cwd: harnessRoot, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+      return dirty ? `${sha}-dirty` : sha;
+    } catch {
+      return null;
+    }
+  })(),
+};
 
 const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted", "paused"]);
 // A pause lands only where the tree is green and committed: before a stage that follows a passed gate.
@@ -77,8 +95,9 @@ export class SoloFactory {
   async activate(jobId, runner) {
     if (this.active) throw new FactoryError("factory_busy", `Run ${this.active.jobId} is already active.`);
     const controller = new AbortController();
-    const promise = runner(controller.signal).finally(() => {
+    const promise = runner(controller.signal).finally(async () => {
       if (this.active?.jobId === jobId) this.active = null;
+      await this.logRun(jobId).catch(() => {});
     });
     this.active = { jobId, controller, promise };
     return promise;
@@ -325,13 +344,20 @@ export class SoloFactory {
           : await this.deployLocal(job, manifest, signal);
         break;
       } catch (error) {
-        // The app runs but breaks the metrics contract: that is a code defect the repair worker can fix,
-        // unlike a crash or port problem. Same bounded repair budget as the deterministic gates.
-        if (error.code !== "invalid_metrics") throw error;
+        // A broken metrics contract or a crash on launch is usually a code defect the repair worker can fix
+        // (e.g. a production-only env check); a port or timeout problem is not. Same bounded repair budget as the gates.
+        if (error.code !== "invalid_metrics" && error.code !== "deployment_exited") throw error;
         this.deployments.get(job.id)?.kill("SIGTERM");
         await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "deploy", message: error.message });
-        const received = error.details?.received ? `\nReceived top-level keys: ${error.details.received.join(", ")}` : "";
-        error.details = { ...error.details, gate: "deploy", output: `GET ${manifest.metricsPath} failed the controller's metrics contract.\n${error.message}${received}` };
+        let output;
+        if (error.code === "invalid_metrics") {
+          const received = error.details?.received ? `\nReceived top-level keys: ${error.details.received.join(", ")}` : "";
+          output = `GET ${manifest.metricsPath} failed the controller's metrics contract.\n${error.message}${received}`;
+        } else {
+          const log = await readFile(path.join(appDir, ".factory", "logs", "deployment.log"), "utf8").catch(() => "");
+          output = `The app exited on launch. It runs with only PORT and NODE_ENV=production set; it must start without any other env vars.\n${error.message}\n${log.slice(-8_000)}`;
+        }
+        error.details = { ...error.details, gate: "deploy", output };
         job = await this.repair(job, error, signal);
         job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: true });
       }
@@ -433,7 +459,7 @@ export class SoloFactory {
       job.agentSessions[label] = result.sessionId;
       await this.store.writeState(job);
     }
-    await this.emit(job.id, { type: "agent.completed", state: job.state, message: `${label} worker completed` });
+    await this.emit(job.id, { type: "agent.completed", state: job.state, stage: label, usage: result.usage ?? null, message: `${label} worker completed` });
     return result;
   }
 
@@ -619,7 +645,7 @@ export class SoloFactory {
     return job;
   }
 
-  async telemetry(jobId) {
+  async telemetry(jobId, { probeApp = true } = {}) {
     const job = await this.store.read(jobId);
     const events = await this.store.events(jobId, 500);
     const stageDurations = job.stageHistory.map((stage) => ({
@@ -630,6 +656,8 @@ export class SoloFactory {
     const agentTurns = events.filter((event) => event.type === "agent.started").length;
     const gateRuns = events.filter((event) => event.type === "gate.started").length;
     const repairs = events.filter((event) => event.type === "gate.failed").length;
+    // Summed over the whole event log, not the 500-event window above, so long slice runs stay exact.
+    const allEvents = await this.store.events(jobId, Infinity);
     const summary = {
       strategy: job.sdlc ?? "single",
       slicesPlanned: (job.slicePlanIds ?? []).length,
@@ -638,9 +666,10 @@ export class SoloFactory {
       repairs,
       gateRuns,
       stageCount: job.stageHistory.length,
+      tokens: usageTotals(allEvents),
     };
     let app = null;
-    if (job.deployment?.url && job.deployment.status === "live") {
+    if (probeApp && job.deployment?.url && job.deployment.status === "live") {
       try {
         const manifest = await this.readManifest(this.store.appDir(jobId));
         try {
@@ -665,6 +694,32 @@ export class SoloFactory {
       events,
       app,
     };
+  }
+
+  // One line per run segment (each start/resume ends in completed, failed, paused, or cancelled)
+  // in <project>/.solofactory/runs.jsonl. Totals are cumulative, so the last line for a jobId is the
+  // whole run. SOLOFACTORY_VARIANT labels the harness configuration being compared ("baseline", ...).
+  async logRun(jobId) {
+    const job = await this.store.read(jobId);
+    const { summary, stageDurations } = await this.telemetry(jobId, { probeApp: false });
+    const record = {
+      at: new Date().toISOString(),
+      jobId,
+      project: path.basename(this.store.project),
+      state: job.state,
+      failedState: job.failedState ?? null,
+      variant: process.env.SOLOFACTORY_VARIANT || "baseline",
+      harness: HARNESS,
+      provider: this.provider.id,
+      codex: this.provider.id === "codex" ? { model: process.env.SOLOFACTORY_CODEX_MODEL || "gpt-5.6-sol", effort: process.env.SOLOFACTORY_CODEX_REASONING_EFFORT || "low" } : undefined,
+      sdlc: summary.strategy,
+      followOn: Boolean(job.followOn),
+      wallMs: Date.now() - new Date(job.startedAt ?? job.createdAt).getTime(),
+      activeMs: stageDurations.reduce((sum, stage) => sum + stage.durationMs, 0),
+      stageMs: stageDurations.reduce((acc, stage) => ({ ...acc, [stage.state]: (acc[stage.state] ?? 0) + stage.durationMs }), {}),
+      ...summary,
+    };
+    await appendFile(path.join(this.store.project, ".solofactory", "runs.jsonl"), `${JSON.stringify(record)}\n`);
   }
 
   async shutdown() {
@@ -787,4 +842,29 @@ export function validateMetrics(value) {
     );
   }
   return value;
+}
+
+// Token totals for a run from its agent.completed events: overall, and per stage label with
+// repeats folded (see stageKind) so runs of any shape line up.
+// Agent labels from invoke(): build-slice-<id>, slice-resume-<id>, repair-<n>, repair-resume, <stage>-resume.
+function stageKind(label = "unknown") {
+  if (/^(build-slice|slice-resume)-/.test(label)) return "slice";
+  if (label.startsWith("repair")) return "repair";
+  return label.replace(/-resume$/, "");
+}
+
+export function usageTotals(events) {
+  const byStage = {};
+  let total = null;
+  // Started minus reported: a turn whose provider threw never emits agent.completed.
+  let turnsWithoutUsage = 0;
+  for (const event of events) {
+    if (event.type === "agent.started") turnsWithoutUsage += 1;
+    if (event.type !== "agent.completed" || !event.usage) continue;
+    turnsWithoutUsage -= 1;
+    const stage = stageKind(event.stage);
+    byStage[stage] = addUsage(byStage[stage], event.usage);
+    total = addUsage(total, event.usage);
+  }
+  return { total, byStage, turnsWithoutUsage };
 }

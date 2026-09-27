@@ -120,6 +120,32 @@ test("a metrics contract failure at deploy self-heals through one repair turn", 
   assert.match(failure, /Received top-level keys: uptime/);
 });
 
+test("a crash on launch gets one repair turn with the deployment log", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-deploy-crash-"));
+  const store = new JobStore(root);
+  await store.init();
+  const job = await store.create({ brief, transcript, provider: "fixture" });
+  let deploys = 0;
+  const factory = new SoloFactory({
+    store,
+    provider: createFixtureProvider(),
+    commandRunner: async () => ({ code: 0, output: "passed" }),
+    deployer: async ({ appDir }) => {
+      deploys += 1;
+      if (deploys === 1) {
+        await writeFile(path.join(appDir, ".factory", "logs", "deployment.log"), "Error: SESSION_SECRET must be set in production.\n");
+        throw new FactoryError("deployment_exited", "App exited with code 1.");
+      }
+      return { mode: "fixture", status: "live", url: "http://127.0.0.1:9971" };
+    },
+  });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(deploys, 2);
+  const failure = await readFile(path.join(root, ".factory", "last-failure-1.txt"), "utf8");
+  assert.match(failure, /SESSION_SECRET must be set in production/);
+});
+
 test("a failed gate triggers bounded repair and a complete gate rerun", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-repair-"));
   const store = new JobStore(root);
@@ -658,4 +684,38 @@ http.createServer((q, r) => r.end(q.url === "/health" ? "ok" : JSON.stringify({ 
   } finally {
     await factory.shutdown();
   }
+});
+
+test("agent usage sums into run telemetry and each run segment lands in runs.jsonl", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-usage-"));
+  const store = new JobStore(root);
+  await store.init();
+  const job = await store.create({ brief, transcript, provider: "fixture" });
+  const fixture = createFixtureProvider();
+  const usage = { inputTokens: 1000, cachedInputTokens: 600, cacheWriteTokens: 100, outputTokens: 50, costUsd: 0.01, models: ["m"] };
+  const provider = { id: "fixture", async run(options) { return { ...(await fixture.run(options)), usage }; } };
+  const factory = new SoloFactory({ store, provider });
+  t.after(() => factory.shutdown());
+
+  process.env.SOLOFACTORY_VARIANT = "test-variant";
+  t.after(() => delete process.env.SOLOFACTORY_VARIANT);
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+
+  const { summary } = await factory.telemetry(job.id);
+  const turns = summary.agentTurns;
+  assert.ok(turns >= 3);
+  assert.equal(summary.tokens.total.inputTokens, 1000 * turns);
+  assert.equal(summary.tokens.total.costUsd.toFixed(2), (0.01 * turns).toFixed(2));
+  assert.equal(summary.tokens.turnsWithoutUsage, 0);
+  assert.ok(summary.tokens.byStage.specification && summary.tokens.byStage.review);
+
+  const lines = (await readFile(path.join(root, ".solofactory", "runs.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  const last = lines.at(-1);
+  assert.equal(last.jobId, job.id);
+  assert.equal(last.state, "completed");
+  assert.equal(last.variant, "test-variant");
+  assert.equal(last.tokens.total.inputTokens, 1000 * turns);
+  assert.match(last.harness.version, /^\d+\.\d+\.\d+$/);
+  assert.ok(last.wallMs > 0 && last.stageMs.specifying >= 0);
 });

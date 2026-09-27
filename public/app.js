@@ -524,7 +524,7 @@ function renderJob() {
   $("#gate-count").textContent = String(state.events.filter((event) => event.type === "gate.passed").length);
   $("#strategy-label").textContent = sdlcOption(job.sdlc).label;
   const elapsedUntil = job.completedAt ? new Date(job.completedAt).getTime() : Date.now();
-  $("#elapsed").textContent = `${formatDuration(elapsedUntil - new Date(job.startedAt || job.createdAt).getTime())} elapsed`;
+  $("#elapsed").textContent = `${formatDuration(elapsedUntil - new Date(job.startedAt || job.createdAt).getTime())} elapsed${usageLine(state.telemetry?.summary?.tokens?.total)}`;
   const progressState = PARKED.includes(job.state) ? job.failedState : job.state;
   const currentIndex = Math.max(0, stageOrder.indexOf(progressState));
   $("#stage-bars").replaceChildren(...stageOrder.slice(0, -1).map((stage, index) => {
@@ -630,6 +630,14 @@ function renderArtifacts() {
     const arrow = document.createElement("span"); arrow.textContent = "↗";
     link.append(text, arrow); return link;
   }));
+}
+
+// "· 412K tokens · $3.10": list-price figure from the CLI; Codex reports no cost, so none is shown.
+function usageLine(usage) {
+  if (!usage) return "";
+  const tokens = usage.inputTokens + usage.outputTokens;
+  const count = tokens >= 1e6 ? `${(tokens / 1e6).toFixed(1)}M` : tokens >= 1e3 ? `${Math.round(tokens / 1e3)}K` : String(tokens);
+  return ` · ${count} tokens${usage.costUsd === null ? "" : ` · $${usage.costUsd.toFixed(2)}`}`;
 }
 
 function renderAppMetrics() {

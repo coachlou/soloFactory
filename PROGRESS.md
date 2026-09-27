@@ -359,6 +359,44 @@ Observed: `npm test` → **70/70**; hint verified live against a building follow
 
 Observed: `npm test` → **72/72**. Not observed: clicking Relaunch in the browser.
 
+## Token telemetry and the runs log (2026-09-26, branch token-telemetry)
+
+- `src/providers.mjs`: both providers return `usage` ({inputTokens incl. cached, cachedInputTokens,
+  cacheWriteTokens, outputTokens, costUsd, models}). Claude reads the `-p` JSON envelope
+  (`total_cost_usd` is list-price-equivalent, reported even on a subscription); Codex sums
+  `turn.completed` usage across attempts and reports no cost (`null`, never 0).
+- `src/factory.mjs`: `agent.completed` events carry `stage` and `usage`; `telemetry().summary.tokens`
+  holds the run total, a per-stage breakdown (slices and repairs folded), and `turnsWithoutUsage`.
+- `<project>/.solofactory/runs.jsonl`: one line per run segment (start/resume → completed, failed,
+  paused, cancelled) with harness version + commit, `SOLOFACTORY_VARIANT` (default `baseline`),
+  provider/model, wall and per-stage time, turns, repairs, gates, and tokens. Totals are cumulative,
+  so the last line per `jobId` is the whole run. Compare variants with e.g.
+  `jq -s 'group_by(.jobId)|map(last)|group_by(.variant)[]|{variant:.[0].variant,runs:length,cost:(map(.tokens.total.costUsd//0)|add/length)}' */.solofactory/runs.jsonl`.
+- Build telemetry card: "· 412K tokens · $3.10" after elapsed time.
+- Known gaps: a turn that throws records no tokens (it is counted in `turnsWithoutUsage`);
+  interview turns are not counted. Any turn with unknown cost (Codex) makes the run's cost unknown.
+- `test/telemetry.test.mjs` drives the real Claude/Codex adapters through fake CLIs on PATH, plus
+  resume segments and mixed-provider cost. Suite: **78/78**.
+
+Observed on two real Claude builds (e2e-yoga, 2026-09-27): per-stage tokens and cost landed in
+`runs.jsonl` (rerun: 43.4 min, $7.89, of which $3.14 was two repairs). Codex usage and the UI line
+are still not observed end to end.
+
+### Repair fixes found from the telemetry (2026-09-27)
+
+- **npm allowlist for headless Claude** (`src/providers.mjs`): `-p --permission-mode acceptEdits`
+  silently denies unlisted shell commands, so repair agents shipped fixes they could not run
+  (18 denials in one repair). Write-mode runs now allow `npm install`, `npm test`, `npm run build`.
+  Replay of that repair from its pre-repair tree: all three gates passed in one turn ($2.19),
+  against two turns ($3.14) in the original run.
+- **Crash on launch gets one repair turn** (`src/factory.mjs`): `deployment_exited` is handled like
+  `invalid_metrics`, with the tail of `deployment.log` and a note that only `PORT` and
+  `NODE_ENV=production` are set. Unit-tested only; the real `SESSION_SECRET` crash did not recur.
+- **Jev tried and removed.** TypeSafe's Jev was wired into interview steering, a spec gate and
+  repair triage. Cheap and accurate, but in two builds and a repair replay it changed no outcome;
+  the replay's environment hint gave no benefit over the plain prompt. Re-add a judge only for a
+  concrete failure it would have prevented, and measure outcome change, not accuracy.
+
 ## Drive the factory from the chat (2026-09-26, 0.9.1)
 
 - `distro/drive.md`: an agent runbook for using SoloFactory from Claude Code or Codex instead of
@@ -506,3 +544,36 @@ Must enforce, both partly exist:
 Not embedding a Claude Code terminal: the value is shared context, the lock, and evidence,
 not the terminal. Build order: ask, then triage, then headless fix; each is the previous
 plus one permission.
+
+### Harness ideas from a coding-agent harness paper (idea, 2026-09-26)
+
+Not implemented. Source: "Jev Engineering for Coding Agents" (independent synthesis of
+TypeSafe design notes, Sept 2026; cost figures illustrative). Its thesis: the leverage is
+in what the harness puts in front of the model each turn. Our stages already start fresh
+from `.factory/*` files, so most of its cache-driven objections do not apply to us; these
+are the parts that do, in build order.
+
+1. **Token and cost telemetry per agent turn.** Done (see "Token telemetry and the runs log"). Today `factory.mjs` counts turns, gate runs,
+   and repairs only. Parse usage from `claude -p --output-format json` (`total_cost_usd`,
+   input/output tokens) and Codex's token report into the evidence stream. Prerequisite
+   for 2; software-dev-factory's `claude.ts` usage capture is the model.
+2. **Provider/model per stage.** The paper's routing trap (frontier → cheap → frontier costs
+   ~1.5× pure frontier) comes from the cheap model reloading a transcript. Our stages load
+   purpose-built files, so per-stage routing is cheap. Try: plan review and review on the
+   other provider (free cross-model review); build on a cheaper model/effort. Judge on 1's
+   numbers plus repair counts, not per-token price.
+3. **Filtered gate output into repair.** Reading and command output dominate tokens (~2/3 in
+   the paper's estimate; writing code <10%). Hand the repair turn the failing tests, first
+   stack trace, and file:line hits, not the whole log; full log stays in evidence.
+4. **Per-directory `GOTCHAS.md`, loaded by path.** Conditional instructions, not skills:
+   when a slice touches `dir/`, the build prompt names `dir/GOTCHAS.md` (and ancestors).
+   Reloaded every slice, so nothing summarizes it away. Repairs that fix a trap append to it.
+5. **One shared evidence bundle per run.** Relevant files, diff, gate logs, found once and
+   cached; the ask pane, triage, review, and any background eval/progress task read it.
+   This is the ask pane's "summarize once and cache" guard, generalized. Read-only
+   consumers never take the project lock.
+6. **Dedup briefs against in-flight and recent work** at queue time (patch lane especially):
+   warn when a fix card matches a queued/building brief or an unreleased fix.
+
+Deferred: routing by file sensitivity (secrets/infra → first-party frontier only) matters
+only once a cheap third-party provider exists.

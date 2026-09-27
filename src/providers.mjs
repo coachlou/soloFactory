@@ -79,6 +79,7 @@ async function codexRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = 
   const overallStarted = Date.now();
   let sessionId = resumeSessionId;
   let autoResumes = 0;
+  let usage = null;
   let nextPrompt = prompt;
 
   for (;;) {
@@ -98,9 +99,10 @@ async function codexRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = 
       reasoningEffort,
     });
     sessionId = attempt.sessionId ?? sessionId;
+    usage = addUsage(usage, attempt.usage);
     if (attempt.result.code === 0) {
       const final = await readFile(attempt.resultPath, "utf8");
-      return { ...(schema ? JSON.parse(final) : { message: final.trim() }), sessionId, autoResumes };
+      return { ...(schema ? JSON.parse(final) : { message: final.trim() }), sessionId, autoResumes, usage };
     }
 
     const diagnostics = detectProviderDiagnostics(attempt.result.output);
@@ -193,6 +195,7 @@ async function runCodexAttempt({
       ];
 
   let observedSessionId = sessionId;
+  let usage = null;
   const result = await runProcess({
     executable: "codex",
     args,
@@ -206,6 +209,7 @@ async function runCodexAttempt({
       try {
         const event = JSON.parse(line);
         if (event.type === "thread.started" && event.thread_id) observedSessionId = event.thread_id;
+        if (event.type === "turn.completed") usage = addUsage(usage, codexUsage(event.usage, model));
         const type = event.type ?? event.event ?? "agent_event";
         onEvent?.({ type, message: humanizeAgentEvent(event) });
       } catch {
@@ -213,13 +217,16 @@ async function runCodexAttempt({
       }
     },
   });
-  return { result, resultPath, sessionId: observedSessionId };
+  return { result, resultPath, sessionId: observedSessionId, usage };
 }
 
 async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = "write" }) {
   await mkdir(cwd, { recursive: true });
   const args = ["-p", "--no-session-persistence", "--output-format", "json"];
   args.push("--permission-mode", mode === "read" ? "plan" : "acceptEdits");
+  // Headless acceptEdits silently denies unlisted shell commands, so repair agents shipped fixes they could not run
+  // (~20 denials per repair on 2026-09-27). Allow only the commands the controller's own gates already run.
+  if (mode !== "read") args.push("--allowedTools", "Bash(npm install:*)", "Bash(npm test:*)", "Bash(npm run build:*)");
   if (schema) args.push("--json-schema", JSON.stringify(schema));
   const result = await runProcess({
     executable: "claude",
@@ -254,7 +261,55 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
   // 600s; terminating.") before its JSON envelope (seen 2026-09-18); the envelope is the last `{` line.
   const envelope = JSON.parse(result.output.split("\n").filter((line) => line.startsWith("{")).at(-1) ?? result.output);
   const final = envelope.structured_output ?? envelope.result;
-  return schema ? (typeof final === "string" ? JSON.parse(final) : final) : { message: String(final ?? "").trim() };
+  const usage = claudeUsage(envelope);
+  return schema ? { ...(typeof final === "string" ? JSON.parse(final) : final), usage } : { message: String(final ?? "").trim(), usage };
+}
+
+// Token usage in one shape for both CLIs. inputTokens counts every input token, cached or not
+// (Codex already reports it that way; Claude splits it three ways). costUsd is the CLI's own
+// list-price figure: Claude reports it even on a subscription, Codex reports none (null).
+export function claudeUsage(envelope) {
+  const u = envelope?.usage;
+  if (!u) return null;
+  const cached = u.cache_read_input_tokens ?? 0;
+  const written = u.cache_creation_input_tokens ?? 0;
+  return {
+    inputTokens: (u.input_tokens ?? 0) + cached + written,
+    cachedInputTokens: cached,
+    cacheWriteTokens: written,
+    outputTokens: u.output_tokens ?? 0,
+    costUsd: typeof envelope.total_cost_usd === "number" ? envelope.total_cost_usd : null,
+    models: Object.keys(envelope.modelUsage ?? {}),
+  };
+}
+
+export function codexUsage(u, model) {
+  if (!u) return null;
+  return {
+    inputTokens: u.input_tokens ?? 0,
+    cachedInputTokens: u.cached_input_tokens ?? 0,
+    cacheWriteTokens: u.cache_write_input_tokens ?? 0,
+    // reasoning_output_tokens is a breakdown already inside output_tokens, as in the OpenAI API.
+    outputTokens: u.output_tokens ?? 0,
+    costUsd: null,
+    models: model ? [model] : [],
+  };
+}
+
+// Sums two usage records. A null cost (Codex reports none) makes the sum unknown:
+// showing only the known part would understate a mixed run.
+export function addUsage(a, b) {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  const cost = a.costUsd === null || b.costUsd === null ? null : a.costUsd + b.costUsd;
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    cachedInputTokens: a.cachedInputTokens + b.cachedInputTokens,
+    cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    costUsd: cost,
+    models: [...new Set([...(a.models ?? []), ...(b.models ?? [])])],
+  };
 }
 
 export function detectProviderDiagnostics(output = "") {
