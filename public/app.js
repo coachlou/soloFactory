@@ -876,6 +876,18 @@ async function api(url, options = {}) {
 function showError(error) {
   $("#notice").textContent = error.message || String(error);
   $("#notice").classList.remove("hidden");
+  reportError(error);
 }
+
+// Every error the owner sees also lands in the factory's error log. Fire-and-forget: a failed report stays silent.
+function reportError(error, action = "notice") {
+  fetch("/api/errors", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ source: "browser", action, message: error?.stack || error?.message || String(error), jobId: state.job?.id, project: state.project }),
+  }).catch(() => {});
+}
+window.addEventListener("error", (event) => reportError(event.error ?? event.message, "uncaught"));
+window.addEventListener("unhandledrejection", (event) => reportError(event.reason, "unhandled rejection"));
 
 function clearError() { $("#notice").classList.add("hidden"); }

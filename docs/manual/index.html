@@ -127,6 +127,7 @@
 
   <h2 id="feedback">9. Report a problem</h2>
   <p><b class="btn">Feedback</b> in the header, or <b class="btn">Report this run</b> on a parked run, drafts a bug report or feature request. The run report attaches the run's evidence and the last log lines, scrubbed of paths and secrets. The body always travels through your clipboard, so you see exactly what is sent. Choose <b class="btn">Preview report</b>, then <b class="btn">Copy &amp; open email</b>: it copies the report and opens a message to support@coachlou.com with the subject "SoloFactory Feedback" — paste the report into the body and send.</p>
+  <p>Every error along the way is also written to <code>errors.jsonl</code> in the factory's home folder: failed requests, failed runs, errors shown in the browser, and failed calls the chat agent makes. Paths and secrets are scrubbed first. The file stays on your machine; <code>/api/errors</code> shows the latest entries, and the agent reads them when you report a problem.</p>
 
   <h2 id="settings">10. Settings</h2>
   <table>
@@ -164,11 +165,11 @@ You:   1
 
 Agent: Queued. ... Reminders are built and passed their checks (1 of 3).
        ... Done. All three work: http://127.0.0.1:49762</code></pre>
-  <p>The options change with where you are:</p>
+  <p>The options change with where you are, and <em>Report a problem with the factory</em> is always the last one:</p>
   <table>
     <tr><th>Where you are</th><th>What you're offered</th></tr>
     <tr><td>No apps yet</td><td>Start my first app · How does this work?</td></tr>
-    <tr><td>An app is live</td><td>Add or change features · Start a new app · Open it · Report a problem with the factory</td></tr>
+    <tr><td>An app is live</td><td>Add or change features · Start a new app · Open it</td></tr>
     <tr><td>A build is running</td><td>How far along is it? · Show me the plan · Pause it · Stop it</td></tr>
     <tr><td>A build stopped with a problem</td><td>What went wrong? · Pick up where it stopped · Go back to an earlier feature · Set it aside</td></tr>
     <tr><td>More than one app</td><td>Which app? · Start a new app</td></tr>
@@ -177,6 +178,7 @@ Agent: Queued. ... Reminders are built and passed their checks (1 of 3).
     <li><strong>Ask for several features at once.</strong> They go in as one request. The factory builds them one at a time and checks each before starting the next, so nothing reaches you untested.</li>
     <li><strong>Nothing costs you without a yes.</strong> The agent shows the plan and builds only after you say go. It also asks before pausing, stopping, or fixing a run.</li>
     <li><strong>Only real options.</strong> If you ask for something the factory can't do, the agent says so and shows your options again.</li>
+    <li><strong>Reporting a problem.</strong> The agent asks what happened, drafts the same scrubbed report as the <b class="btn">Feedback</b> button, and tells you to email it to support@coachlou.com with the subject "SoloFactory Feedback". It never sends anything itself.</li>
   </ul>
   <p>A build started from the chat also shows up on the Factory board, and you can switch between the chat and the browser at any time.</p>
   <p class="muted">Folder set up before version 0.9.1? Its instructions still point the agent at the browser, so the first time say <em>"hey solofactory — work from the chat, following SoloFactory's drive.md."</em></p>

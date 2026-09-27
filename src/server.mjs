@@ -1,5 +1,5 @@
 import http from "node:http";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JobStore } from "./store.mjs";
@@ -13,7 +13,7 @@ import {
 } from "./interview.mjs";
 import { createProvider, detectProviderDiagnostics, discoverProviders } from "./providers.mjs";
 import { createFixtureProvider } from "./fixture-provider.mjs";
-import { REPORTABLE_STATES, buildDiagnostics, issuesConfig, renderReport, validateFeedback } from "./feedback.mjs";
+import { REPORTABLE_STATES, buildDiagnostics, issuesConfig, renderReport, scrub, validateFeedback } from "./feedback.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PARKED = new Set(["failed", "interrupted", "cancelled", "paused"]);
@@ -27,6 +27,17 @@ export async function createSoloFactoryServer(options = {}) {
   // .solofactory/; the distro points SOLOFACTORY_ROOT at the ambient folder.
   const root = path.resolve(options.root ?? process.env.SOLOFACTORY_ROOT ?? home);
   const activeFile = path.join(home, "active-project");
+  const { version } = JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8"));
+  // One JSONL line per operational error, from the server, the browser, and chat agents, for later analysis.
+  // ponytail: append-only, no rotation; add a size cap if a real install ever grows it past a few MB.
+  const errorLog = path.join(home, "errors.jsonl");
+  async function logError(entry) {
+    const line = { at: new Date().toISOString(), version };
+    for (const [key, value] of Object.entries(entry)) {
+      if (value !== undefined && value !== null) line[key] = typeof value === "string" ? scrub(value.slice(0, 2000)).text : value;
+    }
+    await mkdir(home, { recursive: true }).then(() => appendFile(errorLog, `${JSON.stringify(line)}\n`)).catch(() => {});
+  }
   let active; // { id, dir } — the project the owner is viewing; job endpoints default to its store
   let store;
   const stores = new Map();
@@ -95,7 +106,14 @@ export async function createSoloFactoryServer(options = {}) {
       runs.set(entry.projectId, run);
       const launch = entry.mode === "resume" ? factory.resume(job.id) : entry.mode === "restart" ? factory.restartFromSlice(job.id, entry.fromSlice) : factory.start(job.id);
       run.promise = launch
-        .catch((error) => console.error(`run ${job.id}: ${error.message}`))
+        .catch((error) => {
+          console.error(`run ${job.id}: ${error.message}`);
+          return logError({ source: "run", project: entry.projectId, jobId: job.id, code: error.code, message: error.message });
+        })
+        // A run that fails is settled by the factory, not thrown, so read its final state.
+        .then(() => projectStore.read(job.id))
+        .then((after) => after.state === "failed" && logError({ source: "run", project: entry.projectId, jobId: job.id, code: after.error?.code, message: after.error?.message, stage: after.failedState }))
+        .catch(() => {})
         .finally(() => {
           runs.delete(entry.projectId);
           drain();
@@ -104,7 +122,10 @@ export async function createSoloFactoryServer(options = {}) {
   }
   // Serialised so concurrent enqueues and settlements never double-start a project.
   let draining = Promise.resolve();
-  const drain = () => (draining = draining.then(drainOnce).catch((error) => console.error(`scheduler: ${error.message}`)));
+  const drain = () => (draining = draining.then(drainOnce).catch((error) => {
+    console.error(`scheduler: ${error.message}`);
+    return logError({ source: "scheduler", code: error.code, message: error.message });
+  }));
 
   function enqueue(projectId, jobId, mode = "start", { front = false, ...extra } = {}) {
     jobProject.set(jobId, projectId);
@@ -178,7 +199,6 @@ export async function createSoloFactoryServer(options = {}) {
     if (id !== active.id) await openProject(id);
     return json(response, 200, { active: active.id, projects: await listProjects(), ...schedulerStatus() });
   }
-  const { version } = JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8"));
   const issuesUrl = options.issuesUrl ?? process.env.SOLOFACTORY_ISSUES_URL;
   const issues = issuesConfig(issuesUrl);
   if (issuesUrl && !issues) console.warn("SOLOFACTORY_ISSUES_URL must look like https://github.com/<owner>/<repo>/issues with no query or fragment; GitHub links are disabled.");
@@ -251,6 +271,20 @@ export async function createSoloFactoryServer(options = {}) {
           context: { stage: "interview" },
         });
         return json(response, 200, validateInterviewResult(result));
+      }
+      if (request.method === "POST" && url.pathname === "/api/errors") {
+        const body = await readJson(request);
+        const source = ["browser", "chat"].includes(body.source) ? body.source : null;
+        if (!source || typeof body.message !== "string" || !body.message.trim()) return json(response, 400, { error: "An error report needs source (browser or chat) and a message.", code: "error_report_invalid" });
+        const extra = Object.fromEntries(["action", "code", "jobId", "project"].filter((key) => typeof body[key] === "string").map((key) => [key, body[key].slice(0, 200)]));
+        await logError({ source, ...extra, message: body.message });
+        return json(response, 202, { logged: true });
+      }
+      if (request.method === "GET" && url.pathname === "/api/errors") {
+        const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 500);
+        const text = await readFile(errorLog, "utf8").catch(() => "");
+        const errors = text.split("\n").filter(Boolean).slice(-limit).flatMap((line) => { try { return [JSON.parse(line)]; } catch { return []; } });
+        return json(response, 200, { errors, file: errorLog });
       }
       if (request.method === "POST" && url.pathname === "/api/feedback/preview") {
         let feedback;
@@ -421,6 +455,7 @@ export async function createSoloFactoryServer(options = {}) {
       return json(response, 404, { error: "Not found" });
     } catch (error) {
       const status = error.code === "ENOENT" ? 404 : /invalid|must|unknown|coverage|transcript|message/i.test(error.message) ? 400 : 500;
+      await logError({ source: "server", status, request: `${request.method} ${request.url.split("?")[0]}`, code: error.code, message: error.message });
       return json(response, status, { error: error.message, code: error.code ?? "request_failed" });
     }
   });

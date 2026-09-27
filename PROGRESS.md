@@ -392,6 +392,19 @@ rewritten around a sample conversation. Demo-verified every row except live paus
 finish too fast). Known demo limit: the fixture's slice plan covers only SC-1, so a
 multi-scenario `slices` follow-on parks with `invalid_slice_plan` in demo mode only.
 
+## Error log and always-on chat reports (2026-09-26, 0.9.4)
+
+Operational errors now land in one scrubbed, append-only `<SOLOFACTORY_HOME>/errors.jsonl`
+(`at`, `version`, `source`, plus `code`/`message`/`jobId`/`project`/`status`/`request`/`action`
+when known). Sources: `server` (every request that hits the catch-all), `run` (a run that
+throws or settles as `failed`), `scheduler`, `browser` (every `showError` notice plus uncaught
+errors and rejections, via `POST /api/errors`), and `chat` (drive.md tells the agent to log
+each failed call). `GET /api/errors?limit=N` returns the latest entries. Strings are capped at
+2000 chars and run through `feedback.scrub()`. No rotation yet. Chat "Report a problem with
+the factory" is now offered last in every state, and routes to support@coachlou.com (subject
+"SoloFactory Feedback") unless `config.issues` is set. Verified: new e2e test, a forced run
+failure, and demo-mode browser errors.
+
 ## Backlog
 
 ### Ask pane: run-aware questions while the factory turns (idea, 2026-09-18)

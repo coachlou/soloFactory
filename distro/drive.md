@@ -18,6 +18,11 @@ shows up on the board, and a run started in the browser can be watched from here
 - The server binds to `127.0.0.1` and dies with its terminal. Start it in the background and
   keep it running while the build or the built app is in use.
 - Never edit `state.json` or `events.jsonl` by hand. Every recovery action has an endpoint.
+- **Log every failed factory call** so it can be analyzed later: when a request returns an error
+  (log it once the server is back if it was down), `POST /api/errors` with
+  `{"source":"chat","action":"<what you were doing>","message":"<the error>","jobId":"<id if any>"}`.
+  The server already logs its own failures. `GET /api/errors?limit=50` returns recent entries
+  from the browser, the server, runs, and chat.
 
 ## 0. Orchestrate: where they are, then what they can do
 
@@ -32,14 +37,15 @@ solofactory", "what can I do", "how's my app"), or reply with a bare number, run
    an empty `default`) don't count as apps.
 2. **Say where they are in one or two plain sentences.** Name the app by its project name, and
    give the link or the stage. Don't mention job ids, states, or endpoints.
-3. **End every reply with 2–4 numbered options** from the row below that matches, so they can
-   answer "2". Offer only options from this table. For anything else, say "The factory can't
-   do that yet" and show the options again.
+3. **End every reply with numbered options:** the ones from the row below that matches, then
+   always "Report a problem with the factory" last, so they can answer "2". Offer only options
+   from this table. For anything else, say "The factory can't do that yet" and show the options
+   again.
 
 | Where they are (from the board) | Offer | Each option does |
 |---|---|---|
 | No projects, or none with a run | Start my first app · How does this work? | step 2 (new project) + step 3 · a 3-line explanation: you describe it, you approve the plan, it builds and checks it |
-| A completed app, nothing running | Add or change features · Start a new app · Open it · Report a problem with the factory | follow-on build (below) · step 2 + 3 · give `deployment.url`, `POST /relaunch` first if it doesn't load · feedback (below), only when `config.issues` is set |
+| A completed app, nothing running | Add or change features · Start a new app · Open it | follow-on build (below) · step 2 + 3 · give `deployment.url`, `POST /relaunch` first if it doesn't load |
 | A card in `queued`…`deploying` | How far along is it? · Show me the plan · Pause it · Stop it | stage + `slices.done/total` in words · `artifacts/plan` summarized · `/pause` · `/cancel`, both after a yes |
 | A card in `parked` | What went wrong? · Pick up where it stopped · Go back to an earlier feature · Set it aside | read `recovery-packet`, explain it plainly · `/resume` (only if `recovery.canResume`) · `/restart` with a completed slice · `/dismiss`, all after a yes |
 | A queued card with `blockedBy` | lead with "It's waiting behind a stopped build", then the `parked` row for that build | |
@@ -61,8 +67,13 @@ delivered before their checks pass. If an owner asks to skip testing, say so pla
 what happened and what they expected. `POST /api/feedback/preview` with
 `{"mode":"problem","fields":{"title":"…","happened":"…","expected":"…"},"jobId":"<id>","includeDiagnostics":true}`
 (diagnostics only for a failed, interrupted, or cancelled run) returns redacted `markdown`.
-Show it, then give them `<config.issues.base>/new?template=problem.yml` to paste it into.
-Never file it yourself.
+If recent `GET /api/errors` entries match what they describe, add their `at`, `source`, and
+`message` under "What happened". Show them the report, then say where to send it:
+- `config.issues` is null (the usual case): email it to support@coachlou.com with the subject
+  "SoloFactory Feedback", pasting the report as the message.
+- `config.issues` is set: paste it into `<config.issues.base>/new?template=problem.yml`.
+
+Never send or file it yourself.
 
 ## 1. Start the server
 

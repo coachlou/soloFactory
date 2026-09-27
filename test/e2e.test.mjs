@@ -417,3 +417,25 @@ async function waitForJob(base, id, states, timeoutMs = 30_000) {
   }
   return job;
 }
+
+test("operational errors from the server, browser, and chat land in one scrubbed log", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-errors-"));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true });
+  await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+
+  assert.equal((await fetch(`${base}/api/jobs/no-such-run`)).status, 404);
+  const logged = await fetch(`${base}/api/errors`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ source: "chat", action: "resume", message: "boom at /Users/owner/secret/app with sk-abcdefghijkl" }) });
+  assert.equal(logged.status, 202);
+  const invalid = await fetch(`${base}/api/errors`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ source: "someone", message: "x" }) });
+  assert.equal(invalid.status, 400);
+
+  const { errors } = await getJson(`${base}/api/errors`);
+  assert.deepEqual(errors.map((entry) => entry.source), ["server", "chat"]);
+  assert.equal(errors[0].status, 404);
+  assert.equal(errors[1].action, "resume");
+  assert.equal(errors[1].message, "boom at [redacted] with [redacted]");
+  assert.ok(errors.every((entry) => entry.at && entry.version));
+  assert.match(await readFile(path.join(home, "errors.jsonl"), "utf8"), /"source":"chat"/);
+});
