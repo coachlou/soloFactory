@@ -405,6 +405,22 @@ the factory" is now offered last in every state, and routes to support@coachlou.
 "SoloFactory Feedback") unless `config.issues` is set. Verified: new e2e test, a forced run
 failure, and demo-mode browser errors.
 
+## Live app safety (2026-09-26, 0.9.5)
+
+The project folder is at once the live app's cwd, the builders' cwd, and a git repo the
+factory commits with `add -A` and rewinds with `reset --hard` + `clean -fd`, so an app's saved
+records could be committed, rewound, or clobbered by a build. Owner data now lives in a
+gitignored `data/` (added to every project's `.gitignore` on init), and every worker prompt
+says to keep it there and out of tests. A Claude/Codex session opened inside a project reads
+"## The app is live" in its `.aai/instructions.md` (appended to existing projects too) and
+steers changes to a follow-on build. drive.md has the chat confirm the app once per
+conversation, re-check the active project before queueing, and never edit `projects/`.
+A follow-on records the shipped release as `baseCommit` before building; Set it aside and
+Start over reset to it (once, guarded by `dismissed`), resume keeps the half-built work, and
+Relaunch works again on the restored release. Known gaps: an app that already stores data
+outside `data/` is still tracked; owner hand-edits made after a failure are dropped by the
+rollback. Verified: unit and e2e tests (76/76).
+
 ## Backlog
 
 ### Ask pane: run-aware questions while the factory turns (idea, 2026-09-18)
