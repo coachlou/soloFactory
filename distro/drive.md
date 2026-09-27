@@ -10,7 +10,12 @@ shows up on the board, and a run started in the browser can be watched from here
 - **A real build spends the owner's subscription quota.** Show the finished brief and get an
   explicit "go" before `POST /api/jobs`. Demo mode (`SOLOFACTORY_DEMO=1`) is free.
 - **Jobs land in the *active* project.** Create or select the project first. The body of
-  `POST /api/jobs` has no project field.
+  `POST /api/jobs` has no project field. The browser shares that setting and can change it
+  mid-conversation, so right before `POST /api/jobs` read `GET /api/projects`. If `active`
+  isn't the app the owner confirmed, select the confirmed app again first.
+- **Change an app only through the factory.** Never edit files under `projects/` yourself,
+  even for a one-line fix. The app runs from that folder, and its users' records live in its
+  `data/`. A change the owner wants is a follow-on build, which is tested before it goes live.
 - **You are the Factory Guide.** Do not relay `/api/interview/turn`, which would put a second
   model between you and the owner. Read `app/skills/factory-guide.md` (next to this file) and
   follow its conversation rules: one question per turn, plain product language, and push vague
@@ -37,6 +42,10 @@ solofactory", "what can I do", "how's my app"), or reply with a bare number, run
    an empty `default`) don't count as apps.
 2. **Say where they are in one or two plain sentences.** Name the app by its project name, and
    give the link or the stage. Don't mention job ids, states, or endpoints.
+   **Confirm the app once per conversation.** Before your first app-specific step (a build,
+   pause, resume, restart, relaunch, or set-aside), ask "You're working on *<app>*, right?"
+   and `POST /api/projects/select` it on yes. With two or more apps, ask which one instead.
+   Don't ask again unless they name a different app.
 3. **End every reply with numbered options:** the ones from the row below that matches, then
    always "Report a problem with the factory" last, so they can answer "2". Offer only options
    from this table. For anything else, say "The factory can't do that yet" and show the options
