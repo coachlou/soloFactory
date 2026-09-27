@@ -631,3 +631,31 @@ http.createServer((q, r) => r.end(q.url === "/health" ? "ok" : JSON.stringify({ 
     await factory.shutdown();
   }
 });
+
+test("a set-aside follow-on that was rolled back does not block relaunching the app it restored", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-relaunch-aside-"));
+  const store = new JobStore(root);
+  await store.init();
+  await writeFile(path.join(root, "app.mjs"), `import http from "node:http";
+http.createServer((q, r) => r.end(q.url === "/health" ? "ok" : JSON.stringify({ uptimeSeconds: 1, requests: { total: 0, errors: 0 }, latencyMs: { average: 0 }, routes: [] }))).listen(process.env.PORT);`);
+  const cmd = ["npm", "run", "x"];
+  await writeFile(path.join(root, "factory.json"), JSON.stringify({ version: 1, healthPath: "/health", metricsPath: "/_factory/metrics", commands: { install: cmd, test: cmd, build: cmd, start: ["node", "app.mjs"] } }));
+  const shipped = await store.create({ brief, transcript, provider: "fixture" });
+  Object.assign(shipped, { state: "completed", deployment: { mode: "local", status: "stopped", url: "http://127.0.0.1:1" } });
+  await store.writeState(shipped);
+  const later = await store.create({ brief, transcript, provider: "fixture" });
+  Object.assign(later, { state: "failed", createdAt: new Date(Date.now() + 1000).toISOString() });
+  await store.writeState(later);
+  const factory = new SoloFactory({ store, provider: createFixtureProvider() });
+  try {
+    await assert.rejects(factory.relaunch(shipped.id), /newer run/, "a parked run may have left its work in the folder");
+    later.dismissed = true;
+    await store.writeState(later);
+    await assert.rejects(factory.relaunch(shipped.id), /newer run/, "set aside without a rollback point, its work is still there");
+    later.baseCommit = await store.git("rev-parse", "HEAD").catch(() => "0".repeat(40));
+    await store.writeState(later);
+    assert.equal((await factory.relaunch(shipped.id)).deployment.status, "live");
+  } finally {
+    await factory.shutdown();
+  }
+});

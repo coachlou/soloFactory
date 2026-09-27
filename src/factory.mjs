@@ -606,8 +606,11 @@ export class SoloFactory {
   async relaunch(jobId) {
     const job = await this.store.read(jobId);
     if (job.state !== "completed" || job.deployment?.status === "live") throw new FactoryError("not_relaunchable", "Only a completed run whose app is not running can be relaunched.");
-    const [newest] = await this.store.list();
-    if (newest.id !== job.id) throw new FactoryError("not_relaunchable", "A newer run exists in this project; relaunch that one.");
+    // A newer run blocks only if its work may still be in the folder: set aside with a rollback
+    // point means the server rewound it, so the folder holds this job's release again.
+    const runs = await this.store.list();
+    const newer = runs.slice(0, runs.findIndex((run) => run.id === job.id));
+    if (newer.some((run) => !(run.dismissed && run.baseCommit))) throw new FactoryError("not_relaunchable", "A newer run exists in this project; relaunch that one.");
     const manifest = await this.readManifest(this.store.appDir(jobId));
     await mkdir(path.join(this.store.appDir(jobId), ".factory", "logs"), { recursive: true }); // gitignored, so may be absent
     job.deployment = await this.deployLocal(job, manifest, new AbortController().signal);
