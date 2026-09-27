@@ -10,6 +10,15 @@ requests.total (number), requests.errors (number), latencyMs.average (number), a
 (an array of per-route aggregates, or an object keyed by normalized route path). Extra
 aggregate fields are fine; different names for these are a deployment failure.`;
 
+// The app may be live in this same folder while workers run, and the factory commits with
+// `git add -A` and rewinds with reset/clean. Only a gitignored data/ is safe from both.
+const DATA_RULE = `Owner data: the app may be running from this folder while you work. Anything its users
+save (records, uploads, databases) must live under data/ at the project root, created at
+startup if missing; the factory keeps data/ out of git so its commits and rewinds never
+touch it. Never edit, move, or delete files in data/, and make tests use a temporary
+directory instead of data/. If an earlier release keeps user data somewhere else, leave
+those files untouched.`;
+
 export function specificationPrompt(sliceMode = false, { followOn = false } = {}) {
   const sliceContract = sliceMode
     ? `
@@ -139,7 +148,9 @@ Write the tests first, then the minimum code that turns them green. Keep the app
 and its whole suite green at the end of this slice. Use Node 22+, npm, and proven
 maintained packages only when they earn their place. Do not deploy; the controller owns
 deployment and will rerun install/test/build itself. Leave the workspace ready for
-deterministic controller verification.`;
+deterministic controller verification.
+
+${DATA_RULE}`;
 }
 
 export function sliceContinuationPrompt(slice, plan) {
@@ -163,7 +174,9 @@ slice's incomplete work: translate each criterion into a test, then the minimum 
 turns it green. If the recovery record names an external owner action that is still
 blocked, report that plainly instead of looping or substituting a weaker implementation.
 Run only the checks needed to leave this slice ready for the controller's deterministic
-gates. Do not deploy; the controller owns verification and deployment.`;
+gates. Do not deploy; the controller owns verification and deployment.
+
+${DATA_RULE}`;
 }
 
 export function planReviewPrompt({ followOn = false } = {}) {
@@ -214,7 +227,9 @@ node, or npx. The start command must honor PORT. Add a concise README with one-c
 operation. Do not deploy; the controller owns deployment.
 
 Run the relevant tests and build yourself, repair anything you find, and leave the workspace
-ready for deterministic controller verification.`;
+ready for deterministic controller verification.
+
+${DATA_RULE}`;
 }
 
 export function repairPrompt(failurePath, slice = null) {
@@ -227,7 +242,9 @@ preserved — fix only what this slice's acceptance criteria need.`
 acceptance contract, then read ${failurePath}. Fix the root cause of the recorded controller
 gate failure with the smallest coherent change. Do not weaken, skip, rename, or delete tests,
 health checks, metrics, build commands, or acceptance criteria.${sliceLines} Run the relevant
-checks and leave the app ready for the controller to rerun every gate.`;
+checks and leave the app ready for the controller to rerun every gate.
+
+${DATA_RULE}`;
 }
 
 export function reviewPrompt() {
@@ -236,7 +253,9 @@ requirement in .factory/PRD.md and every scenario in .factory/ACCEPTANCE.md. Ins
 code and tests. Fix concrete correctness, wiring, error-handling, accessibility, privacy, or
 operator-documentation gaps you find. Keep the scope small. Do not deploy and do not claim a
 gate passed; the controller will rerun tests, build, health, and telemetry checks afterward.
-Write a concise review record to .factory/REVIEW.md.`;
+Write a concise review record to .factory/REVIEW.md.
+
+${DATA_RULE}`;
 }
 
 export function continuationPrompt(stage, sliceMode = false, { followOn = false } = {}) {
@@ -254,5 +273,7 @@ Resolve the recorded interruption where code changes can resolve it, then finish
 incomplete ${stage} work. If the recovery record names an external owner action that is still
 blocked, report that plainly instead of looping or substituting a weaker implementation.
 Run only the checks needed to leave this stage ready for the controller's deterministic gates.
-Do not deploy; the controller owns verification and deployment.`;
+Do not deploy; the controller owns verification and deployment.
+
+${DATA_RULE}`;
 }

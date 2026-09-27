@@ -1,13 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import http from "node:http";
 import { JobStore } from "../src/store.mjs";
 import { buildRecoveryPacket, FactoryError, SoloFactory, validateMetrics } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
-import { buildPrompt, sliceBuildPrompt, specificationPrompt } from "../src/prompts.mjs";
+import { buildPrompt, continuationPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "../src/prompts.mjs";
 
 const brief = {
   workingName: "Pocket Pulse",
@@ -29,6 +29,13 @@ test("metrics validation accepts route lists and aggregate route maps", () => {
 test("build prompts spell out the metrics field names the deployer validates", () => {
   for (const prompt of [buildPrompt(), specificationPrompt(), sliceBuildPrompt({ id: "S1", title: "Skeleton", dependsOn: [], acceptance: ["/health answers"] }, {})]) {
     for (const field of ["uptimeSeconds", "requests.total", "requests.errors", "latencyMs.average", "routes"]) assert.match(prompt, new RegExp(field.replace(".", "\\.")));
+  }
+});
+
+test("every worker prompt keeps owner data in data/ and tests out of it", () => {
+  const slice = { id: "S1", title: "Skeleton", dependsOn: [], acceptance: ["/health answers"] };
+  for (const prompt of [buildPrompt(), sliceBuildPrompt(slice, {}), sliceContinuationPrompt(slice, {}), continuationPrompt("build"), repairPrompt(".factory/logs/x.log"), reviewPrompt()]) {
+    assert.match(prompt, /data\//);
   }
 });
 
@@ -561,7 +568,11 @@ test("restart from slice 2 rewinds the tree to slice 1's commit and replays only
   const firstCommit = parked.sliceStats["SLICE-SKELETON"].commit;
   assert.match(firstCommit, /^[0-9a-f]{40}$/);
   await writeFile(path.join(store.appDir(job.id), "stale.txt"), "left over from the parked attempt\n");
+  // The live app saved the owner's records; a factory commit must not sweep them into history.
+  await mkdir(path.join(store.appDir(job.id), "data"), { recursive: true });
+  await writeFile(path.join(store.appDir(job.id), "data", "habits.json"), '["day 1"]');
   await store.commit("test: stale work after slice 2");
+  assert.equal(await store.git("ls-files", "data"), "", "owner data stays out of git");
 
   await assert.rejects(new SoloFactory({ ...options, store, provider: fixture }).restartFromSlice(job.id, "SLICE-SKELETON"), /first slice/);
   const restarted = await new SoloFactory({ ...options, store, provider: fixture }).restartFromSlice(job.id, "SLICE-UI");
@@ -571,6 +582,7 @@ test("restart from slice 2 rewinds the tree to slice 1's commit and replays only
   assert.equal(restarted.sliceStats["SLICE-SKELETON"].commit, firstCommit, "slice 1's commit survives untouched");
   assert.ok(await store.git("merge-base", "--is-ancestor", firstCommit, "HEAD").then(() => true, () => false));
   await assert.rejects(readFile(path.join(store.appDir(job.id), "stale.txt")), /ENOENT/, "the rewind dropped everything after slice 1");
+  assert.equal(await readFile(path.join(store.appDir(job.id), "data", "habits.json"), "utf8"), '["day 1"]', "the rewind keeps owner data");
   const events = await store.events(job.id, 500);
   const builds = (id) => events.filter((event) => event.type === "agent.started" && event.message.includes(`build-slice-${id}`)).length;
   assert.equal(builds("SLICE-SKELETON"), 1);

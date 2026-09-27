@@ -38,7 +38,7 @@ export class JobStore {
     // ponytail: append-only ignore rules; a hand-edited .gitignore keeps its own lines
     const ignoreFile = path.join(this.project, ".gitignore");
     const current = await readFile(ignoreFile, "utf8").catch(() => "");
-    const missing = [".solofactory/", ".factory/logs/", ".aai/memory/"].filter((rule) => !current.split("\n").includes(rule));
+    const missing = [".solofactory/", ".factory/logs/", ".aai/memory/", "data/"].filter((rule) => !current.split("\n").includes(rule));
     if (missing.length) await writeFile(ignoreFile, `${current}${current && !current.endsWith("\n") ? "\n" : ""}${missing.join("\n")}\n`);
     await this.scaffoldContext();
   }
