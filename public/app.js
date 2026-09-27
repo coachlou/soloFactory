@@ -632,12 +632,12 @@ function renderArtifacts() {
   }));
 }
 
-// "· 412K tokens · $3.10": list-price figure from the CLI; Codex reports no cost, so none is shown.
+// "· 398K tokens in · 14K out". No dollar figure: members run on subscriptions, and the CLI's
+// list-price cost read as an API bill. Cost stays in runs.jsonl.
 function usageLine(usage) {
   if (!usage) return "";
-  const tokens = usage.inputTokens + usage.outputTokens;
-  const count = tokens >= 1e6 ? `${(tokens / 1e6).toFixed(1)}M` : tokens >= 1e3 ? `${Math.round(tokens / 1e3)}K` : String(tokens);
-  return ` · ${count} tokens${usage.costUsd === null ? "" : ` · $${usage.costUsd.toFixed(2)}`}`;
+  const count = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
+  return ` · ${count(usage.inputTokens)} tokens in · ${count(usage.outputTokens)} out`;
 }
 
 function renderAppMetrics() {

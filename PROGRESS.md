@@ -372,7 +372,9 @@ Observed: `npm test` → **72/72**. Not observed: clicking Relaunch in the brows
   provider/model, wall and per-stage time, turns, repairs, gates, and tokens. Totals are cumulative,
   so the last line per `jobId` is the whole run. Compare variants with e.g.
   `jq -s 'group_by(.jobId)|map(last)|group_by(.variant)[]|{variant:.[0].variant,runs:length,cost:(map(.tokens.total.costUsd//0)|add/length)}' */.solofactory/runs.jsonl`.
-- Build telemetry card: "· 412K tokens · $3.10" after elapsed time.
+- Build telemetry card: "· 398K tokens in · 14K out" after elapsed time. No dollar figure
+  (0.9.7): members are on subscriptions and read the list-price cost as an API bill; cost stays
+  in `runs.jsonl`.
 - Known gaps: a turn that throws records no tokens (it is counted in `turnsWithoutUsage`);
   interview turns are not counted. Any turn with unknown cost (Codex) makes the run's cost unknown.
 - `test/telemetry.test.mjs` drives the real Claude/Codex adapters through fake CLIs on PATH, plus
@@ -465,6 +467,12 @@ Ships the token telemetry and the two repair fixes it exposed (see "Token teleme
 runs log" and "Repair fixes found from the telemetry" above): cost per run on the build card
 and in `runs.jsonl`, headless Claude may run the npm gate commands, and a crash on launch gets
 one repair turn. Verified: 83/83.
+
+## Tokens, not dollars, on the build card (2026-09-27, 0.9.7)
+
+The build card shows tokens in and out instead of a dollar figure. Members run on
+subscriptions, and the CLI's list-price cost read as an API bill. Cost stays in `runs.jsonl`.
+Verified: 83/83; the line checked by calling `usageLine` directly, not on a live card.
 
 ## Backlog
 
