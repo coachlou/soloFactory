@@ -476,6 +476,16 @@ Verified: 83/83; the line checked by calling `usageLine` directly, not on a live
 
 ## Backlog
 
+### SDLC hardening (proposal, 2026-10-06)
+
+Not implemented. Full design in [docs/sdlc-hardening-spec.md](docs/sdlc-hardening-spec.md),
+harness-neutral by rule: enforcement is controller checks on diffs and files, instructions are
+`.aai/` markdown, no provider-specific hooks or settings. In build order: controller-enforced
+contract protection (`contract_weakened`), a replay corpus that gates prompt/model changes,
+repair root-cause lines and per-directory `GOTCHAS.md`, fresh-context review in three passes
+(other provider when available), an optional browser smoke check, and live-app incidents as
+proposed fix cards.
+
 ### Ask pane: run-aware questions while the factory turns (idea, 2026-09-18)
 
 Not implemented. A chat pane beside a run that answers questions about it, read-only:
