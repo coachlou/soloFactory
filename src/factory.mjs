@@ -42,6 +42,21 @@ export class FactoryError extends Error {
 // one SoloFactory per run, and a project's next release must stop the previous release's app.
 const liveByProject = new Map();
 
+// A deployed app is started through npm, which runs it under `sh -c`. On Linux /bin/sh is often dash,
+// which does not exec the last command, so SIGTERM to npm leaves the real server running (and its
+// inherited stdout pipe keeps this process alive). Each app therefore gets its own process group,
+// and stopping it signals the whole group.
+const OWN_GROUP = process.platform !== "win32";
+function stopApp(child, signal = "SIGTERM") {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    if (OWN_GROUP && child.pid) process.kill(-child.pid, signal);
+    else child.kill(signal);
+  } catch {
+    try { child.kill(signal); } catch { /* already gone */ }
+  }
+}
+
 export class SoloFactory {
   constructor({ store, provider, maxRepairs = 2, commandRunner = runProcess, deployer } = {}) {
     this.store = store;
@@ -347,7 +362,7 @@ export class SoloFactory {
         // A broken metrics contract or a crash on launch is usually a code defect the repair worker can fix
         // (e.g. a production-only env check); a port or timeout problem is not. Same bounded repair budget as the gates.
         if (error.code !== "invalid_metrics" && error.code !== "deployment_exited") throw error;
-        this.deployments.get(job.id)?.kill("SIGTERM");
+        stopApp(this.deployments.get(job.id));
         await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "deploy", message: error.message });
         let output;
         if (error.code === "invalid_metrics") {
@@ -589,7 +604,7 @@ export class SoloFactory {
           // A missing old run record must not block the new release from deploying.
         }
       }
-      previous.child.kill("SIGTERM");
+      stopApp(previous.child);
     }
     const logPath = path.join(appDir, ".factory", "logs", "deployment.log");
     const log = createWriteStream(logPath, { flags: "a" });
@@ -597,12 +612,13 @@ export class SoloFactory {
       cwd: this.store.appDir(job.id),
       env: subscriptionEnvironment({ PORT: String(port), NODE_ENV: "production" }),
       stdio: ["ignore", "pipe", "pipe"],
+      detached: OWN_GROUP,
     });
     child.stdout.pipe(log);
     child.stderr.pipe(log);
     this.deployments.set(job.id, child);
     liveByProject.set(appDir, { jobId: job.id, child });
-    signal.addEventListener("abort", () => child.kill("SIGTERM"), { once: true });
+    signal.addEventListener("abort", () => stopApp(child), { once: true });
     child.once("exit", async (code) => {
       log.end();
       this.deployments.delete(job.id);
@@ -723,7 +739,7 @@ export class SoloFactory {
   }
 
   async shutdown() {
-    for (const child of this.deployments.values()) child.kill("SIGTERM");
+    for (const child of this.deployments.values()) stopApp(child);
     this.deployments.clear();
   }
 }
@@ -815,7 +831,7 @@ async function waitForHttp(url, child, signal, timeoutMs = 30_000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  child.kill("SIGTERM");
+  stopApp(child);
   throw new FactoryError("health_check_failed", `No successful health response from ${url}.`);
 }
 

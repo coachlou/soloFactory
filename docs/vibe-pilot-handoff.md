@@ -35,13 +35,14 @@ Read this first in a new session, then read `docs/vibe-pilot-spec.md`. Together 
   Then copy `reading-list` into `soloFactory-vibe/pilot-projects/projects/`. The everyday soloFactory stays at port 4173; the pilot runs at **4174**. Remove it afterwards with `git worktree remove ../soloFactory-vibe`.
 - **This is a branch of soloFactory, not a new product.** If the pilot passes its gates, the lane merges back as a soloFactory feature.
 
-## First thing tomorrow: the test suite in the cloud session
-On 2026-10-07, `npm test` did not finish within 10 minutes in the cloud container.
-- The distro check passes.
-- `feedback`, `interview`, `process`, `providers`, `telemetry` and `wbs` all pass in about 5 seconds combined.
-- **`test/e2e.test.mjs` and `test/factory.test.mjs` each hit a 120-second timeout.**
+## Test suite: fixed on 2026-10-07
+`npm test` used to hang in the cloud container. **Cause:** a deployed app is started with `npm start`, which runs it under `sh -c`. On Linux, `/bin/sh` is often dash, which doesn't hand over to the last command, so SIGTERM to npm left the real server running. That broke the "next release replaces its previous live deployment" test, and the orphaned server's open output pipe stopped the test run from ever exiting.
 
-Find out whether they're slow (for example, npm installs in temporary projects needing network) or genuinely hang in this environment, before relying on them for build steps. Do this before building, so every step is verified.
+**Fix** (`src/factory.mjs`): deployed apps now get their own process group, and every place that stops an app signals the whole group (`stopApp`). `npm test` now passes 83 of 83 in about 18 seconds and leaves no stray servers.
+
+**Who it affects:** Linux and WSL users, since Ubuntu's `/bin/sh` is dash. A replaced or stopped app kept running and holding its port. macOS's `/bin/sh` (bash) didn't show it.
+
+**Follow-up for build step 1:** `src/process.mjs` (`runProcess`, used for gates and agent CLIs) stops children with a plain SIGTERM too, so a timed-out `npm test` could orphan its test processes the same way. Apply the same process-group treatment there when building step 1.
 
 ## Build plan (the order follows the findings)
 1. **One owner of the running app (preview process).**
