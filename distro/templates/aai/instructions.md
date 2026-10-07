@@ -12,6 +12,7 @@ app". SoloFactory is this folder's agentic function; projects are its output.
 | File | Kind | Load when |
 |------|------|-----------|
 | `~/.aai/identity.md`, `purpose.md`, `context.md`, `memory.md` | reference — the owner's global ambient home | always, **if `~/.aai/` exists**; then `~/.aai/rules/core.md`. Skip silently if absent. |
+| `~/.aai/rules/coding.md`, else `.ailib/dev-rules/rules/coding.md` | reference — global coding rules | before writing, changing, or reviewing code; never copy them into this folder |
 | `.aai/references/*.md` | reference — folder-level rules | always, if present |
 | `.ailib/solofactory/` | vendored — resolve `.aai/skills/solofactory/` first (shadowing) | any factory operation |
 | `.ailib/solofactory/app/README.md` | reference — how the app runs and its boundaries | before starting or troubleshooting the factory |

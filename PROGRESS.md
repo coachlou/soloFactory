@@ -474,6 +474,14 @@ The build card shows tokens in and out instead of a dollar figure. Members run o
 subscriptions, and the CLI's list-price cost read as an API bill. Cost stays in `runs.jsonl`.
 Verified: 83/83; the line checked by calling `usageLine` directly, not on a live card.
 
+## Vendored coding rules for folders without ~/.aai (2026-10-07, 0.9.8)
+
+`distro/DEPENDS` now lists `dev-rules`, so an install vendors the global coding rules at
+`.ailib/dev-rules/`, and the stamped `.aai/instructions.md` Inputs table tells the harness to
+read `~/.aai/rules/coding.md` and fall back to the vendored copy. On a machine or cloud
+container without the owner's `~/.aai`, the factory's workers previously built against no
+design rules at all. Verified: 83/83.
+
 ## Backlog
 
 ### Ask pane: run-aware questions while the factory turns (idea, 2026-09-18)
