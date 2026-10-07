@@ -1,2 +1,6 @@
 # capabilities vendored alongside solofactory (offline update path)
 ambient-folder
+
+# Vendors the global coding rules at .ailib/dev-rules/, so a folder without the
+# owner's ~/.aai still gets the design rules the factory's workers build against.
+dev-rules
