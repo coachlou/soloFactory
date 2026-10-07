@@ -42,7 +42,7 @@ Read this first in a new session, then read `docs/vibe-pilot-spec.md`. Together 
 
 **Who it affects:** Linux and WSL users, since Ubuntu's `/bin/sh` is dash. A replaced or stopped app kept running and holding its port. macOS's `/bin/sh` (bash) didn't show it.
 
-**Follow-up for build step 1:** `src/process.mjs` (`runProcess`, used for gates and agent CLIs) stops children with a plain SIGTERM too, so a timed-out `npm test` could orphan its test processes the same way. Apply the same process-group treatment there when building step 1.
+**Same fix in `src/process.mjs`, also done 2026-10-07.** `runProcess`, which runs gates and agent CLIs, now gives each command its own process group. It stops the whole group on timeout, cancel and exit, so a timed-out `npm test` or an agent's background dev server can't outlive its turn. Anything still running is also killed if soloFactory exits abruptly. Two new tests cover it, and both fail on the old code. A timing-sensitive idle-timer test was widened from 100ms to 400ms after it flaked once under full-suite load. `npm test`: 85 of 85, three runs in a row.
 
 ## Build plan (the order follows the findings)
 1. **One owner of the running app (preview process).**

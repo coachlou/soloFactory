@@ -33,9 +33,11 @@ test("command contract rejects shell execution", () => {
 test("agent activity extends the idle deadline", async () => {
   const result = await runProcess({
     executable: process.execPath,
-    args: ["-e", "let n=0; const timer=setInterval(() => { console.log(++n); if (n === 6) clearInterval(timer); }, 30)"],
-    idleTimeoutMs: 100,
-    hardTimeoutMs: 1_000,
+    // The run (6 × 100ms) outlasts the idle window, so only activity can keep it alive. The window is wide enough
+    // that Node's own startup under a parallel test load does not count as silence.
+    args: ["-e", "let n=0; const timer=setInterval(() => { console.log(++n); if (n === 6) clearInterval(timer); }, 100)"],
+    idleTimeoutMs: 400,
+    hardTimeoutMs: 3_000,
   });
   assert.equal(result.code, 0);
   assert.equal(result.timedOut, false);
@@ -179,4 +181,55 @@ console.log(JSON.stringify({ type: "result", subtype: "success", result: "done",
     restoreEnv("PATH", previous.PATH);
     restoreEnv("SOLOFACTORY_AGENT_HARD_MINUTES", previous.hard);
   }
+});
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitFor(check, ms = 2_000) {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (check()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return check();
+}
+
+// A grandchild stands in for the real script under `npm` / `sh -c`, which a plain SIGTERM to the direct child misses.
+const spawnGrandchild = (pidFile, parentBody) =>
+  `const { spawn } = require("node:child_process"); const fs = require("node:fs");
+   const g = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+   fs.writeFileSync(${JSON.stringify(pidFile)}, String(g.pid)); ${parentBody}`;
+
+test("a timed-out command takes its whole process group with it", { skip: process.platform === "win32" }, async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "solo-process-group-"));
+  const pidFile = path.join(dir, "grandchild.pid");
+  const result = await runProcess({
+    executable: process.execPath,
+    args: ["-e", spawnGrandchild(pidFile, "setInterval(() => {}, 1000);")],
+    idleTimeoutMs: 300,
+    hardTimeoutMs: 5_000,
+  });
+  assert.equal(result.timedOut, true);
+  const grandchild = Number(await readFile(pidFile, "utf8"));
+  assert.ok(await waitFor(() => !alive(grandchild)), "the grandchild must not outlive the timeout");
+});
+
+test("anything a finished command leaves running in its group is stopped", { skip: process.platform === "win32" }, async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "solo-process-leftover-"));
+  const pidFile = path.join(dir, "grandchild.pid");
+  const result = await runProcess({
+    executable: process.execPath,
+    args: ["-e", spawnGrandchild(pidFile, "process.exit(0);")],
+    hardTimeoutMs: 5_000,
+  });
+  assert.equal(result.code, 0);
+  const grandchild = Number(await readFile(pidFile, "utf8"));
+  assert.ok(await waitFor(() => !alive(grandchild)), "a background process left by a gate or agent must be stopped");
 });

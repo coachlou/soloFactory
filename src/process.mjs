@@ -25,6 +25,26 @@ export function subscriptionEnvironment(extra = {}) {
   return env;
 }
 
+// Gates (`npm test`, `npm run build`) and agent CLIs start their own children. A plain SIGTERM reaches only
+// the direct child: where /bin/sh is dash (Linux, WSL's Ubuntu), `npm` does not hand over to the script, so a
+// timed-out test run or an agent's background dev server would outlive its turn. Each child therefore gets its
+// own process group, stopped as a whole on timeout, cancel and exit. The registry is a last-resort sweep if this
+// process exits without a graceful shutdown.
+const OWN_GROUP = process.platform !== "win32";
+const activeGroups = new Set();
+function signalGroup(child, signal) {
+  if (!child?.pid) return;
+  try {
+    if (OWN_GROUP) process.kill(-child.pid, signal);
+    else if (child.exitCode === null) child.kill(signal);
+  } catch {
+    // ESRCH: the whole group is already gone.
+  }
+}
+process.once("exit", () => {
+  for (const child of activeGroups) signalGroup(child, "SIGKILL");
+});
+
 export async function runProcess({
   executable,
   args = [],
@@ -45,8 +65,9 @@ export async function runProcess({
     cwd,
     env: subscriptionEnvironment(env),
     stdio: ["pipe", "pipe", "pipe"],
-    detached: false,
+    detached: OWN_GROUP,
   });
+  activeGroups.add(child);
 
   let output = "";
   let lineBuffer = "";
@@ -60,7 +81,7 @@ export async function runProcess({
   const effectiveHardTimeout = hardTimeoutMs ?? timeoutMs;
 
   const terminate = () => {
-    if (!child.killed) child.kill("SIGTERM");
+    if (child.exitCode === null && child.signalCode === null) signalGroup(child, "SIGTERM");
   };
 
   const triggerTimeout = (reason) => {
@@ -68,7 +89,7 @@ export async function runProcess({
     timedOut = true;
     timeoutReason = reason;
     terminate();
-    setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
+    setTimeout(() => signalGroup(child, "SIGKILL"), 2_000).unref();
   };
 
   const resetIdleTimer = () => {
@@ -106,6 +127,9 @@ export async function runProcess({
     child.once("error", reject);
     child.once("exit", (code, exitSignal) => resolve({ code, signal: exitSignal }));
   }).finally(() => {
+    // Anything the command left behind in its group (a test's server, an agent's background job) goes with it.
+    signalGroup(child, "SIGTERM");
+    activeGroups.delete(child);
     if (idleTimer) clearTimeout(idleTimer);
     if (hardTimer) clearTimeout(hardTimer);
     signal?.removeEventListener("abort", terminate);
