@@ -1,5 +1,15 @@
 # SoloFactory progress
 
+## Requested next: feature and slice recovery (2026-10-07)
+
+First implementation added after the second broad recovery cycle failed. Owner
+requested staged recovery within a preserved run after the
+photo-library review exposed a broad unfinished backlog. See
+[feature-slice-recovery-spec.md](docs/feature-slice-recovery-spec.md) for the
+flow, preservation rules, implementation entry points, and acceptance tests.
+The current photo-library run is parked, so installation can occur without
+interrupting its worker. Verification and installation status follow below.
+
 ## Outcome
 
 A local-first web application whose subscription-backed Factory Guide interviews one
@@ -592,3 +602,27 @@ are the parts that do, in build order.
 
 Deferred: routing by file sensitivity (secrets/infra → first-party frontier only) matters
 only once a cheap third-party provider exists.
+
+## 2026-10-07 — completion gate defect
+
+Observed household-photo-library runs completed although REVIEW.md listed missing core features and acceptance evidence. Added controller-enforced structured verdict covering intake must-haves and scenarios, fresh run token + contract digest, file evidence validation, bounded repair, resume validation and re-review after post-review/deployment repairs. Contract narrowing during repair is rejected. Added regression tests for single/slices, rejected/missing/stale/partial verdicts, missing evidence, repair budget, resume and scope narrowing. Existing unrelated untracked archives/.aai preserved. Local installation update follows passing checks; no public release/push.
+
+## 2026-10-07 — actionable review recovery
+
+Review recovery diagnostics include every unfinished MH/SC with its full requirement, all reviewer blockers, artifact paths and repair-budget guidance. Dashboard Guide receives the selected project’s latest run snapshot and matching recovery evidence; it must not treat an existing PRD as proof of delivery or claim chat resumes execution. Matching older terse failures are enriched read-only without rewriting run history.
+
+Added regressions for complete repair diagnostics and Guide/recovery API context, including preservation of stored history. Full npm test: 103 pass, 0 fail. No generated application changes or subscription build started.
+
+## 2026-10-07 — owner-authorized review recovery
+
+An explicit resume of a review-rejected run now grants another bounded repair cycle without resetting attempt numbers, deleting previous failure files, or changing the frozen contract. Automatic retries never renew their budget. Added regressions proving a resumed exhausted run can repair and pass, and a still-incomplete run parks again within the new bound.
+
+Validation: 105 tests pass. Installed local snapshot 3ca34d262676 in photo-library-prototype; owner-authorized same-run recovery is active.
+
+## 2026-10-07 — feature recovery implementation
+
+Added separate same-run recovery planning/approval/execution, full gap coverage and stale-approval checks, source/review preservation, scoped original-requirement evidence gates, durable per-feature checkpoints and repair bounds, scheduler controls and dashboard progress. Full npm test: 122 pass, 0 fail; diff check clean. Paused/failed runs supported; active runs must first use existing Pause. Per-feature live deployment remains deferred.
+
+Recovery refinements: ready-plan feedback and revision history, prerequisite-only slices, full original owned-check reviews, correct per-feature/final integration budget bounds, and queued follow-on releases allowed behind recovery. Full suite 124/124; an existing 100ms process-start timing test failed once under load, then passed alone and in the full recheck. Browser confirmed plan list, acceptance disclosure, feedback and approval controls. Latest source needs installation after the current planner parks.
+
+Final local installation: d7806ee5f25c; 124 tests pass. Approved corrected 15-feature photo-library recovery is running on the same run, first compatibility step active. Full app completion remains pending.

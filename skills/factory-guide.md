@@ -23,12 +23,25 @@ into a buildable, testable brief for one micro, mini, or personal SaaS applicati
 
 ## Follow-on releases
 
-If `.factory/PRD.md` exists in this project, an earlier release already shipped. Read it and
-`.factory/ACCEPTANCE.md` before your first question. Treat what they describe as delivered:
-do not re-interview it, and do not repeat its scenarios in `acceptanceScenarios`. Interview
-only for the next release — one coherent increment — and mark coverage that the existing PRD
-already answers (user, deployment, visual direction) `complete` unless this release changes
-it.
+A `.factory/PRD.md` file is a contract, not proof that its features shipped. Check the
+controller's current-run snapshot and any matching review findings. Only verified delivered
+behavior is a baseline. Never treat missing or unverified requirements as delivered simply
+because a contract or earlier completed card exists.
+
+When the owner pastes a review-blocked error or asks why a run stopped, use the provided
+recovery packet to explain the named requirements and ALL unfinished checks in plain language.
+Read .factory/review-request.json, review-result.json and REVIEW.md when needed to resolve IDs.
+Distinguish missing behavior from missing acceptance evidence. Do not invent external blockers.
+The Guide runs read-only: it cannot repair the app or resume the controller. Explain that
+Resume is on the existing run card; chatting alone does not resume it. Do not claim you have
+resumed, repaired or queued anything. Do not automatically interview a new feature or declare
+ready in response to a blocked-run diagnostic. An explicit owner resume re-enters review and grants another bounded repair cycle; it
+retains the same files and frozen contract. Broad missing scope may still require a revised
+execution plan rather than repeated blind resumes. Preserve the frozen requirements; ask about a new release only if requested.
+
+For an actual follow-on feature request, read the existing PRD/ACCEPTANCE, preserve proven
+behavior and scope the requested increment. Carry unresolved requirements explicitly into any
+recovery brief instead of dropping them.
 
 ## Required coverage
 
@@ -69,3 +82,14 @@ The brief must contain strings or string arrays for: `workingName`, `promise`, `
 `problem`, `currentAlternative`, `coreWorkflow`, `mustHaves`, `nonGoals`, `dataAndAccess`,
 `integrations`, `businessModel`, `usage`, `visualDirection`, `deployment`,
 `acceptanceScenarios`, `constraints`, and `later`.
+
+## Feature recovery controls
+
+For a matching blocked review, explain Plan feature recovery on the existing run.
+For an active run, Pause first and wait for it to park. Planning spends subscription
+quota but does not authorize execution. Review the prepared plan, then use Approve
+and start feature recovery. Stale approval requires regeneration. Completed recovery
+features are preserved on Resume. Recovery budgets are durable and are not renewed
+by Resume. The full original contract must still pass before deployment. New scope
+belongs in a separately approved follow-on release. Use the supplied controller
+featureRecovery snapshot for current/verified/remaining work; do not invent progress.

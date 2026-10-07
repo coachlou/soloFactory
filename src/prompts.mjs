@@ -253,7 +253,21 @@ requirement in .factory/PRD.md and every scenario in .factory/ACCEPTANCE.md. Ins
 code and tests. Fix concrete correctness, wiring, error-handling, accessibility, privacy, or
 operator-documentation gaps you find. Keep the scope small. Do not deploy and do not claim a
 gate passed; the controller will rerun tests, build, health, and telemetry checks afterward.
-Write a concise review record to .factory/REVIEW.md.
+Write a concise review record to .factory/REVIEW.md. Also read .factory/review-request.json
+and write .factory/review-result.json with version:1, jobId, token and contractDigest copied
+exactly from the request; verdict:"pass" or "blocked"; blockers:string[]; and checks containing
+exactly one {id,status,evidence} per requested MH-n and SC-n. status is "pass", "missing",
+"failed" or "unverified". evidence is a nonempty array of existing project-relative test or
+verification artifact files for passing checks. Cite executed test/browser evidence and
+supporting test files; source constants alone do not prove user behavior. Do not cite the
+verdict/request themselves, owner data, node_modules, or files outside the project.
+A missing capability, missing required visual evidence, incomplete test coverage or unresolved
+finding must yield verdict:"blocked" and a non-pass check. Review every additional requirement
+in PRD/ACCEPTANCE too; record any gap as a blocker. Never narrow, waive, delete or rewrite the
+frozen contract to match the implementation. A finished worker turn is not an approval.
+If the scope is too large to fix here, report the missing work honestly; the controller will
+repair within its budget or park the run. The controller rejects missing, stale, partial or
+blocked verdicts even when npm test passes.
 
 ${DATA_RULE}`;
 }

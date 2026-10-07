@@ -167,3 +167,38 @@ of these actions:
 | `/api/jobs/<id>/pause`, `/cancel` | pauses or stops an active run, or dequeues a queued one |
 | `/api/jobs/<id>/relaunch` | restarts a completed app whose server stopped |
 | GET `/api/jobs/<id>/recovery-packet` | the diagnosis to read before suggesting a fix |
+
+## Feature recovery within a preserved run
+
+For an unresolved parked run with a matching failed review, choose **Plan feature
+recovery**. An active run must first reach a safe stop through Pause. Planning
+preserves the source, original contract and completed work, and produces a separate
+execution plan mapping every unfinished MH/SC check to an owning feature slice.
+Review the plan, then choose **Approve and start feature recovery**. Approval is
+bound to the plan digest, source baseline, source review, and frozen contract.
+A changed baseline rejects stale approval; regenerate the plan before starting.
+
+Each feature runs deterministic gates and a scoped evidence review of both its
+acceptance checks and the full original checks it owns. Completed features are
+recorded durably; Resume continues at the unfinished feature. There are up to two
+repairs per feature and two for final integration, bounded by the approved phase.
+Recovery resumes do not replenish consumed budgets. The original full-contract
+review still gates deployment. The run ID and original strategy are unchanged;
+source reviews, feature reviews and prior phase histories remain available.
+
+`POST /api/jobs/:id/recovery-plan` starts planning through the project scheduler.
+Read the resulting plan at `GET /api/jobs/:id` under `job.recoveryPhase`.
+`POST /api/jobs/:id/recovery-start` with `{"planDigest":"…"}` approves that exact
+plan and queues execution. These controls reject active/queued project writers.
+The run card shows planned/current/verified features, acceptance checks and budgets.
+The Guide can explain this state; chat text alone does not execute recovery.
+
+Do not loop broad Resume after repeated review rejection. Use feature recovery
+when unfinished checks need separate implementation turns. Inspect and show the
+concrete recovery plan before approving its digest. Existing explicit owner
+authorization to execute the recovery remains valid; do not ask again merely
+because planning produced the implementation detail.
+
+To revise a ready plan, enter feedback and choose Plan feature recovery again.
+The planning endpoint accepts optional `guidance` text (up to 6000 characters);
+prior candidate/history are preserved and old approval becomes invalid.

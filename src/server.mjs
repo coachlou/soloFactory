@@ -3,6 +3,8 @@ import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/p
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JobStore } from "./store.mjs";
+import { withReviewDiagnostics } from "./review.mjs";
+import { validateRecoveryApproval } from "./feature-recovery.mjs";
 import { buildRecovery, buildRecoveryPacket, SoloFactory } from "./factory.mjs";
 import {
   INTERVIEW_RESPONSE_SCHEMA,
@@ -104,7 +106,9 @@ export async function createSoloFactoryServer(options = {}) {
       factories.set(job.id, factory);
       const run = { jobId: job.id, factory };
       runs.set(entry.projectId, run);
-      const launch = entry.mode === "resume" ? factory.resume(job.id) : entry.mode === "restart" ? factory.restartFromSlice(job.id, entry.fromSlice) : factory.start(job.id);
+      const launch = entry.mode === "recovery-plan" ? factory.planRecovery(job.id, entry.guidance)
+        : entry.mode === "recovery-start" ? factory.startRecovery(job.id, entry.planDigest)
+        : entry.mode === "resume" ? factory.resume(job.id) : entry.mode === "restart" ? factory.restartFromSlice(job.id, entry.fromSlice) : factory.start(job.id);
       run.promise = launch
         .catch((error) => {
           console.error(`run ${job.id}: ${error.message}`);
@@ -193,6 +197,7 @@ export async function createSoloFactoryServer(options = {}) {
             repairs: Object.values(job.sliceStats ?? {}).reduce((sum, s) => sum + (s.repairs ?? 0), 0),
           };
         }
+        if (job.recoveryPhase?.plan) card.slices = { done: job.recoveryPhase.done.length, total: job.recoveryPhase.plan.slices.length, current: job.recoveryPhase.current ?? null, repairs: 0 };
         if (job.blockedBy) card.blockedBy = job.blockedBy;
         columns[column].push(card);
       }
@@ -267,11 +272,19 @@ export async function createSoloFactoryServer(options = {}) {
         const body = await readJson(request);
         const provider = requireProvider(body.provider, fixtureMode);
         const messages = validateMessages(body.messages);
+        const latest = (await store.list())[0];
+        const current = latest ? await withReviewDiagnostics(latest, active.dir) : null;
+        const runContext = current ? {
+          project: active.id, jobId: current.id, state: current.state, strategy: current.sdlc ?? "single",
+          repairAttempts: current.attempt ?? 0,
+          featureRecovery: current.recoveryPhase ? { status: current.recoveryPhase.status, done: current.recoveryPhase.done, current: current.recoveryPhase.current, plan: current.recoveryPhase.plan, remainingRepairs: Math.max(0, (current.repairBudgetLimit ?? 0) - current.attempt) } : null,
+          recoveryPacket: PARKED.has(current.state) ? buildRecoveryPacket({ ...current, recovery: current.recovery ?? buildRecovery(current, active.dir) }) : null,
+        } : { project: active.id, state: "no-runs" };
         const result = await providerFactory(provider).run({
           // The guide runs inside the active project so its transcript is that project's memory
           // and the CLI picks up the project's own CLAUDE.md/.aai.
           cwd: active.dir,
-          prompt: buildInterviewPrompt({ skill, messages }),
+          prompt: buildInterviewPrompt({ skill, messages, runContext }),
           schema: INTERVIEW_RESPONSE_SCHEMA,
           mode: "read",
           logPath: path.join(active.dir, ".aai", "memory", "interviews", "guide.log"),
@@ -397,12 +410,29 @@ export async function createSoloFactoryServer(options = {}) {
         await drain();
         return json(response, 202, { job });
       }
+      const featureRecoveryMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/recovery-(plan|start)$/);
+      if (request.method === "POST" && featureRecoveryMatch) {
+        const [ , id, action] = featureRecoveryMatch;
+        const projectId = jobProject.get(id) ?? active.id;
+        const jobStore = storeOfJob(id);
+        const job = await jobStore.read(id);
+        if (!PARKED.has(job.state) || job.dismissed || runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start")) return json(response, 409, { error: "Feature recovery requires an idle, unresolved parked run. Pause an active run first." });
+        const body = await readJson(request);
+        if (action === "start") {
+          try { await validateRecoveryApproval({ store: jobStore }, job, body.planDigest); }
+          catch (error) { return json(response, 409, { error: error.message }); }
+        } else if (job.recoveryPhase && !["planning", "plan_failed", "ready", "built"].includes(job.recoveryPhase.status)) return json(response, 409, { error: "This run already has an active recovery plan." });
+        if (body.guidance !== undefined && (typeof body.guidance !== "string" || body.guidance.length > 6000)) return json(response, 400, { error: "Recovery plan feedback must be text of at most 6000 characters." });
+        if (runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start")) return json(response, 409, { error: "The project acquired another writer; retry after it parks." });
+        await enqueue(projectId, id, `recovery-${action}`, { front: true, planDigest: body.planDigest, guidance: body.guidance ?? "" });
+        return json(response, 202, { accepted: true, jobId: id });
+      }
       const resumeMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/resume$/);
       if (request.method === "POST" && resumeMatch) {
         const projectId = jobProject.get(resumeMatch[1]) ?? active.id;
         const jobStore = storeFor(projectId);
         const job = await ensureRecovery(await jobStore.read(resumeMatch[1]), jobStore);
-        if (!job.recovery?.canResume || !["failed", "interrupted", "paused"].includes(job.state) || queue.some((entry) => entry.jobId === job.id)) {
+        if (!job.recovery?.canResume || ["ready", "planning", "plan_failed"].includes(job.recoveryPhase?.status) || !["failed", "interrupted", "paused"].includes(job.state) || queue.some((entry) => entry.jobId === job.id)) {
           return json(response, 409, { error: "That run cannot be resumed from its current state." });
         }
         // Front of the queue: resolving a parked run is what unblocks everything behind it.
@@ -436,8 +466,10 @@ export async function createSoloFactoryServer(options = {}) {
       const recoveryMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/recovery-packet$/);
       if (request.method === "GET" && recoveryMatch) {
         const jobStore = storeOfJob(recoveryMatch[1]);
-        const job = await ensureRecovery(await jobStore.read(recoveryMatch[1]), jobStore);
-        if (!job.recovery || !["failed", "interrupted", "cancelled"].includes(job.state)) {
+        const preserved = await ensureRecovery(await jobStore.read(recoveryMatch[1]), jobStore);
+        const enriched = await withReviewDiagnostics(preserved, jobStore.appDir());
+        const job = { ...enriched, recovery: enriched.recovery ?? buildRecovery(enriched, jobStore.appDir()) };
+        if (!job.recovery || !["failed", "interrupted", "cancelled", "paused"].includes(job.state)) {
           return json(response, 409, { error: "That run does not need recovery." });
         }
         response.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });

@@ -9,7 +9,9 @@ import { fileURLToPath } from "node:url";
 import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./process.mjs";
 import { buildPrompt, continuationPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
 import { orderSlices, validateSlicePlan } from "./wbs.mjs";
+import { prepareReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
+import { planFeatureRecovery, runFeatureRecovery } from "./feature-recovery.mjs";
 
 // Which harness produced a run, so runs.jsonl can compare harness changes. Read once at load.
 const harnessRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -63,6 +65,14 @@ export class SoloFactory {
 
   async resume(jobId) {
     return this.activate(jobId, (signal) => this.runResume(jobId, signal));
+  }
+
+  async planRecovery(jobId, guidance = "") {
+    return this.activate(jobId, signal => planFeatureRecovery(this, jobId, signal, guidance));
+  }
+
+  async startRecovery(jobId, planDigest) {
+    return this.activate(jobId, signal => runFeatureRecovery(this, jobId, signal, planDigest));
   }
 
   // Rewinds a parked slice run to the commit before `sliceId` and rebuilds from there.
@@ -161,6 +171,18 @@ export class SoloFactory {
     if (!TERMINAL.has(job.state) || job.state === "completed") {
       throw new FactoryError("not_resumable", "Only a failed, cancelled, or interrupted run can be resumed.");
     }
+    if (job.recoveryPhase?.status === "ready" || ["planning", "plan_failed"].includes(job.recoveryPhase?.status)) {
+      throw new FactoryError("recovery_approval_required", "Review and approve the recovery plan before execution; retry planning if it failed.");
+    }
+    if (job.recoveryPhase?.status === "running") return runFeatureRecovery(this, jobId, signal);
+    if (job.recoveryPhase?.status === "built") {
+      try {
+        job.error = null; job.failedState = null; job.recovery = null;
+        await this.store.writeState(job);
+        job = await this.reviewAndVerify(job, signal);
+        return await this.deployAndComplete(job, signal);
+      } catch (error) { return this.fail(jobId, signal, error); }
+    }
     const appDir = this.store.appDir(jobId);
     const failedState = inferFailedState(job);
     const previousError = job.error;
@@ -217,9 +239,17 @@ export class SoloFactory {
       }
 
       if (failedState === "reviewing") {
-        job = await this.stage(job, "reviewing", "Continuing the contract review");
-        await this.invoke(job, "review-resume", continuationPrompt("review"), signal, { resumeSessionId });
-        job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: false });
+        // An owner-requested resume authorizes another bounded recovery cycle.
+        // Keep attempt numbers monotonic so prior failure files are preserved.
+        if (previousError?.code === "review_rejected") {
+          job.repairBudgetLimit = job.attempt + this.maxRepairs;
+          await this.store.writeState(job);
+          await this.emit(job.id, {
+            type: "recovery.budget", state: "reviewing",
+            message: `Owner-requested review recovery allows ${this.maxRepairs} further repair attempts; the frozen contract is unchanged`,
+          });
+        }
+        job = await this.reviewAndVerify(job, signal);
         return await this.deployAndComplete(job, signal);
       }
 
@@ -235,10 +265,48 @@ export class SoloFactory {
   async finishFromBuild(job, signal, { includeInstall = true } = {}) {
     const appDir = this.store.appDir(job.id);
     job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall });
-    job = await this.stage(job, "reviewing", "Reviewing against the frozen contract");
-    await this.invoke(job, "review", reviewPrompt(), signal);
-    job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: false });
+    job = await this.reviewAndVerify(job, signal);
     return this.deployAndComplete(job, signal);
+  }
+
+  async requireReview(job) {
+    try {
+      return await validateReview(this.store.appDir(job.id), job.reviewRequest);
+    } catch (error) {
+      throw new FactoryError("review_rejected", error.message, { gate: "review", output: error.message, ...error.details });
+    }
+  }
+
+  async reviewAndVerify(job, signal) {
+    const appDir = this.store.appDir(job.id);
+    for (;;) {
+      job = await this.stage(job, "reviewing", "Reviewing against the frozen contract");
+      let request;
+      try { request = await prepareReview(appDir, job); }
+      catch (error) { throw new FactoryError("review_rejected", `Cannot review the frozen contract: ${error.message}`); }
+      if (job.reviewContractDigest && request.contractDigest !== job.reviewContractDigest) {
+        throw new FactoryError("review_rejected", "Frozen contract changed after the first review; scope cannot be narrowed during repair.");
+      }
+      job.reviewContractDigest = request.contractDigest;
+      job.reviewRequest = request;
+      await this.store.writeState(job);
+      await this.invoke(job, "review", reviewPrompt(), signal);
+      try {
+        await this.requireReview(job);
+      } catch (failure) {
+        await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "review", message: failure.message });
+        job = await this.repair(job, failure, signal);
+        job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: false });
+        continue;
+      }
+      const attempt = job.attempt;
+      job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: false });
+      // Any gate repair changes the app after the verdict; require a fresh review.
+      if (attempt !== job.attempt) continue;
+      await this.requireReview(job);
+      await this.emit(job.id, { type: "gate.passed", state: job.state, gate: "review", message: "All intake checks have a passing review with evidence" });
+      return job;
+    }
   }
 
   sliceScenarioCount(job) {
@@ -335,7 +403,10 @@ export class SoloFactory {
   async deployAndComplete(job, signal) {
     const appDir = this.store.appDir(job.id);
     let deployment;
+    // Legacy deployment resumes also need the new review gate.
+    if (!job.reviewRequest) job = await this.reviewAndVerify(job, signal);
     for (;;) {
+      await this.requireReview(job);
       job = await this.stage(job, "deploying", "Launching and checking the application");
       const manifest = await this.readManifest(appDir);
       try {
@@ -360,6 +431,7 @@ export class SoloFactory {
         error.details = { ...error.details, gate: "deploy", output };
         job = await this.repair(job, error, signal);
         job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: true });
+        job = await this.reviewAndVerify(job, signal);
       }
     }
     job.deployment = deployment;
@@ -524,7 +596,7 @@ export class SoloFactory {
 
   // One repair turn against a recorded failure. Throws the failure itself once the budget is spent.
   async repair(job, failure, signal, slice = null) {
-    if (job.attempt >= this.maxRepairs) throw failure;
+    if (job.attempt >= (job.repairBudgetLimit ?? this.maxRepairs)) throw failure;
     job.attempt += 1;
     await this.store.writeState(job);
     const failureRelative = `.factory/last-failure-${job.attempt}.txt`;
@@ -737,14 +809,19 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
   const failedState = inferFailedState(job);
   const timeoutReason = job.error?.details?.timeoutReason;
   const primary = diagnostics[0];
-  const title = primary?.title
+  const reviewBlocked = job.error?.code === "review_rejected";
+  const title = reviewBlocked ? "Required functionality or evidence is unfinished" : primary?.title
     ?? (timeoutReason === "idle" ? "The coding agent became inactive" : timeoutReason === "hard" ? "The run reached its safety cap" : "The run paused before completion");
   const actions = diagnostics.map((item) => item.action);
   if (!actions.length) {
-    actions.push("Review the recovery packet and the named log, then resume this run from its preserved files.");
+    if (reviewBlocked) {
+      actions.push("Read the unfinished checks and reviewer blockers in this packet and .factory/REVIEW.md.");
+      actions.push("Implement the missing behavior and run its acceptance checks; preserve the frozen contract and existing data.");
+      actions.push("Use Resume on this run's card to continue its preserved files. Dashboard chat explains or shapes briefs; it does not resume a run.");
+    } else actions.push("Review the recovery packet and the named log, then resume this run from its preserved files.");
   }
   const attempts = job.error?.details?.autoResumes ?? 0;
-  const summary = diagnostics.length
+  const summary = reviewBlocked ? `The review did not approve the app. ${job.attempt ?? 0} automatic repairs have been used; green tests do not prove the missing features are complete.` : diagnostics.length
     ? `${diagnostics.map((item) => item.title).join("; ")}. The partial app and completed specification are intact.`
     : timeoutReason === "idle"
       ? `The agent stopped producing activity. ${attempts ? "Its one bounded same-session retry was used." : "A manual resume can continue without starting over."}`
@@ -760,7 +837,7 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
     logPath: job.error?.details?.logPath ?? null,
     filesPreserved: true,
     canResume: job.state !== "cancelled",
-    automaticRetry: legacy
+    automaticRetry: reviewBlocked ? "The bounded repair budget stopped this run. Repeating the error in chat does not perform a repair or resume." : legacy
       ? "This run predates activity-aware recovery; no automatic resume was available."
       : diagnostics.length
         ? "Automatic retry stopped because a concrete blocker was detected, avoiding another token-consuming agent turn."
@@ -778,14 +855,21 @@ export function buildRecoveryPacket(job) {
     `Failed stage: ${recovery.failedState}`,
     `Preserved workspace: ${recovery.workspace}`,
     `Failure: ${job.error?.message ?? recovery.summary}`,
+    `Summary: ${recovery.summary}`,
+    `Automatic retry: ${recovery.automaticRetry}`,
     "",
     "Recommended actions:",
     ...recovery.actions.map((action) => `- ${action}`),
   ];
+  if (job.error?.details?.output && job.error.details.output !== job.error.message) lines.push("", "Review findings:", job.error.details.output);
+  if (job.recoveryPhase?.plan) lines.push("", `Feature recovery: ${job.recoveryPhase.status}; ${job.recoveryPhase.done.length}/${job.recoveryPhase.plan.slices.length} verified.`,
+    ...job.recoveryPhase.plan.slices.map(slice => `- ${job.recoveryPhase.done.includes(slice.id) ? "Verified" : "Unfinished"}: ${slice.title} (${slice.checks.join(", ")})`));
   if (recovery.logPath) lines.push("", `Log: ${recovery.logPath}`);
   lines.push(
     "",
-    "Please inspect the preserved workspace and evidence, help resolve any external blocker, and continue from the current state. Do not start over or redo completed work unless the evidence requires it.",
+    job.error?.code === "review_rejected"
+      ? "Inspect the preserved workspace and review evidence, implement the unfinished requirements, and verify them against the frozen contract. Do not start over, waive requirements, or redo completed work unless the evidence requires it. Dashboard chat cannot execute this recovery; use the run controls to continue."
+      : "Please inspect the preserved workspace and evidence, help resolve any external blocker, and continue from the current state. Do not start over or redo completed work unless the evidence requires it.",
   );
   return `${lines.join("\n")}\n`;
 }

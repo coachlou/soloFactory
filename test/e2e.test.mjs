@@ -60,7 +60,7 @@ test("HTTP recovery explains legacy blockers and resumes the same run id", async
   t.after(() => app.close());
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const job = await app.store.create({
-    brief: { workingName: "Preserved fixture" },
+    brief: { workingName: "Preserved fixture", acceptanceScenarios: ["A user records a score."] },
     transcript: [{ role: "user", content: "Build the preserved app." }],
     provider: "fixture",
   });
@@ -69,7 +69,11 @@ test("HTTP recovery explains legacy blockers and resumes the same run id", async
   job.error = { code: "unexpected_error", message: "Codex timed out." };
   job.stageHistory.push({ state: "building", label: "Building", startedAt: new Date().toISOString(), endedAt: null });
   await app.store.writeState(job);
-  const logDir = path.join(app.store.appDir(job.id), ".factory", "logs");
+  // A build-stage recovery retains the spec/intake produced before the build.
+  const cwd = app.store.appDir(job.id);
+  await createFixtureProvider().run({ cwd, context: { stage: "specification", job } });
+  await writeFile(path.join(cwd, ".factory", "requirements.json"), JSON.stringify({ brief: job.brief, transcript: job.transcript }));
+  const logDir = path.join(cwd, ".factory", "logs");
   await mkdir(logDir, { recursive: true });
   await writeFile(
     path.join(logDir, "build.log"),
@@ -445,4 +449,90 @@ test("operational errors from the server, browser, and chat land in one scrubbed
   assert.equal(errors[1].message, "boom at [redacted] with [redacted]");
   assert.ok(errors.every((entry) => entry.at && entry.version));
   assert.match(await readFile(path.join(home, "errors.jsonl"), "utf8"), /"source":"chat"/);
+});
+
+test('Guide and recovery packet receive full matching review diagnostics without rewriting history', async t => {
+  const { prepareReview } = await import('../src/review.mjs');
+  const { buildRecovery } = await import('../src/factory.mjs');
+  const home = await mkdtemp(path.join(os.tmpdir(), 'solo-review-guide-'));
+  const calls = [];
+  const fixture = createFixtureProvider();
+  const app = await createSoloFactoryServer({ home, fixtureMode: true, providerFactory: () => ({ id: 'fixture', async run(args) { calls.push(args); return fixture.run(args); } }) });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const job = await app.store.create({ brief: {workingName:'Blocked photo library',mustHaves:['Years and Months browsing','Real EXIF extraction'],acceptanceScenarios:['A matching import updates its saved album.']},transcript:[{role:'user',content:'Recover missing features'}],provider:'fixture' });
+  const cwd = app.store.appDir(job.id);
+  await fixture.run({cwd,context:{stage:'specification',job}});
+  await writeFile(path.join(cwd,'.factory/requirements.json'),JSON.stringify({brief:job.brief}));
+  job.reviewRequest = await prepareReview(cwd,job);
+  await fixture.run({cwd,context:{stage:'review',job}});
+  const file = path.join(cwd,'.factory/review-result.json');
+  const report = JSON.parse(await readFile(file,'utf8'));
+  report.verdict='blocked';report.blockers=['No metadata pipeline'];
+  report.checks[0].status='unverified';report.checks[1].status='missing';
+  await writeFile(file,JSON.stringify(report));
+  job.state='failed';job.failedState='reviewing';job.attempt=2;
+  job.error={code:'review_rejected',message:'Review blocked: MH-1 is unverified.',details:{}};
+  job.recovery=buildRecovery(job,cwd);
+  await app.store.writeState(job);
+  const before=JSON.stringify(await app.store.read(job.id));
+  const packet=await (await fetch(`${base}/api/jobs/${job.id}/recovery-packet`)).text();
+  for(const text of ['Years and Months browsing','Real EXIF extraction','No metadata pipeline','Resume on this run','2 automatic repairs']) assert.ok(packet.includes(text),text);
+  await postJson(`${base}/api/interview/turn`,{provider:'fixture',messages:[{role:'user',content:'What does MH-1 mean?'}]});
+  const call=calls.find(x=>x.context.stage==='interview');
+  assert.match(call.prompt,/Years and Months browsing/);
+  assert.match(call.prompt,/Real EXIF extraction/);
+  assert.match(call.prompt,/No metadata pipeline/);
+  assert.match(call.prompt,/Guide runs read-only/);
+  assert.match(call.prompt,/"strategy": "single"/);
+  assert.equal(JSON.stringify(await app.store.read(job.id)),before);
+});
+
+test('HTTP feature recovery requires matching approval and respects the project writer', async t => {
+  const { prepareReview } = await import('../src/review.mjs');
+  const { buildRecovery } = await import('../src/factory.mjs');
+  const home = await mkdtemp(path.join(os.tmpdir(), 'solo-http-feature-recovery-'));
+  const fixture = createFixtureProvider();
+  let releasePlan;
+  const holdPlan = new Promise(resolve => { releasePlan = resolve; });
+  let planningStarted;
+  const sawPlan = new Promise(resolve => { planningStarted = resolve; });
+  const app = await createSoloFactoryServer({ home, fixtureMode: true, providerFactory: () => ({
+    id: 'fixture', async run(args) {
+      if (args.context.stage.startsWith('recovery-plan-')) { planningStarted(); await holdPlan; }
+      return fixture.run(args);
+    },
+  }) });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { releasePlan(); return app.close(); });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const job = await app.store.create({ brief: { workingName: 'Recovery HTTP', mustHaves: ['Edit live albums'], acceptanceScenarios: ['New photos enter a saved album'] }, transcript: [{ role: 'user', content: 'Recover existing behavior' }], provider: 'fixture' });
+  const cwd = app.store.appDir();
+  await mkdir(path.join(cwd, '.factory'), { recursive: true });
+  await writeFile(path.join(cwd, '.factory/requirements.json'), JSON.stringify(job.brief));
+  for (const stage of ['specification', 'build']) await fixture.run({ cwd, context: { stage, job } });
+  job.reviewRequest = await prepareReview(cwd, job); job.reviewContractDigest = job.reviewRequest.contractDigest;
+  await fixture.run({ cwd, context: { stage: 'review', job } });
+  const reportPath = path.join(cwd, '.factory/review-result.json'); const report = JSON.parse(await readFile(reportPath));
+  report.verdict = 'blocked'; report.blockers = ['Missing live rules']; report.checks[0].status = 'missing';
+  await writeFile(reportPath, JSON.stringify(report)); await app.store.commit('fixture baseline');
+  job.startedAt = new Date().toISOString(); job.state = 'failed'; job.failedState = 'reviewing'; job.error = { code: 'review_rejected', message: 'Missing live rules' };
+  job.recovery = buildRecovery(job, cwd); await app.store.writeState(job);
+  const guide = await postJson(`${base}/api/interview/turn`, { provider: 'fixture', messages: [{ role: 'user', content: 'Queue a later feature after recovery' }] });
+  const waiting = await postJson(`${base}/api/jobs`, { provider: 'fixture', transcript: [{ role: 'user', content: 'Build this after the preserved recovery completes' }], coverage: guide.coverage, brief: guide.brief });
+  assert.equal(waiting.job.state, 'queued', 'a later release must wait behind the parked run');
+  await postJson(`${base}/api/jobs/${job.id}/recovery-plan`, {}); await sawPlan;
+  assert.equal((await fetch(`${base}/api/jobs/${job.id}/recovery-plan`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 409);
+  releasePlan();
+  let ready; const deadline = Date.now() + 20_000;
+  do { await new Promise(r => setTimeout(r, 50)); ready = (await getJson(`${base}/api/jobs/${job.id}`)).job; } while (!['paused', 'failed'].includes(ready.state) && Date.now() < deadline);
+  assert.equal(ready.recoveryPhase?.status, 'ready', ready.error?.message);
+  assert.equal((await fetch(`${base}/api/jobs/${job.id}/resume`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 409);
+  assert.equal((await fetch(`${base}/api/jobs/${job.id}/recovery-start`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ planDigest: 'wrong' }) })).status, 409);
+  await postJson(`${base}/api/jobs/${job.id}/recovery-start`, { planDigest: ready.recoveryPhase.planDigest });
+  let after;
+  do { await new Promise(r => setTimeout(r, 100)); after = (await getJson(`${base}/api/jobs/${job.id}`)).job; } while (!['completed', 'failed'].includes(after.state) && Date.now() < deadline);
+  assert.equal(after.state, 'completed', after.error?.message);
+  assert.equal(after.sdlc, 'single'); assert.deepEqual(after.recoveryPhase.done, ['RECOVERY-1']);
 });

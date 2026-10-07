@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { COVERAGE_KEYS, makeOpeningTurn } from "./interview.mjs";
 
@@ -65,7 +65,17 @@ export function createFixtureProvider() {
         };
       }
       await mkdir(path.join(cwd, ".factory"), { recursive: true });
-      if (context.stage.startsWith("specification")) {
+      if (context.stage.startsWith("recovery-plan-")) {
+        const phase = context.job.recoveryPhase;
+        await writeFile(path.join(cwd, phase.planFile), JSON.stringify({
+          version: 1, requestId: phase.id, contractDigest: phase.request.contractDigest,
+          slices: phase.request.checks.map((check, index) => ({
+            id: `RECOVERY-${index + 1}`, title: check.text, objective: `Recover ${check.id}`,
+            checks: [check.id], acceptance: [`Execute server.test.mjs to verify ${check.text}`],
+            dependsOn: index ? [`RECOVERY-${index}`] : [], demo: 'Run the executable fixture behavior checks.',
+          })),
+        }));
+      } else if (context.stage.startsWith("specification")) {
         const body = (title) => `# ${title}\n\nPocket Pulse is a deliberately small personal SaaS fixture used to prove the complete SoloFactory lifecycle. It lets one owner record a daily score and short note, then inspect recent entries and a seven-day summary. The application has no login, billing, team features, external analytics, or remote services. Data remains in the browser.\n\nThe primary end-to-end scenario is observable: open the app, submit a score and note, see the new entry, and see the summary update. The server exposes a health endpoint and privacy-preserving aggregate request telemetry. Keyboard access, mobile layout, explicit empty states, and clear failures are required. This document is intentionally substantive enough to exercise the specification gate without hiding fixture behavior.\n`;
         await writeFile(path.join(cwd, ".factory", "PRD.md"), body("Product requirements"));
         await writeFile(path.join(cwd, ".factory", "PLAN.md"), body("Implementation plan"));
@@ -77,8 +87,13 @@ export function createFixtureProvider() {
         await writeFixtureSlice(cwd, context.job.sliceIndex ?? 0);
       } else if (context.stage === "build" || context.stage === "build-resume" || context.stage === "repair-resume") {
         await writeFixtureApp(cwd);
-      } else if (context.stage.startsWith("review")) {
+      } else if (context.stage.startsWith("review") || /^recovery-.*-review-\d+$/.test(context.stage)) {
         await writeFile(path.join(cwd, ".factory", "REVIEW.md"), "# Review\n\nFixture contract inspected; no changes required.\n");
+        const request = JSON.parse(await readFile(path.join(cwd, ".factory", "review-request.json"), "utf8"));
+        await writeFile(path.join(cwd, ".factory", "review-result.json"), JSON.stringify({
+          version: 1, jobId: request.jobId, token: request.token, contractDigest: request.contractDigest,
+          verdict: "pass", blockers: [], checks: request.checks.map(check => ({ id: check.id, status: "pass", evidence: ["server.test.mjs"] })),
+        }));
       }
       return { message: `${context.stage} complete` };
     },

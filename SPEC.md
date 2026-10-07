@@ -411,3 +411,45 @@ Two upstream investments keep bad decompositions from ever reaching a build turn
 
 A per-slice demo audit during the final review is deliberately deferred until real slice-mode
 runs show the gated slices are not being delivered end-to-end.
+
+## Completion review gate
+
+A completed worker turn is not review approval. After build/tests, the controller writes a fresh `.factory/review-request.json` covering every intake must-have (MH-n) and acceptance scenario (SC-n), bound to the run and frozen contract digest. The reviewer writes `.factory/review-result.json` and a human-readable REVIEW.md. Every check must pass with existing project-relative evidence files, verdict must be pass, and blockers must be empty. Missing, stale, malformed, partial, blocked or unevidenced reports fail the gate even if npm test passes. Reviewers must report missing capabilities and required browser/visual evidence instead of waiving scope.
+
+Review failures use the existing bounded repair budget, then park the run. An explicit owner resume after a rejected review obtains a fresh review and authorizes another bounded repair cycle (two attempts by default). Attempt numbers remain monotonic so earlier failure files are retained. Automatic retries never renew this budget. Repairs after review (including deployment repairs) require re-review. The frozen contract cannot be narrowed during repair. Existing completed runs are historical and are not retroactively reclassified. A structured review still depends on honest behavioral assessment; the controller validates coverage, evidence presence and verdict consistency rather than proving arbitrary application semantics.
+
+Review recovery diagnostics include every unfinished MH/SC with its full requirement, all reviewer blockers, artifact paths and repair-budget guidance. Dashboard Guide receives the selected project’s latest run snapshot and matching recovery evidence; it must not treat an existing PRD as proof of delivery or claim chat resumes execution. Matching older terse failures are enriched read-only without rewriting run history.
+
+## Feature recovery within a preserved run
+
+For an unresolved parked run with a matching failed review, choose **Plan feature
+recovery**. An active run must first reach a safe stop through Pause. Planning
+preserves the source, original contract and completed work, and produces a separate
+execution plan mapping every unfinished MH/SC check to an owning feature slice.
+Review the plan, then choose **Approve and start feature recovery**. Approval is
+bound to the plan digest, source baseline, source review, and frozen contract.
+A changed baseline rejects stale approval; regenerate the plan before starting.
+
+Each feature runs deterministic gates and a scoped evidence review of both its
+acceptance checks and the full original checks it owns. Completed features are
+recorded durably; Resume continues at the unfinished feature. There are up to two
+repairs per feature and two for final integration, bounded by the approved phase.
+Recovery resumes do not replenish consumed budgets. The original full-contract
+review still gates deployment. The run ID and original strategy are unchanged;
+source reviews, feature reviews and prior phase histories remain available.
+
+`POST /api/jobs/:id/recovery-plan` starts planning through the project scheduler.
+Read the resulting plan at `GET /api/jobs/:id` under `job.recoveryPhase`.
+`POST /api/jobs/:id/recovery-start` with `{"planDigest":"…"}` approves that exact
+plan and queues execution. These controls reject active/queued project writers.
+The run card shows planned/current/verified features, acceptance checks and budgets.
+The Guide can explain this state; chat text alone does not execute recovery.
+
+To revise a ready plan, enter feedback and choose Plan feature recovery again.
+The planning endpoint accepts optional `guidance` text (up to 6000 characters);
+prior candidate/history are preserved and old approval becomes invalid.
+
+Prerequisite-only recovery slices may use an empty `checks` array, but still
+require executable acceptance criteria. Every unfinished original check must
+still have exactly one owning slice; its full evidence gate runs after its
+prerequisites, and final review covers the unchanged full contract.
