@@ -50,6 +50,40 @@ The generated app is deployed locally on an unused loopback port. Keep SoloFacto
 while using that app. This is the deliberately small v0.1 deployment contract; no cloud
 account or secrets are needed.
 
+## Codex model settings
+
+Codex uses `gpt-6.1-sol` with `medium` reasoning effort by default. These settings
+apply to the Guide, planning, coding, repair, and AI review. Deterministic tests run
+as commands and do not use a model. Codex stage-specific model or effort settings are
+not currently supported.
+
+Override the defaults when starting the factory:
+
+```bash
+SOLOFACTORY_CODEX_MODEL=gpt-6.1-sol SOLOFACTORY_CODEX_REASONING_EFFORT=medium npm start
+```
+
+Pause active runs at a safe boundary before changing settings or restarting the
+factory. Resume the preserved run after restarting; its completed features remain.
+
+## Claude model settings
+
+Claude uses `opus` with `medium` effort for the Guide, coding, and repairs.
+Plan correction also uses `opus`. Specification, feature planning, plan review, recovery planning,
+feature review, and final AI review use `fable` with `low` effort. Model aliases
+resolve through the installed Claude Code CLI. Deterministic tests run as commands and do not use a model.
+
+Override either profile when starting the factory:
+
+```bash
+SOLOFACTORY_CLAUDE_MODEL=opus SOLOFACTORY_CLAUDE_EFFORT=medium \
+SOLOFACTORY_CLAUDE_REASONING_MODEL=fable SOLOFACTORY_CLAUDE_REASONING_EFFORT=low npm start
+```
+
+These profiles apply to Claude runs; the provider of an existing run remains
+unchanged. Update the installation and restart at a safe pause boundary to load
+new adapter settings.
+
 ## Verify the factory
 
 ```bash
@@ -140,6 +174,18 @@ standalone Command Line Tools. Select the full installation with
 `xcodebuild -version`. TestFlight affects distribution, not this local build-tool selection.
 
 See [SPEC.md](./SPEC.md) for the complete product, state, security, and acceptance contract.
+
+## Planned features
+
+Every new run plans before it builds. After the specification, a planner writes a
+dependency-ordered feature plan (`.factory/slices.json` version 2) in which each must-have and
+acceptance scenario has exactly one closing feature with executable proofs. A fresh reviewer
+must approve that exact plan, bound to its digest, the frozen contract and a token, before any
+code is written. Each feature then passes install/test/build, its own proof commands, a scoped
+review bound to the reviewed source, and a checkpoint commit before the next one starts.
+Plans, features and final integration each get two repairs; Resume never refills them. There is
+no single-build option for new runs; older single and slice runs still resume. Details:
+[SPEC.md §12](SPEC.md).
 
 ## Completion review gate
 

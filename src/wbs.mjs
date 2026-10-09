@@ -12,6 +12,8 @@
 //   "[SC-n]" on at least one slice criterion, so the plan provably covers the
 //   contract instead of merely being plausible.
 
+import { assertAllowedCommand } from "./process.mjs";
+
 export const SLICE_ID_RE = /^[A-Z][A-Z0-9-]{0,63}$/;
 const SCENARIO_TAG_RE = /\bSC-(\d{1,3})\b/g;
 
@@ -172,4 +174,91 @@ export function nextExecutable(doneIds, plan) {
     if (slice.dependsOn.every((dep) => done.has(dep))) return slice;
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Version-2 feature plans: every new run decomposes the frozen contract into
+// typed, dependency-ordered features before the first implementation turn.
+//
+// `checks` is the original-check registry from review.mjs originalChecks(),
+// so plan ownership and full review share one MH-n/SC-n numbering. Pure: the
+// caller supplies identity and digest; proof files may not exist yet.
+
+export const MAX_FEATURES = 30;
+
+const text = (value, min) => typeof value === "string" && value.trim().length >= min;
+
+export function validateFeaturePlan(raw, { jobId, contractDigest, checks }) {
+  if (!raw || typeof raw !== "object" || raw.version !== 2) throw new Error("slices.json must be a version 2 feature plan.");
+  if (raw.jobId !== jobId || raw.contractDigest !== contractDigest) throw new Error("Feature plan does not match this run and its frozen contract.");
+  if (!Array.isArray(raw.slices) || raw.slices.length === 0) throw new Error("slices.json must contain at least one feature.");
+  if (raw.slices.length > MAX_FEATURES) throw new Error(`Feature plan has ${raw.slices.length} features; the limit is ${MAX_FEATURES}. Park and split the brief rather than merging or dropping scope.`);
+  const registry = new Map(checks.map((check) => [check.id, check.text]));
+  if (!registry.size) throw new Error("Feature planning requires at least one original requirement or acceptance scenario.");
+
+  for (const item of raw.compatibility ?? []) {
+    if (item?.status !== "verified") throw new Error(`Unresolved compatibility: ${item?.subject ?? JSON.stringify(item)}. Resolve it read-only before planning work that depends on it.`);
+  }
+
+  const position = new Map();
+  raw.slices.forEach((slice, index) => {
+    if (!slice || typeof slice !== "object" || typeof slice.id !== "string" || !SLICE_ID_RE.test(slice.id)) throw new Error(`slices[${index}].id must match ${SLICE_ID_RE}.`);
+    if (position.has(slice.id)) throw new Error(`Duplicate slice id: ${slice.id}.`);
+    position.set(slice.id, index);
+  });
+
+  const owner = new Map();
+  const behaviors = new Map();
+  const obligationIds = new Set();
+  const slices = raw.slices.map((slice, index) => {
+    const where = `Feature ${slice.id}`;
+    if (!text(slice.title, 3) || !text(slice.objective, 3)) throw new Error(`${where} needs a title and an observable objective.`);
+    if (!text(slice.demo, 8)) throw new Error(`${where} needs a demo concrete enough to act on.`);
+    const dependsOn = slice.dependsOn ?? [];
+    if (!Array.isArray(dependsOn)) throw new Error(`${where} has a malformed dependsOn.`);
+    for (const dep of dependsOn) {
+      if (!position.has(dep)) throw new Error(`${where} depends on unknown slice ${dep}.`);
+      if (position.get(dep) >= index) throw new Error(`${where} depends on ${dep}, which is not an earlier slice.`);
+    }
+    if (!Array.isArray(slice.closes)) throw new Error(`${where} needs a closes array (empty only for a named prerequisite).`);
+    for (const id of slice.closes) {
+      if (!registry.has(id)) throw new Error(`${where} closes unknown check ${id}.`);
+      if (owner.has(id)) throw new Error(`${id} has two closing owners: ${owner.get(id)} and ${slice.id}.`);
+      owner.set(id, slice.id);
+    }
+    if (!Array.isArray(slice.acceptance) || slice.acceptance.length === 0) throw new Error(`${where} needs at least one acceptance obligation.`);
+    const acceptance = slice.acceptance.map((item) => {
+      if (!item || typeof item.id !== "string" || !SLICE_ID_RE.test(item.id) || obligationIds.has(item.id)) throw new Error(`${where} has a missing or duplicate obligation id.`);
+      obligationIds.add(item.id);
+      if (!text(item.behavior, 12)) throw new Error(`Obligation ${item.id} needs a concrete expected behavior.`);
+      const key = item.behavior.trim().toLowerCase();
+      if (behaviors.has(key)) throw new Error(`Features ${behaviors.get(key)} and ${slice.id} share the behavior "${item.behavior.slice(0, 90)}". Merge or redraw the boundary.`);
+      behaviors.set(key, slice.id);
+      if (!Array.isArray(item.refs) || item.refs.some((ref) => !registry.has(ref))) throw new Error(`Obligation ${item.id} references unknown original checks.`);
+      const command = item.proof?.command;
+      try { assertAllowedCommand(command); if (command.length < 2) throw new Error("needs arguments"); }
+      catch (error) { throw new Error(`Obligation ${item.id} needs an executable proof command as an npm/node/npx argument array (${error.message})`); }
+      if (!text(item.proof.expect, 3)) throw new Error(`Obligation ${item.id} needs an expected proof result.`);
+      return { id: item.id, behavior: item.behavior.trim(), refs: [...item.refs], proof: { command: [...command], expect: item.proof.expect.trim() } };
+    });
+    for (const id of slice.closes) {
+      if (!acceptance.some((item) => item.refs.includes(id))) throw new Error(`${where} closes ${id} but no obligation in it proves ${id}.`);
+    }
+    return { id: slice.id, title: slice.title.trim(), objective: slice.objective.trim(), demo: slice.demo.trim(), dependsOn: [...dependsOn], closes: [...slice.closes], acceptance };
+  });
+
+  const missing = [...registry.keys()].filter((id) => !owner.has(id));
+  if (missing.length) throw new Error(`Feature plan has no closing owner for ${missing.map((id) => `${id} (${registry.get(id).slice(0, 80)})`).join(", ")}.`);
+
+  // A prerequisite must feed a later closing feature, directly or transitively.
+  const feedsCloser = new Set();
+  for (let index = slices.length - 1; index >= 0; index -= 1) {
+    const slice = slices[index];
+    if (slice.closes.length || feedsCloser.has(slice.id)) slice.dependsOn.forEach((dep) => feedsCloser.add(dep));
+  }
+  for (const slice of slices) {
+    if (!slice.closes.length && !feedsCloser.has(slice.id)) throw new Error(`Feature ${slice.id} is an orphan prerequisite: no later feature that closes a check depends on it.`);
+  }
+
+  return { version: 2, jobId, contractDigest, compatibility: [...(raw.compatibility ?? [])], slices };
 }

@@ -194,6 +194,7 @@ export async function createSoloFactoryServer(options = {}) {
             done,
             total,
             current: job.slicePlanIds?.[job.sliceIndex] ?? null,
+            substage: job.featureCursor?.substage ?? null,
             repairs: Object.values(job.sliceStats ?? {}).reduce((sum, s) => sum + (s.repairs ?? 0), 0),
           };
         }
@@ -251,8 +252,7 @@ export async function createSoloFactoryServer(options = {}) {
           version,
           issues: issues ? { base: issues.base, available: true } : null,
           sdlcOptions: [
-            { id: "single", label: "Single build (v0 behavior)", detail: "One implementation turn for the whole app, then gates." },
-            { id: "slices", label: "Vertical slices (wbs)", detail: "Walking skeleton first, then one bounded agent turn per slice, gated after each." },
+            { id: "slices", label: "Planned features", detail: "A reviewed feature plan first, then each feature is built, proved and reviewed before the next starts." },
           ],
         });
       }
@@ -333,8 +333,9 @@ export async function createSoloFactoryServer(options = {}) {
       if (request.method === "POST" && url.pathname === "/api/jobs") {
         const body = await readJson(request);
         const provider = requireProvider(body.provider, fixtureMode);
-        const sdlc = body.sdlc ?? "single";
-        if (!["single", "slices"].includes(sdlc)) return json(response, 400, { error: `Unknown SDLC strategy: ${sdlc}.` });
+        // Every new run is planned; single builds exist only as history and cannot be requested.
+        const sdlc = body.sdlc ?? "slices";
+        if (sdlc !== "slices") return json(response, 400, { error: `New runs always plan features first; "${sdlc}" is not available.` });
         validateMessages(body.transcript);
         const validated = validateInterviewResult({
           message: "Ready",
@@ -481,7 +482,7 @@ export async function createSoloFactoryServer(options = {}) {
         const jobStore = storeFor(projectId);
         const original = await jobStore.read(retryMatch[1]);
         if (runs.get(projectId)?.jobId === original.id) return json(response, 409, { error: "That run is still active." });
-        const job = await jobStore.create({ brief: original.brief, transcript: original.transcript, provider: original.provider, sdlc: original.sdlc ?? "single" });
+        const job = await jobStore.create({ brief: original.brief, transcript: original.transcript, provider: original.provider });
         // Starting over replaces the original, so it no longer holds the queue, and the new run goes first.
         if (PARKED.has(original.state)) {
           await rollBack(original, jobStore);

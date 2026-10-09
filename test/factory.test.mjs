@@ -17,6 +17,13 @@ const transcript = [
   { role: "assistant", content: "What should we build?" },
   { role: "user", content: "A daily tracker with clear acceptance behavior." },
 ];
+// A v1 slice run from before planned features (planVersion 2); these must still run and resume.
+async function legacySliceJob(store) {
+  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  delete job.planVersion;
+  await store.writeState(job);
+  return job;
+}
 
 test("metrics validation accepts route lists and aggregate route maps", () => {
   const base = { uptimeSeconds: 1, requests: { total: 2, errors: 0 }, latencyMs: { average: 3 } };
@@ -221,7 +228,7 @@ test("a failed build preserves its workspace and resumes the same run", async ()
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-resume-"));
   const store = new JobStore(root);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture" });
+  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "single" });
   const fixture = createFixtureProvider();
   const failingProvider = {
     id: "fixture",
@@ -266,7 +273,7 @@ test("slice strategy runs every vertical slice with per-slice gates and records 
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-slices-"));
   const store = new JobStore(root);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  const job = await legacySliceJob(store);
   const calls = [];
   const commandRunner = async ({ executable, args }) => {
     calls.push([executable, ...args].join(" "));
@@ -303,7 +310,7 @@ test("a failing gate inside a slice is repaired within that slice and the run co
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-slice-repair-"));
   const store = new JobStore(root);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  const job = await legacySliceJob(store);
   let call = 0;
   const commandRunner = async () => {
     call += 1;
@@ -378,7 +385,7 @@ test("a slice run gets a second-opinion plan review before any build turn", asyn
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-planreview-"));
   const store = new JobStore(root);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  const job = await legacySliceJob(store);
   const factory = new SoloFactory({
     store,
     provider: createFixtureProvider(),
@@ -400,7 +407,7 @@ test("a plan review that leaves the plan invalid parks the run and resume recove
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-planreview-fail-"));
   const store = new JobStore(root);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  const job = await legacySliceJob(store);
   const fixture = createFixtureProvider();
   const corruptingProvider = {
     id: "fixture",
@@ -439,7 +446,7 @@ test("a project is a git repo: app at the root, evidence gitignored, commits at 
   const project = await mkdtemp(path.join(os.tmpdir(), "solo-factory-project-"));
   const store = new JobStore(project);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture" });
+  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "single" });
   const factory = new SoloFactory({
     store,
     provider: createFixtureProvider(),
@@ -517,14 +524,16 @@ test("a project with a shipped manifest specs and slices the brief as a follow-o
   assert.equal(result.followOn, true);
   assert.match(result.baseCommit, /^[0-9a-f]{40}$/, "a follow-on records the shipped app's commit to rewind to");
   assert.equal(await store.git("show", `${result.baseCommit}:factory.json`), '{"version":1}');
-  assert.match(prompts.specification, /follow-on release/);
+  assert.match(prompts.specification, /NEXT release only/);
   assert.match(prompts.specification, /cumulative/);
-  assert.doesNotMatch(prompts.specification, /Slice 1 must be a thin walking skeleton/);
-  assert.match(prompts["plan-review"], /no\s+skeleton slice is needed/);
+  assert.match(prompts["feature-plan"], /Follow-on release/);
+  assert.match(prompts["feature-plan"], /no walking skeleton/);
+  assert.doesNotMatch(prompts["feature-plan"], /first feature carries factory\.json/);
+  assert.match(prompts["plan-review-1"], /existing app and tests/);
   const firstSlice = Object.keys(prompts).find((stage) => stage.startsWith("build-slice-"));
   assert.ok(firstSlice, JSON.stringify(Object.keys(prompts)));
-  assert.doesNotMatch(prompts[firstSlice], /walking-skeleton slice/);
-  assert.match(prompts[firstSlice], /Earlier releases already built this app/);
+  assert.doesNotMatch(prompts[firstSlice], /If factory\.json does not exist yet/);
+  assert.match(prompts[firstSlice], /Earlier releases built this app/);
 
   const greenfield = await mkdtemp(path.join(os.tmpdir(), "solo-factory-greenfield-"));
   const freshStore = new JobStore(greenfield);
@@ -539,7 +548,8 @@ test("a project with a shipped manifest specs and slices the brief as a follow-o
   }).start(fresh.id);
   assert.equal(freshResult.followOn, false);
   assert.equal(freshResult.baseCommit, undefined, "a first build has no good version to rewind to");
-  assert.match(freshPrompts.specification, /Slice 1 must be a thin walking skeleton/);
+  assert.match(freshPrompts["feature-plan"], /first feature carries factory\.json/);
+  assert.doesNotMatch(freshPrompts["feature-plan"], /Follow-on release/);
 });
 
 test("a project's next release replaces its previous live deployment", async (t) => {
@@ -571,7 +581,7 @@ test("pause during slice 1 parks before slice 2 on a committed tree; resume repl
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-pause-"));
   const store = new JobStore(root);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  const job = await legacySliceJob(store);
   const fixture = createFixtureProvider();
   const options = { commandRunner: async () => ({ code: 0, output: "passed" }), deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9975" }) };
   const factory = new SoloFactory({ ...options, store, provider: { id: "fixture", run: async (args) => {

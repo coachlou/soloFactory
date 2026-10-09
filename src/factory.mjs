@@ -7,11 +7,11 @@ import { appendFile, mkdir, readFile, readdir, writeFile } from "node:fs/promise
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./process.mjs";
-import { buildPrompt, continuationPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
-import { orderSlices, validateSlicePlan } from "./wbs.mjs";
-import { prepareReview, validateReview } from "./review.mjs";
+import { buildPrompt, continuationPrompt, featureBuildPrompt, featurePlanPrompt, featureReviewPrompt, planAuditPrompt, planCorrectionPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
+import { orderSlices, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
+import { contractDigest, originalChecks, preparePlanReview, prepareReview, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
-import { planFeatureRecovery, runFeatureRecovery } from "./feature-recovery.mjs";
+import { archiveReview, digest, planFeatureRecovery, runFeatureRecovery, sourceBaseline } from "./feature-recovery.mjs";
 
 // Which harness produced a run, so runs.jsonl can compare harness changes. Read once at load.
 const harnessRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -93,8 +93,11 @@ export class SoloFactory {
         job.error = null;
         job.failedState = null;
         job.recovery = null;
+        // Attempts restart at zero, so every v2 budget is re-derived from the rewound cursor.
+        if (job.planVersion === 2) Object.assign(job, { featureCursor: null, finalBudgetSet: false, repairBudgetLimit: null });
         await this.store.writeState(job);
         await this.emit(job.id, { type: "job.restarted", state: job.state, message: `Restarting from slice ${sliceId} at ${base.slice(0, 7)}` });
+        if (job.planVersion === 2) return await this.buildFeatures(job, signal);
         return await this.buildSlices(job, signal, { resumeFrom: index, fresh: true });
       } catch (error) {
         return this.fail(jobId, signal, error);
@@ -150,10 +153,17 @@ export class SoloFactory {
 
       job = await this.stage(job, "specifying", "Writing PRD, plan, and acceptance contract");
       const before = await readdir(appDir);
-      await this.invoke(job, "specification", specificationPrompt(job.sdlc === "slices", { followOn: job.followOn }), signal);
+      const planned = job.planVersion === 2;
+      await this.invoke(job, "specification", specificationPrompt(job.sdlc === "slices" && !planned, { followOn: job.followOn }), signal);
       await this.validateSpecification(appDir, before);
       await this.commit(job, "factory: specification");
 
+      if (planned) {
+        job.specified = true;
+        await this.store.writeState(job);
+        job = await this.planFeatures(job, signal);
+        return await this.buildFeatures(job, signal);
+      }
       if (job.sdlc === "slices") {
         if (!job.planReviewed) job = await this.reviewSlicePlan(job, signal);
         return await this.buildSlices(job, signal);
@@ -207,6 +217,27 @@ export class SoloFactory {
         message: `Resuming the preserved run from ${failedState}`,
       });
 
+      if (job.planVersion === 2) {
+        if (!job.approvedPlan) {
+          if (!job.specified) {
+            job = await this.stage(job, "specifying", "Finishing the interrupted specification");
+            const before = await readdir(appDir);
+            await this.invoke(job, "specification-resume", continuationPrompt("specification", false, { followOn: job.followOn }), signal, { resumeSessionId });
+            await this.validateSpecification(appDir, before);
+            await this.commit(job, "factory: specification");
+            job.specified = true;
+            await this.store.writeState(job);
+          }
+          job = await this.planFeatures(job, signal);
+          return await this.buildFeatures(job, signal);
+        }
+        if (job.featureCursor || (job.sliceIndex ?? 0) < job.approvedPlan.plan.slices.length) return await this.buildFeatures(job, signal);
+        // Final integration keeps its own budget: no refill on resume.
+        if (failedState === "deploying") return await this.deployAndComplete(job, signal);
+        if (failedState === "reviewing") return await this.deployAndComplete(await this.reviewAndVerify(job, signal), signal);
+        return await this.finishFromBuild(job, signal);
+      }
+
       if (failedState === "specifying") {
         job = await this.stage(job, "specifying", "Finishing the interrupted specification");
         const before = await readdir(appDir);
@@ -241,7 +272,7 @@ export class SoloFactory {
       if (failedState === "reviewing") {
         // An owner-requested resume authorizes another bounded recovery cycle.
         // Keep attempt numbers monotonic so prior failure files are preserved.
-        if (previousError?.code === "review_rejected") {
+        if (previousError?.code === "review_rejected" && job.planVersion !== 2) {
           job.repairBudgetLimit = job.attempt + this.maxRepairs;
           await this.store.writeState(job);
           await this.emit(job.id, {
@@ -372,6 +403,215 @@ export class SoloFactory {
     job.sliceIndex = ordered.length;
     await this.store.writeState(job);
     return this.finishFromBuild(job, signal, { includeInstall: false });
+  }
+
+  // Version-2 planning: a planner writes .factory/slices.json, a fresh reviewer returns a
+  // verdict bound to the plan digest, contract digest and token. No build turn runs before
+  // approval. Planning turns may not touch app source or the contract (preserved, never reset).
+  async planFeatures(job, signal) {
+    const appDir = this.store.appDir(job.id);
+    const factoryDir = path.join(appDir, ".factory");
+    const contract = await contractDigest(appDir);
+    const checks = originalChecks(job.brief);
+    await writeFile(path.join(factoryDir, "plan-request.json"), `${JSON.stringify({ version: 1, jobId: job.id, contractDigest: contract, checks }, null, 2)}\n`);
+    job = await this.stage(job, "specifying", "Planning features against the frozen contract");
+    // Persisted, so a mutation left behind by a parked planning turn still blocks after resume.
+    job.planBaseline ??= { source: await sourceBaseline(this.store, { head: false }), contract };
+    job.planCorrections ??= 0;
+    job.planReviews ??= 0;
+    await this.store.writeState(job);
+    const guard = async () => {
+      if (await sourceBaseline(this.store, { head: false }) !== job.planBaseline.source || await contractDigest(appDir) !== job.planBaseline.contract) {
+        throw new FactoryError("plan_mutation", "A planning turn changed application source or the frozen contract; no feature was built. The changes are preserved for inspection.");
+      }
+    };
+    const readPlan = async () => {
+      try {
+        return validateFeaturePlan(JSON.parse(await readFile(path.join(factoryDir, "slices.json"), "utf8")), { jobId: job.id, contractDigest: contract, checks });
+      } catch (error) {
+        return error;
+      }
+    };
+    await guard();
+    let plan = await readPlan();
+    if (plan instanceof Error && !job.planDrafted) {
+      await this.invoke(job, "feature-plan", featurePlanPrompt({ followOn: job.followOn }), signal);
+      job.planDrafted = true;
+      await this.store.writeState(job);
+      await guard();
+      plan = await readPlan();
+    }
+    for (;;) {
+      let blockers;
+      if (plan instanceof Error) blockers = [plan.message];
+      else {
+        const planDigest = digest(plan);
+        const request = await preparePlanReview(appDir, job, planDigest);
+        job.planReviews += 1;
+        await this.store.writeState(job);
+        await this.invoke(job, `plan-review-${job.planReviews}`, planAuditPrompt({ followOn: job.followOn }), signal);
+        await guard();
+        const after = await readPlan();
+        if (after instanceof Error || digest(after) !== planDigest) {
+          throw new FactoryError("plan_verdict_invalid", "The planning reviewer changed the plan, so its verdict cannot approve it. Resume reviews the current plan afresh.");
+        }
+        try {
+          await validatePlanReview(appDir, request);
+          return await this.approvePlan(job, plan, planDigest, request);
+        } catch (error) {
+          if (!error.details?.blockers) throw new FactoryError("plan_verdict_invalid", error.message);
+          blockers = error.details.blockers.length ? error.details.blockers : [error.message];
+        }
+      }
+      await this.emit(job.id, { type: "plan.blocked", state: job.state, message: blockers[0] });
+      if (job.planCorrections >= this.maxRepairs) {
+        throw new FactoryError("plan_blocked", `The feature plan is still blocked after ${job.planCorrections} corrections: ${blockers[0]}`, { blockers, output: blockers.join("\n") });
+      }
+      job.planCorrections += 1;
+      await this.store.writeState(job);
+      await this.invoke(job, `plan-correction-${job.planCorrections}`, planCorrectionPrompt(blockers), signal);
+      await guard();
+      plan = await readPlan();
+    }
+  }
+
+  async approvePlan(job, plan, planDigest, request) {
+    job.approvedPlan = { plan, digest: planDigest, contractDigest: request.contractDigest, token: request.token, approvedAt: new Date().toISOString() };
+    job.slicePlanIds = plan.slices.map((slice) => slice.id);
+    job.sliceIndex = 0;
+    await writeFile(path.join(this.store.jobDir(job.id), "approved-plan.json"), `${JSON.stringify(job.approvedPlan, null, 2)}\n`);
+    await this.store.writeState(job);
+    // Committed so restart-from-slice resets and resumes always see the approved plan.
+    await this.commit(job, "factory: feature plan approved");
+    await this.emit(job.id, { type: "plan.approved", state: job.state, message: `Feature plan approved: ${plan.slices.length} feature${plan.slices.length === 1 ? "" : "s"}` });
+    return job;
+  }
+
+  // Fail closed when the workspace plan or frozen contract no longer matches what was approved.
+  async assertPlanCurrent(job) {
+    const appDir = this.store.appDir(job.id);
+    const approved = job.approvedPlan;
+    let current = null;
+    try {
+      current = validateFeaturePlan(JSON.parse(await readFile(path.join(appDir, ".factory", "slices.json"), "utf8")), { jobId: job.id, contractDigest: approved.contractDigest, checks: originalChecks(job.brief) });
+    } catch {
+      // Unreadable or invalid counts as changed.
+    }
+    if (!current || digest(current) !== approved.digest || await contractDigest(appDir) !== approved.contractDigest) {
+      throw new FactoryError("stale_plan", "The approved feature plan or frozen contract changed after approval; execution is blocked.");
+    }
+  }
+
+  // Executes the approved plan one feature at a time. A feature enters sliceDone only after
+  // gates, its proofs, a candidate-bound scoped review and a durable checkpoint commit.
+  async buildFeatures(job, signal) {
+    const slices = job.approvedPlan.plan.slices;
+    const checks = originalChecks(job.brief);
+    for (let i = job.sliceIndex ?? 0; i < slices.length; i++) {
+      const slice = slices[i];
+      await this.assertPlanCurrent(job);
+      if (job.featureCursor?.id !== slice.id) {
+        // Each feature gets maxRepairs; set once per feature, so resume never refills it.
+        job.featureCursor = { id: slice.id, substage: "implementing", implementStarted: false, reviews: 0, startedAt: new Date().toISOString(), attemptBefore: job.attempt };
+        job.repairBudgetLimit = job.attempt + this.maxRepairs;
+        job.sliceIndex = i;
+        await this.store.writeState(job);
+        await this.emit(job.id, { type: "slice.started", state: job.state, slice: slice.id, message: `Feature ${i + 1}/${slices.length}: ${slice.title}` });
+      }
+      job = await this.proveFeature(job, slice, checks, `${i + 1}/${slices.length}`, signal);
+      const cursor = job.featureCursor;
+      job.sliceStats ||= {};
+      job.sliceStats[slice.id] = {
+        startedAt: cursor.startedAt,
+        durationMs: Date.now() - new Date(cursor.startedAt).getTime(),
+        repairs: job.attempt - cursor.attemptBefore,
+        reviews: cursor.reviews,
+        commit: cursor.commit,
+      };
+      job.sliceDone = [...(job.sliceDone ?? []), slice.id];
+      job.sliceIndex = i + 1;
+      job.featureCursor = null;
+      await this.store.writeState(job);
+      await this.emit(job.id, { type: "slice.completed", state: job.state, slice: slice.id, message: `Feature ${i + 1}/${slices.length} verified` });
+    }
+    if (!job.finalBudgetSet) {
+      job.repairBudgetLimit = job.attempt + this.maxRepairs;
+      job.finalBudgetSet = true;
+      await this.store.writeState(job);
+    }
+    return this.finishFromBuild(job, signal, { includeInstall: false });
+  }
+
+  // Cursor substages: implementing → checking → reviewing → committing → verified. Each is
+  // persisted before the next stage boundary so pause/resume continues exactly where it stopped.
+  async proveFeature(job, slice, checks, position, signal) {
+    const appDir = this.store.appDir(job.id);
+    const cursor = job.featureCursor;
+    const save = (substage) => { cursor.substage = substage; return this.store.writeState(job); };
+    const candidate = () => sourceBaseline(this.store, { head: false });
+    const owned = checks.filter((check) => slice.closes.includes(check.id));
+    const reviewChecks = [
+      ...owned,
+      ...slice.acceptance.map((item) => ({ id: item.id, text: `${item.behavior} (proof: ${item.proof.command.join(" ")} → ${item.proof.expect})` })),
+    ];
+    for (;;) {
+      if (cursor.substage === "implementing") {
+        job = await this.stage(job, "building", `Feature ${position} — ${slice.title}`);
+        const resumed = cursor.implementStarted;
+        cursor.implementStarted = true;
+        await this.store.writeState(job);
+        const label = resumed ? `slice-resume-${slice.id}` : `build-slice-${slice.id}`;
+        const prompt = featureBuildPrompt(slice, { owned, planDigest: job.approvedPlan.digest, followOn: job.followOn, resumed });
+        await this.invoke(job, label, prompt, signal, { resumeSessionId: this.resumeSessionFor(job, label) });
+        await save("checking");
+      }
+      if (cursor.substage === "checking") {
+        job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: true, slice, proofs: slice.acceptance });
+        cursor.candidate = await candidate();
+        await save("reviewing");
+      }
+      if (cursor.substage === "reviewing") {
+        job = await this.stage(job, "reviewing", `Reviewing feature ${position} — ${slice.title}`);
+        if (await candidate() !== cursor.candidate) { await save("checking"); continue; }
+        await this.assertPlanCurrent(job);
+        if (cursor.reviews >= this.maxRepairs + 2) throw new FactoryError("review_unstable", `Feature ${slice.id} did not reach a stable reviewed candidate after ${cursor.reviews} reviews.`);
+        cursor.reviews += 1;
+        const request = await prepareReview(appDir, job, { checks: reviewChecks, candidate: cursor.candidate });
+        // Kept off job.reviewRequest, which always names the final whole-app review.
+        cursor.reviewRequest = request;
+        await this.store.writeState(job);
+        const label = `feature-review-${slice.id}-${cursor.reviews}`;
+        await this.invoke(job, label, featureReviewPrompt(slice), signal);
+        await archiveReview(this, job, label);
+        if (await candidate() !== cursor.candidate) {
+          await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "review", message: "The reviewer changed source; its verdict is void and the feature is rechecked." });
+          await save("checking");
+          continue;
+        }
+        try {
+          await this.requireReview({ ...job, reviewRequest: request });
+        } catch (failure) {
+          await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "review", message: failure.message });
+          job = await this.repair(job, failure, signal, slice);
+          await save("checking");
+          continue;
+        }
+        await this.emit(job.id, { type: "gate.passed", state: job.state, gate: "review", slice: slice.id, message: `Feature ${slice.id} review passed` });
+        await save("committing");
+      }
+      if (cursor.substage === "committing") {
+        if (await candidate() !== cursor.candidate) { await save("checking"); continue; }
+        try {
+          await this.store.commit(`factory: feature ${slice.id} verified`);
+          if (await this.store.git("status", "--porcelain")) throw new Error("working tree is not clean after the commit");
+        } catch (error) {
+          throw new FactoryError("checkpoint_failed", `Feature ${slice.id} passed review but its checkpoint commit failed: ${error.message}`);
+        }
+        cursor.commit = await this.store.git("rev-parse", "HEAD");
+        await save("verified");
+      }
+      if (cursor.substage === "verified") return job;
+    }
   }
 
   resumeSessionFor(job, label) {
@@ -578,11 +818,11 @@ export class SoloFactory {
     return manifest;
   }
 
-  async verifyWithRepairs(job, manifest, signal, { includeInstall, slice = null }) {
+  async verifyWithRepairs(job, manifest, signal, { includeInstall, slice = null, proofs = [] }) {
     let current = job;
     for (;;) {
       current = await this.stage(current, "verifying", "Running deterministic quality gates");
-      const failure = await this.verify(current, manifest, signal, { includeInstall });
+      const failure = await this.verify(current, manifest, signal, { includeInstall, proofs });
       if (!failure) {
         const passed = slice ? `slice ${slice.id}` : [...current.stageHistory].reverse().find((s) => !["verifying", "repairing"].includes(s.state))?.state ?? "build";
         await this.commit(current, `factory: ${passed} passed gates`);
@@ -606,10 +846,15 @@ export class SoloFactory {
     return job;
   }
 
-  async verify(job, manifest, signal, { includeInstall }) {
-    const gates = includeInstall ? ["install", "test", "build"] : ["test", "build"];
-    for (const gate of gates) {
-      const command = manifest.commands[gate];
+  async verify(job, manifest, signal, { includeInstall, proofs = [] }) {
+    const gates = (includeInstall ? ["install", "test", "build"] : ["test", "build"]).map((gate) => [gate, manifest.commands[gate]]);
+    // Each distinct obligation proof is its own gate; one identical to an earlier command already ran.
+    const seen = new Set(gates.map(([, command]) => JSON.stringify(command)));
+    for (const item of proofs) {
+      const key = JSON.stringify(item.proof.command);
+      if (!seen.has(key)) { seen.add(key); gates.push([`proof-${item.id}`, item.proof.command]); }
+    }
+    for (const [gate, command] of gates) {
       const started = Date.now();
       job.activeCommand = { gate, command, startedAt: new Date().toISOString() };
       await this.store.writeState(job);
@@ -934,6 +1179,8 @@ export function validateMetrics(value) {
 function stageKind(label = "unknown") {
   if (/^(build-slice|slice-resume)-/.test(label)) return "slice";
   if (label.startsWith("repair")) return "repair";
+  if (/^(plan-review|plan-correction)-\d+$/.test(label)) return label.replace(/-\d+$/, "");
+  if (label.startsWith("feature-review-")) return "feature-review";
   return label.replace(/-resume$/, "");
 }
 

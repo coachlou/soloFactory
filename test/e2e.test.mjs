@@ -135,7 +135,7 @@ async function postJson(url, body) {
   return value;
 }
 
-test("HTTP journey with the vertical-slice strategy completes and serves the final slice", async (t) => {
+test("HTTP journey: a run without sdlc plans features, gets approval, then builds; single mode is refused", async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-http-slices-"));
   const app = await createSoloFactoryServer({ home, fixtureMode: true });
   await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
@@ -143,7 +143,7 @@ test("HTTP journey with the vertical-slice strategy completes and serves the fin
   const base = `http://127.0.0.1:${app.server.address().port}`;
 
   const config = await getJson(`${base}/api/config`);
-  assert.equal(config.sdlcOptions.length, 2);
+  assert.deepEqual(config.sdlcOptions.map((option) => option.id), ["slices"]);
   const transcript = [
     { role: "assistant", content: config.opening.message },
     { role: "user", content: "Build a tiny private daily tracker with no login and observable save behavior." },
@@ -152,14 +152,19 @@ test("HTTP journey with the vertical-slice strategy completes and serves the fin
   assert.equal(guide.status, "ready");
   transcript.push({ role: "assistant", content: guide.message });
 
+  const single = await fetch(`${base}/api/jobs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: "fixture", transcript, coverage: guide.coverage, brief: guide.brief, sdlc: "single" }) });
+  assert.equal(single.status, 400);
+  assert.match((await single.json()).error, /always plan features first/);
+  assert.equal((await getJson(`${base}/api/board`)).columns.queued?.length ?? 0, 0, "a refused request creates no run");
+
   const started = await postJson(`${base}/api/jobs`, {
     provider: "fixture",
     transcript,
     coverage: guide.coverage,
     brief: guide.brief,
-    sdlc: "slices",
   });
   assert.equal(started.job.sdlc, "slices");
+  assert.equal(started.job.planVersion, 2);
   let job = started.job;
   const deadline = Date.now() + 60_000;
   while (!["completed", "failed"].includes(job.state) && Date.now() < deadline) {
@@ -169,7 +174,12 @@ test("HTTP journey with the vertical-slice strategy completes and serves the fin
   assert.equal(job.state, "completed", job.error?.message);
   assert.deepEqual(job.sliceDone, ["SLICE-SKELETON", "SLICE-UI"]);
   const card = (await getJson(`${base}/api/board`)).columns.completed.find((c) => c.jobId === job.id);
-  assert.deepEqual(card.slices, { done: 2, total: 2, current: null, repairs: 0 });
+  assert.deepEqual(card.slices, { done: 2, total: 2, current: null, substage: null, repairs: 0 });
+  assert.equal(job.approvedPlan.plan.version, 2);
+  const events = await app.store.events(job.id, 500);
+  const approved = events.findIndex((event) => event.type === "plan.approved");
+  const firstBuild = events.findIndex((event) => event.type === "agent.started" && event.message.includes("build-slice-"));
+  assert.ok(approved >= 0 && firstBuild > approved, "no build turn before the plan is approved");
 
   const telemetry = await getJson(`${base}/api/jobs/${job.id}/telemetry`);
   assert.equal(telemetry.summary.strategy, "slices");
@@ -461,7 +471,7 @@ test('Guide and recovery packet receive full matching review diagnostics without
   await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
   t.after(() => app.close());
   const base = `http://127.0.0.1:${app.server.address().port}`;
-  const job = await app.store.create({ brief: {workingName:'Blocked photo library',mustHaves:['Years and Months browsing','Real EXIF extraction'],acceptanceScenarios:['A matching import updates its saved album.']},transcript:[{role:'user',content:'Recover missing features'}],provider:'fixture' });
+  const job = await app.store.create({ brief: {workingName:'Blocked photo library',mustHaves:['Years and Months browsing','Real EXIF extraction'],acceptanceScenarios:['A matching import updates its saved album.']},transcript:[{role:'user',content:'Recover missing features'}],provider:'fixture',sdlc:'single' });
   const cwd = app.store.appDir(job.id);
   await fixture.run({cwd,context:{stage:'specification',job}});
   await writeFile(path.join(cwd,'.factory/requirements.json'),JSON.stringify({brief:job.brief}));
@@ -507,7 +517,7 @@ test('HTTP feature recovery requires matching approval and respects the project 
   await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
   t.after(() => { releasePlan(); return app.close(); });
   const base = `http://127.0.0.1:${app.server.address().port}`;
-  const job = await app.store.create({ brief: { workingName: 'Recovery HTTP', mustHaves: ['Edit live albums'], acceptanceScenarios: ['New photos enter a saved album'] }, transcript: [{ role: 'user', content: 'Recover existing behavior' }], provider: 'fixture' });
+  const job = await app.store.create({ brief: { workingName: 'Recovery HTTP', mustHaves: ['Edit live albums'], acceptanceScenarios: ['New photos enter a saved album'] }, transcript: [{ role: 'user', content: 'Recover existing behavior' }], provider: 'fixture', sdlc: 'single' });
   const cwd = app.store.appDir();
   await mkdir(path.join(cwd, '.factory'), { recursive: true });
   await writeFile(path.join(cwd, '.factory/requirements.json'), JSON.stringify(job.brief));

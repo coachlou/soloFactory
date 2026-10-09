@@ -118,6 +118,8 @@ if (args[1] === "resume") {
   process.env.SOLOFACTORY_AGENT_HARD_MINUTES = "0.1";
   process.env.SOLOFACTORY_AGENT_BACKOFF_SECONDS = "0";
   process.env.FAKE_CODEX_COUNT = countFile;
+  delete process.env.SOLOFACTORY_CODEX_MODEL;
+  delete process.env.SOLOFACTORY_CODEX_REASONING_EFFORT;
   const provider = createProvider("codex");
   try {
     const events = [];
@@ -126,8 +128,8 @@ if (args[1] === "resume") {
     assert.equal(result.autoResumes, 1);
     assert.equal((await readFile(countFile, "utf8")).trim().split("\n").length, 2);
     const calls = (await readFile(countFile, "utf8")).trim().split("\n").map(JSON.parse);
-    assert.ok(calls.every((args) => args.includes("--model") && args.includes("gpt-5.6-sol")));
-    assert.ok(calls.every((args) => args.includes('model_reasoning_effort="low"')));
+    assert.ok(calls.every((args) => args.includes("--model") && args.includes("gpt-6.1-sol")));
+    assert.ok(calls.every((args) => args.includes('model_reasoning_effort="medium"')));
     assert.ok(events.some((event) => event.type === "agent.backoff"));
 
     await writeFile(countFile, "");

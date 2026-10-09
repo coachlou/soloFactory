@@ -32,7 +32,6 @@ async function boot() {
   if (!first) showError(new Error(NO_PROVIDER));
   renderMessages();
   renderCoverage();
-  renderSdlcOptions();
   await refreshProjects();
   const savedId = localStorage.getItem("solofactory.currentJob");
   const candidate = state.jobs.find((job) => job.id === savedId)
@@ -107,7 +106,9 @@ function boardCard(card) {
       bar.append(seg);
     }
     if (card.slices.repairs && bar.lastChild) bar.children[Math.max(0, card.slices.done - 1)].classList.add("repaired");
-    bar.title = `${card.slices.done}/${card.slices.total} slices${card.slices.repairs ? ` · ${card.slices.repairs} repair${card.slices.repairs === 1 ? "" : "s"}` : ""}`;
+    // Feature status: verified, then the cursor's substage (or blocked when parked), then planned.
+    const status = card.slices.current ? ` · ${card.slices.current} ${PARKED.includes(card.state) ? "blocked" : card.slices.substage ?? "planned"}` : "";
+    bar.title = `${card.slices.done}/${card.slices.total} features verified${status}${card.slices.repairs ? ` · ${card.slices.repairs} repair${card.slices.repairs === 1 ? "" : "s"}` : ""}`;
     button.append(bar);
   }
   if (card.blockedBy) button.append(Object.assign(document.createElement("small"), { className: "blocked", textContent: `waiting on recovery of ${card.blockedBy}` }));
@@ -304,24 +305,9 @@ function renderMessages(thinking = false) {
   container.scrollTop = container.scrollHeight;
 }
 
-function renderSdlcOptions() {
-  const select = $("#sdlc-select");
-  const options = state.config?.sdlcOptions?.length ? state.config.sdlcOptions : [{ id: "single", label: "Single build (v0 behavior)", detail: "" }];
-  select.replaceChildren(...options.map((option) => {
-    const item = document.createElement("option");
-    item.value = option.id;
-    item.textContent = option.label;
-    return item;
-  }));
-  $("#sdlc-detail").textContent = options.find((option) => option.id === select.value)?.detail || "";
-  select.addEventListener("change", () => {
-    $("#sdlc-detail").textContent = options.find((option) => option.id === select.value)?.detail || "";
-  });
-}
-
 function sdlcOption(id) {
   const options = state.config?.sdlcOptions ?? [];
-  return options.find((option) => option.id === id) ?? { id: id ?? "single", label: id === "slices" ? "Vertical slices (wbs)" : "Single build" };
+  return options.find((option) => option.id === id) ?? { id: id ?? "single", label: "Single build" };
 }
 
 function renderCoverage() {
@@ -469,7 +455,7 @@ $("#start-button").addEventListener("click", async () => {
   try {
     const { job } = await api("/api/jobs", {
       method: "POST",
-      body: { provider: state.provider, transcript: state.messages, coverage: state.guide.coverage, brief: state.guide.brief, sdlc: $("#sdlc-select").value },
+      body: { provider: state.provider, transcript: state.messages, coverage: state.guide.coverage, brief: state.guide.brief },
     });
     // Submitted briefs queue; the owner goes straight back to shaping the next release.
     showInterview();
@@ -522,7 +508,8 @@ function renderJob() {
       : job.error?.message || statusCopy(job.state);
   $("#repair-count").textContent = `${job.attempt} / ${job.repairBudgetLimit ?? 2}`;
   $("#gate-count").textContent = String(state.events.filter((event) => event.type === "gate.passed").length);
-  $("#strategy-label").textContent = sdlcOption(job.sdlc).label;
+  const feature = job.featureCursor;
+  $("#strategy-label").textContent = sdlcOption(job.sdlc).label + (feature ? ` · ${feature.id} ${PARKED.includes(job.state) ? "blocked" : feature.substage}` : "");
   const elapsedUntil = job.completedAt ? new Date(job.completedAt).getTime() : Date.now();
   $("#elapsed").textContent = `${formatDuration(elapsedUntil - new Date(job.startedAt || job.createdAt).getTime())} elapsed${usageLine(state.telemetry?.summary?.tokens?.total)}`;
   const progressState = PARKED.includes(job.state) ? job.failedState : job.state;

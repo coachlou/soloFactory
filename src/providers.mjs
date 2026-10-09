@@ -74,8 +74,8 @@ async function codexRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = 
   const maxAutoResumes = mode === "read" ? 0 : 1;
   // Factory runs must be reproducible across retries. Do not inherit a newly
   // selected interactive model when resuming an older subscription session.
-  const model = process.env.SOLOFACTORY_CODEX_MODEL || "gpt-5.6-sol";
-  const reasoningEffort = process.env.SOLOFACTORY_CODEX_REASONING_EFFORT || "low";
+  const model = process.env.SOLOFACTORY_CODEX_MODEL || "gpt-6.1-sol";
+  const reasoningEffort = process.env.SOLOFACTORY_CODEX_REASONING_EFFORT || "medium";
   const overallStarted = Date.now();
   let sessionId = resumeSessionId;
   let autoResumes = 0;
@@ -220,9 +220,16 @@ async function runCodexAttempt({
   return { result, resultPath, sessionId: observedSessionId, usage };
 }
 
-async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = "write" }) {
+async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = "write", context = {} }) {
   await mkdir(cwd, { recursive: true });
-  const args = ["-p", "--no-session-persistence", "--output-format", "json"];
+  const reasoningTask = /^(specification(?:-|$)|feature-plan(?:-|$)|plan-review$|recovery-plan-)|(?:^|-)review(?:-|$)/.test(context.stage ?? "");
+  const model = reasoningTask
+    ? process.env.SOLOFACTORY_CLAUDE_REASONING_MODEL || "fable"
+    : process.env.SOLOFACTORY_CLAUDE_MODEL || "opus";
+  const effort = reasoningTask
+    ? process.env.SOLOFACTORY_CLAUDE_REASONING_EFFORT || "low"
+    : process.env.SOLOFACTORY_CLAUDE_EFFORT || "medium";
+  const args = ["-p", "--no-session-persistence", "--output-format", "json", "--model", model, "--effort", effort];
   args.push("--permission-mode", mode === "read" ? "plan" : "acceptEdits");
   // Headless acceptEdits silently denies unlisted shell commands, so repair agents shipped fixes they could not run
   // (~20 denials per repair on 2026-09-27). Allow only the commands the controller's own gates already run.

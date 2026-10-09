@@ -40,6 +40,36 @@ test("the real Claude adapter returns usage from the CLI envelope", async () => 
   assert.deepEqual(result.usage, { inputTokens: 58764, cachedInputTokens: 26979, cacheWriteTokens: 31783, outputTokens: 4, costUsd: 0.1325718, models: ["claude-sonnet-5"] });
 });
 
+test("Claude routes planning and every review to the reasoning profile, with configurable overrides", async () => {
+  const keys = ["SOLOFACTORY_CLAUDE_MODEL", "SOLOFACTORY_CLAUDE_EFFORT", "SOLOFACTORY_CLAUDE_REASONING_MODEL", "SOLOFACTORY_CLAUDE_REASONING_EFFORT"];
+  const saved = keys.map(key => process.env[key]);
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "sf-claude-profiles-"));
+  const capture = path.join(cwd, "args.json");
+  try {
+    for (const key of keys) delete process.env[key];
+    await withFakeCli("claude", `const fs = require("node:fs");
+fs.writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2)));
+process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({result:"ok"})));`, async () => {
+      const run = async (stage, model, effort) => {
+        await createProvider("claude").run({cwd, prompt:"ok", context:{stage}});
+        const args = JSON.parse(await readFile(capture,"utf8"));
+        assert.equal(args[args.indexOf("--model") + 1], model, stage);
+        assert.equal(args[args.indexOf("--effort") + 1], effort, stage);
+      };
+      for (const stage of ["interview", "build", "build-resume", "build-slice-PEOPLE", "slice-resume-PEOPLE", "repair-2", "plan-correction-1", "recovery-feature-PEOPLE"]) await run(stage, "opus", "medium");
+      for (const stage of ["specification", "specification-resume", "plan-review", "recovery-plan-id", "review", "review-resume", "recovery-feature-PEOPLE-review-2", "feature-plan", "feature-plan-resume", "plan-review-2"]) await run(stage, "fable", "low");
+      process.env.SOLOFACTORY_CLAUDE_MODEL = "coding-model";
+      process.env.SOLOFACTORY_CLAUDE_EFFORT = "high";
+      process.env.SOLOFACTORY_CLAUDE_REASONING_MODEL = "review-model";
+      process.env.SOLOFACTORY_CLAUDE_REASONING_EFFORT = "medium";
+      await run("build", "coding-model", "high");
+      await run("review", "review-model", "medium");
+    });
+  } finally {
+    keys.forEach((key, i) => saved[i] === undefined ? delete process.env[key] : process.env[key] = saved[i]);
+  }
+});
+
 test("the real Codex adapter sums every turn.completed and reports no cost", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "sf-codex-run-"));
   const turn = { type: "turn.completed", usage: { input_tokens: 23152, cached_input_tokens: 12032, cache_write_input_tokens: 0, output_tokens: 5, reasoning_output_tokens: 3 } };
@@ -62,7 +92,7 @@ test("a failed run then a resume logs two segments, the last one cumulative", as
   const root = await mkdtemp(path.join(os.tmpdir(), "sf-telemetry-resume-"));
   const store = new JobStore(root);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture" });
+  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "single" });
   const fixture = createFixtureProvider();
   const usage = { inputTokens: 100, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: 10, costUsd: 0.001, models: ["m"] };
   let failBuild = true;

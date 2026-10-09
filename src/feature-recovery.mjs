@@ -7,10 +7,12 @@ import { validateSlicePlan } from './wbs.mjs';
 export const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 // Source baseline only: never traverse owner data or ignored runtime/dependency trees.
-export async function sourceBaseline(store) {
+// head:false is a feature candidate's identity: the same files stay the same candidate across gate commits.
+export async function sourceBaseline(store, { head = true } = {}) {
   const root = await realpath(store.appDir());
   const names = await store.git('ls-files', '-z', '--cached', '--others', '--exclude-standard');
-  const hash = createHash('sha256').update(await store.git('rev-parse', 'HEAD'));
+  const hash = createHash('sha256');
+  if (head) hash.update(await store.git('rev-parse', 'HEAD'));
   for (const file of [...new Set(names.split('\0').filter(Boolean))].sort()) {
     if (/^(data|node_modules|dist|build|\.factory|\.solofactory)(\/|$)/.test(file) || file.startsWith('.aai/memory/')) continue;
     let actual;
@@ -43,7 +45,7 @@ export function validateRecoveryPlan(raw, request) {
   return normalized;
 }
 
-async function archiveReview(factory, job, label) {
+export async function archiveReview(factory, job, label) {
   for (const file of ['review-request.json', 'review-result.json', 'REVIEW.md']) {
     const body = await readFile(path.join(factory.store.appDir(), '.factory', file)).catch(() => null);
     if (body) await writeFile(path.join(factory.store.jobDir(job.id), `${label}-${file}`), body);

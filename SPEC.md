@@ -336,13 +336,53 @@ The factory is ready when all of the following are demonstrated:
 
 These are extension points in the lifecycle, not components shipped pre-emptively.
 
-## 12. Build strategies — single build vs vertical slices
+## 12. Build strategies — planned features (default), historical single and v1 slices
 
-A run chooses its build strategy at creation and keeps it for the run's life.
+### Planned features (`sdlc: "slices"`, `planVersion: 2`) — every new run
 
-- `single` (default, v0 behavior): one implementation worker turn builds the complete
+New runs always use this path. The API and UI offer no other strategy: `POST /api/jobs`
+defaults `sdlc` to `slices` and refuses any other value with 400, and retry/start-over never
+carry a strategy forward.
+
+1. **Specify.** The specification worker writes PRD/PLAN/ACCEPTANCE only (no slice plan).
+2. **Plan.** A planner turn writes only `.factory/slices.json` version 2 from
+   `.factory/plan-request.json` (job id, contract digest, the original MH-n/SC-n checks).
+   `src/wbs.mjs` `validateFeaturePlan` requires: 1–30 typed features in dependency order;
+   every original check closed by exactly one feature and referenced by one of its
+   obligations; no unknown or duplicate owners; a prerequisite feature (empty `closes`) has
+   its own proof and a later closing dependent; every proof an `npm`/`node`/`npx` argv; no
+   unresolved compatibility entry. Planning turns may not change app source or the frozen
+   contract (`plan_mutation`).
+3. **Approve.** A fresh reviewer writes `.factory/plan-review-result.json` copying the
+   request's token, contract digest and plan digest. Only an `approve` verdict bound to the
+   exact plan approves it; a malformed, stale or mismatched verdict, or a reviewer that edits
+   the plan, is `plan_verdict_invalid`. A `blocked` verdict gets up to 2 correction turns, then
+   `plan_blocked`. Approval is persisted (`job.approvedPlan`, `approved-plan.json`) and
+   committed. No implementation turn runs before it.
+4. **Build each feature** through a persisted cursor (`job.featureCursor.substage`):
+   implementing → checking (install/test/build plus every distinct obligation proof as gate
+   `proof-<id>`) → reviewing (a scoped review of only that feature's owned checks and
+   obligations, bound to a hash of the candidate source; a reviewer that edits source voids
+   its verdict and forces fresh checks; capped at 4 reviews, `review_unstable`) → committing
+   (a durable checkpoint commit; failure is `checkpoint_failed` and nothing advances) →
+   verified. Only then does the feature enter `sliceDone`. Each feature's checks re-confirm
+   the approved plan and contract are unchanged (`stale_plan`).
+5. **Budgets.** 2 corrections per plan, 2 repairs per feature, 2 for final integration. Each is
+   set once and never refilled by resume.
+6. **Final review and deployment** are the same whole-app gates and contract review as before.
+
+Pause and resume continue at the cursor's substage: a pause after checks resumes at review,
+with no rebuild and no duplicate `slice.completed`. Restart-from-slice rewinds to the prior
+feature's checkpoint commit.
+
+### Historical strategies
+
+Runs created before planned features keep their recorded strategy and still resume, restart
+and recover as described below; nothing new can select them.
+
+- `single` (v0 behavior): one implementation worker turn builds the complete
   application, then the controller runs the whole-project gates and review.
-- `slices` (wbs-driven): the specification worker additionally authors
+- `slices` v1 (no `planVersion`): the specification worker additionally authors
   `.factory/slices.json`, a machine-readable plan of 2–6 vertical slices. Slice 1 must be a
   thin walking skeleton that also creates the runtime manifest (`factory.json` v1 with
   install/test/build/start), `GET /health`, and privacy-preserving `GET /_factory/metrics`.

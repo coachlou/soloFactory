@@ -12,13 +12,19 @@ export async function contractDigest(appDir) {
   return hash.digest("hex");
 }
 
-export async function prepareReview(appDir, job) {
+// The one original-check registry: full review, feature plans and scoped reviews all use these IDs.
+export function originalChecks(brief) {
+  return [
+    ...(brief?.mustHaves ?? []).map((text, i) => ({ id: `MH-${i + 1}`, text })),
+    ...(brief?.acceptanceScenarios ?? []).map((text, i) => ({ id: `SC-${i + 1}`, text })),
+  ];
+}
+
+// Scoped reviews pass their own checks and the candidate source identity the verdict must name.
+export async function prepareReview(appDir, job, { checks = originalChecks(job.brief), candidate } = {}) {
   const request = {
-    version: 1, jobId: job.id, token: randomUUID(), contractDigest: await contractDigest(appDir),
-    checks: [
-      ...(job.brief.mustHaves ?? []).map((text, i) => ({ id: `MH-${i + 1}`, text })),
-      ...(job.brief.acceptanceScenarios ?? []).map((text, i) => ({ id: `SC-${i + 1}`, text })),
-    ],
+    version: 1, jobId: job.id, token: randomUUID(), contractDigest: await contractDigest(appDir), checks,
+    ...(candidate ? { candidate } : {}),
   };
   if (!request.checks.length) throw new Error("Review requires at least one intake requirement or acceptance scenario.");
   await rm(path.join(appDir, ".factory", "review-result.json"), { force: true });
@@ -33,6 +39,7 @@ export async function validateReview(appDir, request) {
   if (report.version !== 1 || report.jobId !== request.jobId || report.token !== request.token || report.contractDigest !== request.contractDigest) {
     throw new Error("Review verdict is stale or does not match this run and frozen contract.");
   }
+  if (request.candidate && report.candidate !== request.candidate) throw new Error("Review verdict is not bound to the checked candidate source.");
   if (!["pass", "blocked"].includes(report.verdict) || !Array.isArray(report.blockers) || report.blockers.some(x => typeof x !== "string" || !x.trim())) {
     throw new Error("Review verdict/blockers are invalid.");
   }
@@ -69,7 +76,10 @@ export async function validateReview(appDir, request) {
     if (!Array.isArray(check.evidence) || !check.evidence.length) throw new Error(`Review check ${check.id} has no evidence.`);
     for (const file of check.evidence) {
       if (typeof file !== "string" || !file.trim() || path.isAbsolute(file)) throw new Error("Review evidence must be a project-relative file.");
-      const absolute = await realpath(path.resolve(root, file));
+      const absolute = await realpath(path.resolve(root, file)).catch((error) => {
+        if (error.code === "ENOENT") throw new Error(`Review evidence ${file} for ${check.id} does not exist.`);
+        throw error;
+      });
       const relative = path.relative(root, absolute);
       if (relative.startsWith("..") || path.isAbsolute(relative) || /^(data|node_modules|\.git)(\/|$)/.test(relative) || /^\.factory\/(review-result|review-request)\.json$/.test(relative)) {
         throw new Error("Review evidence cannot escape the project, read owner data or cite its own verdict.");
@@ -78,6 +88,32 @@ export async function validateReview(appDir, request) {
     }
   }
   if (report.verdict !== "pass" || report.blockers.length) throw new Error(`Review blocked: ${report.blockers.join("; ") || "reviewer did not approve"}`);
+  return report;
+}
+
+// Planning verdicts bind approval to the exact plan bytes and frozen contract; a finished turn is not approval.
+export async function preparePlanReview(appDir, job, planDigest) {
+  const request = { version: 1, jobId: job.id, token: randomUUID(), contractDigest: await contractDigest(appDir), planDigest };
+  await rm(path.join(appDir, ".factory", "plan-review-result.json"), { force: true });
+  await writeFile(path.join(appDir, ".factory", "plan-review-request.json"), JSON.stringify(request, null, 2) + "\n");
+  return request;
+}
+
+export async function validatePlanReview(appDir, request) {
+  let report;
+  try { report = JSON.parse(await readFile(path.join(appDir, ".factory", "plan-review-result.json"), "utf8")); }
+  catch { throw new Error("Plan review wrote no readable verdict."); }
+  if (report?.version !== 1 || report.jobId !== request.jobId || report.token !== request.token || report.contractDigest !== request.contractDigest || report.planDigest !== request.planDigest) {
+    throw new Error("Plan verdict is stale or does not match this run, plan and frozen contract.");
+  }
+  if (!["approve", "blocked"].includes(report.verdict) || !Array.isArray(report.blockers) || report.blockers.some(x => typeof x !== "string" || !x.trim())) {
+    throw new Error("Plan verdict/blockers are invalid.");
+  }
+  if (report.verdict !== "approve" || report.blockers.length) {
+    const error = new Error(`Plan review blocked: ${report.blockers[0] ?? "reviewer did not approve"}`);
+    error.details = { blockers: report.blockers };
+    throw error;
+  }
   return report;
 }
 

@@ -67,9 +67,9 @@ already works, including several features at once and fixes to it ("the streak c
 wrong"). Select the project and ask only about the change, one question at a time. Then write
 a brief for *this release only*. Copy the unchanged fields from the last completed job's
 `brief` and rewrite `promise`, `mustHaves`, `acceptanceScenarios`, and `nonGoals` for the
-change. The factory sees the existing app and keeps what's already delivered. Use
-`"sdlc": "slices"` when they ask for more than one feature, so each is built and checked
-before the next. Show the plan and queue only on "go", as in step 4. Features are never
+change. The factory sees the existing app and keeps what's already delivered. Every run
+plans its features first and builds each one only after the one before it passes its checks
+and review. Show the plan and queue only on "go", as in step 4. Features are never
 delivered before their checks pass. If an owner asks to skip testing, say so plainly.
 
 **Report a problem with the factory** (not with their app; that's a follow-on build). Ask
@@ -116,7 +116,6 @@ or an empty list), has a duplicate scenario, or has a scenario over 400 characte
 ```json
 {
   "provider": "claude",
-  "sdlc": "single",
   "coverage": { "promise": "complete", "user": "complete", "…": "all 13 keys, all complete" },
   "transcript": [ { "role": "assistant", "content": "…" }, { "role": "user", "content": "…" } ],
   "brief": {
@@ -133,8 +132,8 @@ or an empty list), has a duplicate scenario, or has a scenario over 400 characte
 - Each acceptance scenario is one observable behavior a test can prove, not a bundle of them.
 - Write "None" as the single list item when there are no integrations or constraints. An empty
   list fails.
-- `sdlc`: `single` means one build turn. `slices` builds a walking skeleton first, then one
-  gated turn per slice. Use `slices` for anything with more than a handful of must-haves.
+- Leave out `sdlc`. Every new run plans its features, gets the plan reviewed, then builds,
+  checks and reviews one feature at a time. Any other `sdlc` value is refused with 400.
 
 Show the owner the brief in plain language. Queue it only after they say go.
 

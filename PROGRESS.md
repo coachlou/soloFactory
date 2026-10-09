@@ -626,3 +626,25 @@ Added separate same-run recovery planning/approval/execution, full gap coverage 
 Recovery refinements: ready-plan feedback and revision history, prerequisite-only slices, full original owned-check reviews, correct per-feature/final integration budget bounds, and queued follow-on releases allowed behind recovery. Full suite 124/124; an existing 100ms process-start timing test failed once under load, then passed alone and in the full recheck. Browser confirmed plan list, acceptance disclosure, feedback and approval controls. Latest source needs installation after the current planner parks.
 
 Final local installation: d7806ee5f25c; 124 tests pass. Approved corrected 15-feature photo-library recovery is running on the same run, first compatibility step active. Full app completion remains pending.
+
+## 2026-10-09 — pre-build feature decomposition (spec/PRD-prebuild-feature-decomposition.md)
+
+Every new run now plans before it builds: specification → feature plan (`slices.json` v2,
+validated by `validateFeaturePlan`) → fresh plan review bound to plan digest, contract digest
+and token → per-feature implement/check (gates + obligation proofs)/scoped candidate-bound
+review/checkpoint commit through a persisted cursor → unchanged final review and deploy.
+Budgets: 2 plan corrections, 2 repairs per feature, 2 for final integration, never refilled on
+resume. `POST /api/jobs` defaults to planned features and refuses any other `sdlc` (400); the
+UI strategy selector is gone. Historical single, v1 slice and feature-recovery runs still
+resume (legacy tests now mark themselves `sdlc: "single"` or drop `planVersion`).
+
+New `test/features.test.mjs` covers matrix rows 5–12 and 15 (planner app mutation, wrong verdict digest, reviewer
+plan edit, stale plan on resume, scoped review, missing behavior with budget not refilled,
+separate final budget, reviewer candidate edits and review cap, pause-at-review, failed
+checkpoint, proof gates). A mutation that refills the feature budget on resume fails it.
+The e2e HTTP journey now runs the default planned path and the 400 on `sdlc: "single"`.
+
+Validation: `node --test test/wbs.test.mjs test/review.test.mjs` 39/39; `npm test` (distro
+precheck ok) 145/145; `git diff --check` clean. Not installed; no active run was touched.
+Claude now routes `feature-plan` to the reasoning profile; `plan-correction-N` stays on opus (plan with
+the stronger model, build with the coding model). Codex still has one profile for every stage.

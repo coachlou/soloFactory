@@ -101,7 +101,8 @@ export class JobStore {
     await this.git("clean", "-qfd");
   }
 
-  async create({ brief, transcript, provider, sdlc = "single" }) {
+  // New runs are planned feature runs (planVersion 2). "single" stays only for callers that recreate history.
+  async create({ brief, transcript, provider, sdlc = "slices" }) {
     const id = `${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
     const now = new Date().toISOString();
     const job = {
@@ -126,6 +127,7 @@ export class JobStore {
       stageHistory: [],
     };
     if (sdlc === "slices") {
+      job.planVersion = 2;
       job.sliceIndex = 0;
       job.sliceDone = [];
       job.sliceStats = {};

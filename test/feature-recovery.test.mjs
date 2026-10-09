@@ -26,7 +26,7 @@ async function setup(t, mutate = async () => {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'solo-feature-recovery-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const store = new JobStore(root); await store.init();
-  const job = await store.create({ brief: { workingName: 'Recovery fixture', mustHaves: ['Live saved searches', 'Edit people'], acceptanceScenarios: ['A new item enters its smart album'] }, transcript: [{ role: 'user', content: 'Recover the missing behavior' }], provider: 'fixture' });
+  const job = await store.create({ brief: { workingName: 'Recovery fixture', mustHaves: ['Live saved searches', 'Edit people'], acceptanceScenarios: ['A new item enters its smart album'] }, transcript: [{ role: 'user', content: 'Recover the missing behavior' }], provider: 'fixture', sdlc: 'single' });
   const fixture = createFixtureProvider(); let recovering = false; let deployments = 0;
   const stages = [];
   const factory = new SoloFactory({ store, maxRepairs: 1,

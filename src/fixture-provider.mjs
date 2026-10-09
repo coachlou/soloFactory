@@ -51,6 +51,30 @@ const fixtureSlicePlan = {
   ],
 };
 
+// Version-2 plan: a skeleton prerequisite, then one feature closing every original check.
+function fixtureFeaturePlan({ jobId, contractDigest, checks }) {
+  const ids = checks.map((check) => check.id);
+  return {
+    version: 2, jobId, contractDigest, compatibility: [],
+    slices: [
+      {
+        id: "SLICE-SKELETON", title: "Walking skeleton",
+        objective: "A running, health-checked Pocket Pulse server with manifest, build, and aggregate metrics.",
+        demo: "Start the app and curl /health and /_factory/metrics; both answer with valid JSON.",
+        dependsOn: [], closes: [],
+        acceptance: [{ id: "SKELETON-1", behavior: "GET /_factory/metrics returns privacy-preserving aggregate counters", refs: [], proof: { command: ["npm", "test"], expect: "server.test.mjs passes" } }],
+      },
+      {
+        id: "SLICE-UI", title: "Recording UI and docs",
+        objective: "A usable recording page with one-command README on top of the walking skeleton.",
+        demo: "Open the served page and see the record-your-score form and the README instructions.",
+        dependsOn: ["SLICE-SKELETON"], closes: ids,
+        acceptance: [{ id: "UI-1", behavior: "The served page invites the owner to record a daily score", refs: ids, proof: { command: ["npm", "test"], expect: "ui.test.mjs passes" } }],
+      },
+    ],
+  };
+}
+
 export function createFixtureProvider() {
   return {
     id: "fixture",
@@ -80,18 +104,25 @@ export function createFixtureProvider() {
         await writeFile(path.join(cwd, ".factory", "PRD.md"), body("Product requirements"));
         await writeFile(path.join(cwd, ".factory", "PLAN.md"), body("Implementation plan"));
         await writeFile(path.join(cwd, ".factory", "ACCEPTANCE.md"), body("Acceptance contract"));
-        if (context.job?.sdlc === "slices") {
+        if (context.job?.sdlc === "slices" && context.job.planVersion !== 2) {
           await writeFile(path.join(cwd, ".factory", "slices.json"), `${JSON.stringify(fixtureSlicePlan, null, 2)}\n`);
         }
+      } else if (context.stage === "feature-plan" || /^plan-correction-\d+$/.test(context.stage)) {
+        const request = JSON.parse(await readFile(path.join(cwd, ".factory", "plan-request.json"), "utf8"));
+        await writeFile(path.join(cwd, ".factory", "slices.json"), `${JSON.stringify(fixtureFeaturePlan(request), null, 2)}\n`);
+      } else if (/^plan-review-\d+$/.test(context.stage)) {
+        const request = JSON.parse(await readFile(path.join(cwd, ".factory", "plan-review-request.json"), "utf8"));
+        await writeFile(path.join(cwd, ".factory", "plan-review-result.json"), JSON.stringify({ ...request, verdict: "approve", blockers: [] }));
       } else if (context.job?.sdlc === "slices" && /^(build-slice-|slice-resume-)/.test(context.stage)) {
         await writeFixtureSlice(cwd, context.job.sliceIndex ?? 0);
       } else if (context.stage === "build" || context.stage === "build-resume" || context.stage === "repair-resume") {
         await writeFixtureApp(cwd);
-      } else if (context.stage.startsWith("review") || /^recovery-.*-review-\d+$/.test(context.stage)) {
+      } else if (context.stage.startsWith("review") || /^feature-review-/.test(context.stage) || /^recovery-.*-review-\d+$/.test(context.stage)) {
         await writeFile(path.join(cwd, ".factory", "REVIEW.md"), "# Review\n\nFixture contract inspected; no changes required.\n");
         const request = JSON.parse(await readFile(path.join(cwd, ".factory", "review-request.json"), "utf8"));
         await writeFile(path.join(cwd, ".factory", "review-result.json"), JSON.stringify({
           version: 1, jobId: request.jobId, token: request.token, contractDigest: request.contractDigest,
+          ...(request.candidate ? { candidate: request.candidate } : {}),
           verdict: "pass", blockers: [], checks: request.checks.map(check => ({ id: check.id, status: "pass", evidence: ["server.test.mjs"] })),
         }));
       }

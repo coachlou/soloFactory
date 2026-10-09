@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nextExecutable, orderSlices, validateSlicePlan } from "../src/wbs.mjs";
+import { nextExecutable, orderSlices, validateFeaturePlan, validateSlicePlan } from "../src/wbs.mjs";
 
 const validPlan = {
   slices: [
@@ -146,4 +146,78 @@ test("a criterion shared between slices is rejected as re-implementation", () =>
     ],
   };
   assert.throws(() => validateSlicePlan(plan), /share the same acceptance criterion/);
+});
+
+// --- version-2 feature plans ---
+const checks = [
+  { id: "MH-1", text: "Record one score a day" },
+  { id: "MH-2", text: "Show the seven-day trend" },
+  { id: "SC-1", text: "The owner records a score and sees the trend move" },
+];
+const binding = { jobId: "job-1", contractDigest: "c".repeat(64), checks };
+const ob = (id, behavior, refs) => ({ id, behavior, refs, proof: { command: ["node", "--test", "test/x.test.mjs"], expect: "all tests pass" } });
+const featurePlan = (slices, extra = {}) => ({ version: 2, jobId: "job-1", contractDigest: "c".repeat(64), slices, ...extra });
+const feature = (id, closes, acceptance, dependsOn = []) => ({ id, title: `Feature ${id}`, objective: "Observable outcome", demo: "Open the page and see it", closes, acceptance, dependsOn });
+const fullPlan = () => featurePlan([
+  feature("STORE", [], [ob("STORE-1", "Scores persist across a restart", [])]),
+  feature("RECORD", ["MH-1"], [ob("RECORD-1", "Owner records one score per day", ["MH-1"])], ["STORE"]),
+  feature("TREND", ["MH-2", "SC-1"], [ob("TREND-1", "Trend shows the seven-day average", ["MH-2", "SC-1"])], ["RECORD"]),
+]);
+
+test("v2: a valid plan normalizes with a prerequisite feeding a closer", () => {
+  const plan = validateFeaturePlan(fullPlan(), binding);
+  assert.deepEqual(plan.slices.map((s) => s.id), ["STORE", "RECORD", "TREND"]);
+  assert.deepEqual(plan.slices[0].acceptance[0].proof.command, ["node", "--test", "test/x.test.mjs"]);
+});
+
+test("v2: one coherent feature is a valid plan and more than six is allowed", () => {
+  assert.equal(validateFeaturePlan(featurePlan([feature("ALL", ["MH-1", "MH-2", "SC-1"], [ob("ALL-1", "Records and trends in one page", ["MH-1", "MH-2", "SC-1"])])]), binding).slices.length, 1);
+  const many = Array.from({ length: 9 }, (_, i) => feature(`F${i}`, i === 8 ? ["MH-1", "MH-2", "SC-1"] : [], [ob(`F${i}-1`, `Increment number ${i} works end to end`, i === 8 ? ["MH-1", "MH-2", "SC-1"] : [])], i ? [`F${i - 1}`] : []));
+  assert.equal(validateFeaturePlan(featurePlan(many), binding).slices.length, 9);
+  const tooMany = Array.from({ length: 31 }, (_, i) => feature(`F${i}`, i === 30 ? ["MH-1", "MH-2", "SC-1"] : [], [ob(`F${i}-1`, `Increment number ${i} works end to end`, ["MH-1"])], i ? [`F${i - 1}`] : []));
+  assert.throws(() => validateFeaturePlan(featurePlan(tooMany), binding), /limit is 30/);
+});
+
+test("v2: a plan covering every SC but omitting an MH names the MH", () => {
+  const plan = fullPlan();
+  plan.slices[2].closes = ["SC-1"];
+  plan.slices[2].acceptance[0].refs = ["SC-1"];
+  assert.throws(() => validateFeaturePlan(plan, binding), /no closing owner for MH-2 \(Show the seven-day trend\)/);
+});
+
+test("v2: unknown and duplicate owners, orphans and unproved closes are rejected", () => {
+  const unknown = fullPlan(); unknown.slices[1].closes = ["MH-1", "MH-9"];
+  assert.throws(() => validateFeaturePlan(unknown, binding), /unknown check MH-9/);
+  const dup = fullPlan(); dup.slices[2].closes = ["MH-1", "MH-2", "SC-1"]; dup.slices[2].acceptance[0].refs.push("MH-1");
+  assert.throws(() => validateFeaturePlan(dup, binding), /MH-1 has two closing owners/);
+  const orphan = fullPlan(); orphan.slices[1].dependsOn = [];
+  assert.throws(() => validateFeaturePlan(orphan, binding), /STORE is an orphan prerequisite/);
+  const unproved = fullPlan(); unproved.slices[1].acceptance[0].refs = [];
+  assert.throws(() => validateFeaturePlan(unproved, binding), /closes MH-1 but no obligation/);
+  const badRef = fullPlan(); badRef.slices[0].acceptance[0].refs = ["SC-7"];
+  assert.throws(() => validateFeaturePlan(badRef, binding), /unknown original checks/);
+});
+
+test("v2: empty/fuzzy acceptance, malformed proof, forward deps and metadata are rejected", () => {
+  const cases = [
+    [(p) => { p.slices[0].acceptance = []; }, /at least one acceptance obligation/],
+    [(p) => { p.slices[0].acceptance[0].behavior = "works"; }, /concrete expected behavior/],
+    [(p) => { p.slices[0].acceptance[0].proof = { command: [], expect: "ok" }; }, /executable proof command/],
+    [(p) => { p.slices[0].acceptance[0].proof.command = ["bash", "-c", "true"]; }, /executable proof command/],
+    [(p) => { p.slices[0].acceptance[0].proof.command = "npm test"; }, /executable proof command/],
+    [(p) => { p.slices[0].acceptance[0].proof.expect = ""; }, /expected proof result/],
+    [(p) => { p.slices[0].dependsOn = ["TREND"]; }, /not an earlier slice/],
+    [(p) => { p.slices[1].acceptance[0].behavior = p.slices[0].acceptance[0].behavior.toUpperCase(); }, /share the behavior/],
+    [(p) => { p.slices[0].demo = "ok"; }, /demo/],
+    [(p) => { p.contractDigest = "d".repeat(64); }, /frozen contract/],
+    [(p) => { p.jobId = "other"; }, /this run/],
+    [(p) => { delete p.version; }, /version 2/],
+    [(p) => { p.compatibility = [{ subject: "sharp on arm64", status: "unknown" }]; }, /Unresolved compatibility: sharp on arm64/],
+  ];
+  for (const [mutate, pattern] of cases) {
+    const plan = fullPlan();
+    mutate(plan);
+    assert.throws(() => validateFeaturePlan(plan, binding), pattern);
+  }
+  assert.doesNotThrow(() => validateFeaturePlan(fullPlan(), binding));
 });

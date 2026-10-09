@@ -156,3 +156,60 @@ test('owner review resume grants a bounded budget and parks again when still inc
   assert.equal(resumed.repairBudgetLimit, 2);
   assert.equal(env.deployments(), 0);
 });
+
+// --- registry, candidate binding and plan verdicts (no factory) ---
+import { mkdir } from 'node:fs/promises';
+import { originalChecks, prepareReview, validateReview, preparePlanReview, validatePlanReview } from '../src/review.mjs';
+
+async function contractDir(t) {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'solo-contract-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await mkdir(path.join(dir, '.factory'));
+  for (const f of ['requirements.json', 'PRD.md', 'PLAN.md', 'ACCEPTANCE.md']) await writeFile(path.join(dir, '.factory', f), f);
+  await writeFile(path.join(dir, 'proof.test.mjs'), 'ok');
+  return dir;
+}
+const passReport = (req, extra = {}) => ({ version: 1, jobId: req.jobId, token: req.token, contractDigest: req.contractDigest, verdict: 'pass', blockers: [],
+  checks: req.checks.map(c => ({ id: c.id, status: 'pass', evidence: ['proof.test.mjs'] })), ...extra });
+
+test('one original-check registry numbers MH then SC', () => {
+  assert.deepEqual(originalChecks({ mustHaves: ['a', 'b'], acceptanceScenarios: ['c'] }).map(c => c.id), ['MH-1', 'MH-2', 'SC-1']);
+  assert.deepEqual(originalChecks({}), []);
+});
+
+test('scoped review uses its own checks and binds the verdict to the candidate', async t => {
+  const dir = await contractDir(t);
+  const job = { id: 'job-1', brief: { mustHaves: ['a', 'b'] } };
+  const req = await prepareReview(dir, job, { checks: [{ id: 'MH-2', text: 'b' }, { id: 'F-1', text: 'obligation' }], candidate: 'cand-1' });
+  assert.deepEqual(req.checks.map(c => c.id), ['MH-2', 'F-1']);
+  const file = path.join(dir, '.factory/review-result.json');
+  await writeFile(file, JSON.stringify(passReport(req)));
+  await assert.rejects(validateReview(dir, req), /not bound to the checked candidate/);
+  await writeFile(file, JSON.stringify(passReport(req, { candidate: 'cand-0' })));
+  await assert.rejects(validateReview(dir, req), /not bound to the checked candidate/);
+  await writeFile(file, JSON.stringify(passReport(req, { candidate: 'cand-1' })));
+  await validateReview(dir, req);
+  const missing = passReport(req, { candidate: 'cand-1' }); missing.checks[1].evidence = ['captures/screen.png'];
+  await writeFile(file, JSON.stringify(missing));
+  await assert.rejects(validateReview(dir, req), /captures\/screen\.png for F-1 does not exist/);
+});
+
+test('plan verdicts bind token, plan digest and contract; blocked names its blocker', async t => {
+  const dir = await contractDir(t);
+  const req = await preparePlanReview(dir, { id: 'job-1' }, 'p'.repeat(64));
+  const file = path.join(dir, '.factory/plan-review-result.json');
+  const verdict = extra => writeFile(file, JSON.stringify({ ...req, verdict: 'approve', blockers: [], ...extra }));
+  await assert.rejects(validatePlanReview(dir, req), /no readable verdict/);
+  await writeFile(file, '{'); await assert.rejects(validatePlanReview(dir, req), /no readable verdict/);
+  await verdict({ token: 'old' }); await assert.rejects(validatePlanReview(dir, req), /stale/);
+  await verdict({ planDigest: 'q'.repeat(64) }); await assert.rejects(validatePlanReview(dir, req), /stale/);
+  await verdict({ contractDigest: 'x' }); await assert.rejects(validatePlanReview(dir, req), /stale/);
+  await verdict({ verdict: 'ok' }); await assert.rejects(validatePlanReview(dir, req), /invalid/);
+  await verdict({ verdict: 'blocked', blockers: ['MH-2 has no negative case'] });
+  await assert.rejects(validatePlanReview(dir, req), e => /MH-2 has no negative case/.test(e.message) && e.details.blockers.length === 1);
+  await verdict({ blockers: ['still open'] }); await assert.rejects(validatePlanReview(dir, req), /still open/);
+  await verdict(); assert.equal((await validatePlanReview(dir, req)).verdict, 'approve');
+  const fresh = await preparePlanReview(dir, { id: 'job-1' }, 'p'.repeat(64));
+  assert.notEqual(fresh.token, req.token);
+  await assert.rejects(validatePlanReview(dir, fresh), /no readable verdict/);
+});
