@@ -87,13 +87,22 @@ ${blockers.map(item => `- ${item}`).join('\n')}`;
 // The plan-correction budget belongs to an input fingerprint. Every preparation since the last executed
 // plan (retries, feedback revisions, a return to earlier inputs) shares the corrections already spent
 // on its fingerprint; only revised inputs or new evidence from an executed plan start fresh.
-function spentCorrections(history = [], sourcesDigest) {
-  let spent = 0;
-  for (const phase of [...history].reverse()) {
+function budgetLedger(job) {
+  const chain = [];
+  for (const phase of [...(job.recoveryPhaseHistory ?? []), job.recoveryPhase].filter(Boolean).reverse()) {
     if (!['planning', 'plan_failed', 'ready'].includes(phase.status)) break;
-    if (phase.request?.sourcesDigest === sourcesDigest) spent = Math.max(spent, phase.corrections ?? 0);
+    chain.push(phase);
   }
-  return spent;
+  return chain;
+}
+
+function spentCorrections(job, sourcesDigest) {
+  return Math.max(0, ...budgetLedger(job).filter(phase => phase.request?.sourcesDigest === sourcesDigest).map(phase => phase.corrections ?? 0));
+}
+
+// Preparations in the ledger whose plan review still blocked after the fingerprint's corrections ran out.
+export function exhaustedPreparations(job) {
+  return budgetLedger(job).filter(phase => phase.blocked);
 }
 
 export async function planFeatureRecovery(factory, id, signal, guidance = '') {
@@ -207,7 +216,7 @@ async function draftRepairPlan(factory, job, signal, request, prior) {
     // Stale-input plans have no current review to bind; review-backed plans bind the source verdict.
     const sourceReport = request.review ? JSON.parse(await readFile(path.join(appDir, '.factory/review-result.json'), 'utf8')) : null;
     if (prior) { job.recoveryPhaseHistory ??= []; job.recoveryPhaseHistory.push(prior); }
-    const corrections = spentCorrections(job.recoveryPhaseHistory, request.sourcesDigest);
+    const corrections = spentCorrections(job, request.sourcesDigest);
     job.recoveryPhase = { id: request.id, status: 'planning', request, sourceReportDigest: sourceReport && digest(sourceReport), planFile, done: [], index: 0, stats: {}, reviews: 0, corrections };
     const phase = job.recoveryPhase;
     job.error = null; job.failedState = null; job.recovery = null;
@@ -246,7 +255,8 @@ async function draftRepairPlan(factory, job, signal, request, prior) {
       }
       phase.planBlockers = planBlockers;
       await factory.emit(id, { type: 'plan.blocked', state: job.state, message: planBlockers[0] });
-      if (phase.corrections >= factory.maxRepairs) throw Object.assign(new Error(`The repair plan is still blocked after ${phase.corrections} corrections: ${planBlockers[0]}`), { code: 'plan_blocked', details: { blockers: planBlockers } });
+      if (phase.corrections >= factory.maxRepairs) phase.blocked = true;
+      if (phase.blocked) throw Object.assign(new Error(`The repair plan is still blocked after ${phase.corrections} corrections: ${planBlockers[0]}`), { code: 'plan_blocked', details: { blockers: planBlockers } });
       phase.corrections += 1;
       await factory.store.writeState(job);
       await factory.invoke(job, `recovery-correction-${request.id}-${phase.corrections}`, repairCorrectionPrompt(planFile, planBlockers), signal);

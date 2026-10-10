@@ -427,7 +427,7 @@ export async function createSoloFactoryServer(options = {}) {
           catch (error) { return json(response, 409, { error: error.message }); }
         } else if (job.recoveryPhase && !["planning", "plan_failed", "ready", "running", "built"].includes(job.recoveryPhase.status)) return json(response, 409, { error: "This run already has an active recovery plan." });
         else {
-          try { await assertPlanInputsRevised(jobStore, job, maxRepairs); }
+          try { await assertPlanInputsRevised(jobStore, job); }
           catch (error) { return json(response, 409, { error: error.message, nextAction: error.details.nextAction, blockers: error.details.blockers }); }
         }
         if (body.guidance !== undefined && (typeof body.guidance !== "string" || body.guidance.length > 6000)) return json(response, 400, { error: "Recovery plan feedback must be text of at most 6000 characters." });

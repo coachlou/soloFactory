@@ -192,11 +192,14 @@ test('a repair plan still blocked after its corrections offers revised inputs, n
   const spentOut = await env.factory.planRecovery(failed.id, 'Again');
   assert.equal(spentOut.recoveryPhase.status, 'plan_failed'); assert.equal(spentOut.error.code, 'plan_blocked');
   assert.equal(corrections() - spent, 0, 'feedback on a ready plan does not renew its fingerprint budget');
-  // Returning to the first inputs does not renew their spent budget either.
-  await writeFile(path.join(env.root, '.factory/uploads/SPEC.md'), '§3 Group by upload day.\n'); spent = corrections();
-  const reverted = await env.factory.planRecovery(failed.id);
-  assert.equal(reverted.recoveryPhase.status, 'plan_failed'); assert.equal(reverted.recoveryPhase.corrections, 1);
-  assert.equal(corrections() - spent, 0, 'the first fingerprint already spent its corrections');
+  // Returning to the first inputs, whose budget is exhausted, is refused before any planner or reviewer turn.
+  await writeFile(path.join(env.root, '.factory/uploads/SPEC.md'), '§3 Group by upload day.\n');
+  const turns = env.stages.length; const saved = await readFile(path.join(env.store.jobDir(failed.id), 'state.json'), 'utf8');
+  await assert.rejects(env.factory.planRecovery(failed.id), error => error.code === 'plan_inputs_unchanged'
+    && error.message.startsWith('These inputs have exhausted their plan corrections. Revise the specs or prototype to prepare a new plan.')
+    && error.details.nextAction.action === 'revise-inputs' && error.details.blockers[0] === 'SPEC.md §3 contradicts the frozen contract');
+  assert.equal(env.stages.length, turns, 'no planner or reviewer turn ran');
+  assert.equal(await readFile(path.join(env.store.jobDir(failed.id), 'state.json'), 'utf8'), saved);
   assert.equal(env.deployments(), 0);
 });
 

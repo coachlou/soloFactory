@@ -472,7 +472,8 @@ repair-plan preparation stopped or failed (`planning` or `plan_failed`) continue
 retains the unfinished checks, keeps spent plan corrections, and runs no implementation or
 deployment. A plan whose review still blocks after its corrections are spent (`plan_blocked`)
 gets no retry: the dashboard lists the review blockers and offers **Revise inputs and prepare a
-new plan**, and `recovery-plan` refuses with `409` until the specs or prototype inputs change. A
+new plan**, and `recovery-plan` refuses with `409`, before any planner or reviewer turn, while the inputs
+match any fingerprint that exhausted its corrections since the last executed plan. A
 correction budget belongs to the input fingerprint: revised inputs start fresh, and every later
 retry, feedback revision or return to earlier inputs shares what that fingerprint already spent. A `ready` plan continues only with exact approval. An exhausted budget or changed
 inputs continue with **Prepare repair plan**. An approved plan that is `running` resumes from

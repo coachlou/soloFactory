@@ -12,7 +12,7 @@ import { orderSlices, integrationProofs, pendingChecks, pendingProofFailure, rec
 export { pendingProofFailure };
 import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
-import { archiveReview, digest, planFeatureRecovery, runFeatureRecovery, sourceBaseline } from "./feature-recovery.mjs";
+import { archiveReview, digest, exhaustedPreparations, planFeatureRecovery, runFeatureRecovery, sourceBaseline } from "./feature-recovery.mjs";
 
 // Which harness produced a run, so runs.jsonl can compare harness changes. Read once at load.
 const harnessRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -70,7 +70,7 @@ export class SoloFactory {
   }
 
   async planRecovery(jobId, guidance = "") {
-    await assertPlanInputsRevised(this.store, await this.store.read(jobId), this.maxRepairs);
+    await assertPlanInputsRevised(this.store, await this.store.read(jobId));
     return this.activate(jobId, signal => planFeatureRecovery(this, jobId, signal, guidance));
   }
 
@@ -1140,12 +1140,19 @@ export function planBlockedOut(job) {
   return job.recoveryPhase?.status === "plan_failed" && (job.error?.code === "plan_blocked" || /plan is still blocked after \d+ corrections/.test(job.error?.message ?? ""));
 }
 
-// Refuses a futile repair-plan retry before any turn runs: the inputs are the ones the blocked plan used.
-export async function assertPlanInputsRevised(store, job, maxRepairs) {
-  if (!planBlockedOut(job)) return;
-  if (digest(await sourceSet(store.appDir(), runInputs(job))) !== job.recoveryPhase.request.sourcesDigest) return;
-  const next = continuationAction(job, { maxRepairs });
-  throw new FactoryError("plan_inputs_unchanged", `${next.reason} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next, blockers: job.recoveryPhase.planBlockers ?? [] });
+// Refuses a futile repair-plan preparation before any turn runs: the current inputs' fingerprint already
+// exhausted its corrections in the budget ledger (the latest plan, or earlier inputs switched back to).
+export async function assertPlanInputsRevised(store, job) {
+  const exhausted = exhaustedPreparations(job);
+  // ponytail: runs saved before the `blocked` flag are recognized only for their latest preparation.
+  if (planBlockedOut(job) && !exhausted.includes(job.recoveryPhase)) exhausted.push(job.recoveryPhase);
+  if (!exhausted.length) return;
+  const now = digest(await sourceSet(store.appDir(), runInputs(job)));
+  const phase = exhausted.find((item) => item.request?.sourcesDigest === now);
+  if (!phase) return;
+  const blockers = phase.planBlockers ?? [];
+  const next = { action: "revise-inputs", label: "Revise inputs and prepare a new plan", endpoint: `/api/jobs/${job.id}/recovery-plan`, reason: "These inputs have exhausted their plan corrections. Revise the specs or prototype to prepare a new plan." };
+  throw new FactoryError("plan_inputs_unchanged", `${next.reason}${blockers.length ? ` Plan review blockers: ${blockers.join("; ")}.` : ""} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next, blockers });
 }
 
 // The one continuation policy: the controller, the HTTP API and the dashboard all ask this which

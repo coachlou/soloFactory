@@ -797,7 +797,7 @@ PRD: `spec/PRD-provider-diagnostics-and-planning-continuation.md`.
 
   It feeds `buildRecovery` (canResume and wording), the `runResume` refusals (codes unchanged), the `/resume` 409 (`nextAction`), and
   `withContinuation` in `annotateJobs`, which derives stale saved banners without writing them. The dashboard uses `nextAction`.
-  A planning retry keeps the spent plan corrections (Lou, 2026-10-10: resetting would let retries bypass the limit); the budget is bound to the input fingerprint: revised inputs start fresh, and retries, feedback revisions or a return to earlier inputs share that fingerprint's spent corrections until a plan executes.
+  A planning retry keeps the spent plan corrections (Lou, 2026-10-10: resetting would let retries bypass the limit); the budget is bound to the input fingerprint: revised inputs start fresh, and retries, feedback revisions or a return to earlier inputs share that fingerprint's spent corrections until a plan executes. Switching back to inputs whose fingerprint exhausted its corrections is refused before any turn (`plan_inputs_unchanged`); approval alone never resets the budget.
 - A trailing record cut off by a kill is dropped from diagnostic lines; a trailing plain-text line still counts.
 - Tests: 194/194 and the distro precheck pass. New tests cover acceptance 1–6 on both Codex and Claude, including the dashboard source check. No real-provider smoke test was run,
   and the photo-library run was not touched.
