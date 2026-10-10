@@ -339,7 +339,7 @@ export function detectProviderDiagnostics(output = "") {
     },
     {
       code: "usage_limit",
-      pattern: /usage limit|rate limit|quota exceeded|too many requests|insufficient_quota/i,
+      pattern: /usage[ _]limit|session limit|rate[ _]limit|quota exceeded|too many requests|insufficient_quota/i,
       title: "Subscription usage is unavailable",
       action: "Wait for the subscription limit to reset or select another signed-in subscription provider. No automatic retry was attempted.",
     },

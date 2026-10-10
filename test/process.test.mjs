@@ -66,6 +66,9 @@ test("continuous activity still respects the total safety cap", async () => {
 
 test("provider diagnostics distinguish limits from recoverable local blockers", () => {
   assert.deepEqual(detectProviderDiagnostics("usage limit exceeded").map((item) => item.code), ["usage_limit"]);
+  // The final line Claude Code printed when a real smoke run hit the subscription limit.
+  const claudeLimit = JSON.stringify({ type: "result", subtype: "success", is_error: true, api_error_status: 429, api_error: "usage_limit_reached", result: "You've hit your session limit · resets 3:30pm (America/Toronto)" });
+  assert.deepEqual(detectProviderDiagnostics(claudeLimit).map((item) => item.code), ["usage_limit"]);
   assert.deepEqual(
     detectProviderDiagnostics("The 'gpt-6-astra' model requires a newer version of Codex.").map((item) => item.code),
     ["model_cli_incompatible"],
