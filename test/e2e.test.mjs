@@ -7,6 +7,8 @@ import os from "node:os";
 import { createSoloFactoryServer } from "../src/server.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
 import { COVERAGE_KEYS } from "../src/interview.mjs";
+import { digest } from "../src/feature-recovery.mjs";
+import { runInputs, sourceSet } from "../src/review.mjs";
 
 test("HTTP journey goes from Guide turn to a reachable generated app", async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-http-"));
@@ -548,6 +550,67 @@ test('HTTP feature recovery requires matching approval and respects the project 
   do { await new Promise(r => setTimeout(r, 100)); after = (await getJson(`${base}/api/jobs/${job.id}`)).job; } while (!['completed', 'failed'].includes(after.state) && Date.now() < deadline);
   assert.equal(after.state, 'completed', after.error?.message);
   assert.equal(after.sdlc, 'single'); assert.deepEqual(after.recoveryPhase.done, ['RECOVERY-1']);
+});
+
+test('HTTP: a saved plan_failed run with a stale Resume banner presents planning retry everywhere', async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'solo-http-plan-failed-'));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const job = await app.store.create({ brief: { workingName: 'Plan failed', mustHaves: ['Browse'], acceptanceScenarios: ['Browse works'] }, transcript: [{ role: 'user', content: 'Recover' }], provider: 'fixture', sdlc: 'slices' });
+  Object.assign(job, { state: 'failed', failedState: 'reviewing', attempt: 1,
+    error: { code: 'unexpected_error', message: 'Repair plan review is still blocked.', details: {} },
+    recoveryPhase: { id: 'r1', status: 'plan_failed', request: { checks: [{ id: 'MH-1', text: 'Browse' }] }, planBlockers: ['MH-1 has no obligation'], done: [] },
+    recovery: { version: 2, status: 'needs_owner', title: 'The run paused before completion', summary: 'Stopped safely.', actions: ['Review the recovery packet and the named log, then resume this run from its preserved files.'], canResume: true, automaticRetry: 'No automatic retry was needed or safe.' } });
+  await app.store.writeState(job);
+  const stateFile = path.join(app.store.jobDir(job.id), 'state.json');
+  const saved = await readFile(stateFile, 'utf8');
+  const { job: shown } = await getJson(`${base}/api/jobs/${job.id}`);
+  assert.equal(shown.recovery.canResume, false);
+  assert.deepEqual([shown.nextAction.action, shown.nextAction.label, shown.nextAction.endpoint], ['retry-plan', 'Retry repair-plan preparation', `/api/jobs/${job.id}/recovery-plan`]);
+  assert.ok(shown.recovery.actions.some(text => /Retry repair-plan preparation/.test(text)));
+  const listed = (await getJson(`${base}/api/jobs`)).jobs.find(item => item.id === job.id);
+  assert.equal(listed.nextAction.action, 'retry-plan');
+  const refused = await fetch(`${base}/api/jobs/${job.id}/resume`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(refused.status, 409);
+  const body = await refused.json();
+  assert.match(body.error, /Retry repair-plan preparation/); assert.equal(body.nextAction.endpoint, `/api/jobs/${job.id}/recovery-plan`);
+  assert.equal(await readFile(stateFile, 'utf8'), saved, 'presentation derives the banner; it never rewrites the saved job');
+  // The dashboard renders the derived action, not the saved flag.
+  const dashboard = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(dashboard, /recovery\?\.canResume/);
+  assert.match(dashboard, /nextAction\?\.action !== "resume"/);
+  assert.match(dashboard, /next\?\.action === "retry-plan"/);
+});
+
+test('HTTP: a repair plan blocked after its corrections offers revised inputs and refuses an unchanged retry', async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'solo-http-plan-blocked-'));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const job = await app.store.create({ brief: { workingName: 'Plan blocked', mustHaves: ['Browse'], acceptanceScenarios: ['Browse works'] }, transcript: [{ role: 'user', content: 'Recover' }], provider: 'fixture', sdlc: 'slices' });
+  // A run that reached repair planning has its frozen contract on disk.
+  await mkdir(path.join(app.store.appDir(), '.factory'), { recursive: true });
+  for (const file of ['requirements.json', 'PRD.md', 'PLAN.md', 'ACCEPTANCE.md']) await writeFile(path.join(app.store.appDir(), '.factory', file), file);
+  const sourcesDigest = digest(await sourceSet(app.store.appDir(), runInputs(job)));
+  Object.assign(job, { state: 'failed', failedState: 'specifying', attempt: 1,
+    error: { code: 'plan_blocked', message: 'The repair plan is still blocked after 2 corrections: MH-1 has no obligation', details: {} },
+    recoveryPhase: { id: 'r1', status: 'plan_failed', corrections: 2, request: { checks: [{ id: 'MH-1', text: 'Browse' }], sourcesDigest }, planBlockers: ['MH-1 has no obligation'], done: [] } });
+  await app.store.writeState(job);
+  const { job: shown } = await getJson(`${base}/api/jobs/${job.id}`);
+  const saved = await readFile(path.join(app.store.jobDir(job.id), 'state.json'), 'utf8');
+  assert.equal(shown.nextAction.action, 'revise-inputs');
+  assert.match(shown.nextAction.reason, /MH-1 has no obligation/);
+  assert.ok(shown.recovery.actions.some(text => text.startsWith('Revise inputs and prepare a new plan')), shown.recovery.actions.join(' | '));
+  assert.ok(!shown.recovery.actions.some(text => /retry repair-plan/i.test(text)));
+  const refused = await fetch(`${base}/api/jobs/${job.id}/recovery-plan`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(refused.status, 409);
+  const body = await refused.json();
+  assert.match(body.error, /Revise inputs and prepare a new plan/); assert.equal(body.nextAction.action, 'revise-inputs'); assert.deepEqual(body.blockers, ['MH-1 has no obligation']);
+  assert.equal(await readFile(path.join(app.store.jobDir(job.id), 'state.json'), 'utf8'), saved);
+  assert.match(await readFile(new URL('../public/app.js', import.meta.url), 'utf8'), /next\?\.action === "revise-inputs"/);
 });
 
 test("HTTP: an image uploaded for another brief while a run builds does not stop that run", async (t) => {

@@ -30,6 +30,7 @@ const HARNESS = {
 };
 
 const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted", "paused"]);
+const PARKED_STATES = new Set(["failed", "cancelled", "interrupted", "paused"]);
 // A pause lands only where the tree is green and committed: before a stage that follows a passed gate.
 const PAUSE_POINTS = new Set(["specifying", "building", "reviewing", "deploying"]);
 
@@ -69,6 +70,7 @@ export class SoloFactory {
   }
 
   async planRecovery(jobId, guidance = "") {
+    await assertPlanInputsRevised(this.store, await this.store.read(jobId), this.maxRepairs);
     return this.activate(jobId, signal => planFeatureRecovery(this, jobId, signal, guidance));
   }
 
@@ -182,13 +184,11 @@ export class SoloFactory {
     if (!TERMINAL.has(job.state) || job.state === "completed") {
       throw new FactoryError("not_resumable", "Only a failed, cancelled, or interrupted run can be resumed.");
     }
-    if (job.recoveryPhase?.status === "ready" || ["planning", "plan_failed"].includes(job.recoveryPhase?.status)) {
-      throw new FactoryError("recovery_approval_required", "Review and approve the recovery plan before execution; retry planning if it failed.");
+    // ponytail: "none" (cancelled, dismissed) stays resumable here as before; the API refuses it.
+    const next = continuationAction(job, { maxRepairs: this.maxRepairs });
+    if (!["resume", "none"].includes(next.action)) {
+      throw new FactoryError(["prepare-plan", "revise-inputs"].includes(next.action) ? "repair_plan_required" : "recovery_approval_required", `${next.reason} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next });
     }
-    if (repairsExhausted(job, this.maxRepairs)) {
-      throw new FactoryError("repair_plan_required", "The repair budget is exhausted. Prepare a repair plan and approve it; Resume does not renew the budget or rerun the same review.");
-    }
-    if (inputsChanged(job)) throw new FactoryError("repair_plan_required", "The specs or prototype inputs changed after the plan was approved. Prepare a repair plan against the current inputs.");
     if (job.recoveryPhase?.status === "running") return runFeatureRecovery(this, jobId, signal);
     if (job.recoveryPhase?.status === "built") {
       try {
@@ -1134,6 +1134,54 @@ export function inputsChanged(job) {
   return job.error?.code === "inputs_changed";
 }
 
+// A repair plan still blocked after its corrections: retrying the same inputs cannot pass review.
+// The message match recognizes runs saved before the plan_blocked code.
+export function planBlockedOut(job) {
+  return job.recoveryPhase?.status === "plan_failed" && (job.error?.code === "plan_blocked" || /plan is still blocked after \d+ corrections/.test(job.error?.message ?? ""));
+}
+
+// Refuses a futile repair-plan retry before any turn runs: the inputs are the ones the blocked plan used.
+export async function assertPlanInputsRevised(store, job, maxRepairs) {
+  if (!planBlockedOut(job)) return;
+  if (digest(await sourceSet(store.appDir(), runInputs(job))) !== job.recoveryPhase.request.sourcesDigest) return;
+  const next = continuationAction(job, { maxRepairs });
+  throw new FactoryError("plan_inputs_unchanged", `${next.reason} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next, blockers: job.recoveryPhase.planBlockers ?? [] });
+}
+
+// The one continuation policy: the controller, the HTTP API and the dashboard all ask this which
+// action may continue a parked run, so a banner can never offer an action the controller refuses.
+// `busy`: a worker already holds or has queued this run.
+export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
+  const next = (action, label, endpoint, reason) => ({ action, label, endpoint: endpoint && `/api/jobs/${job.id}/${endpoint}`, reason });
+  const phase = job.recoveryPhase?.status;
+  if (job.dismissed || !PARKED_STATES.has(job.state)) return next("none", null, null, "Only an unresolved parked run can continue.");
+  if (busy) return next("none", null, null, "A worker is already running or queued for this run; wait for it to park.");
+  if (planBlockedOut(job)) return next("revise-inputs", "Revise inputs and prepare a new plan", "recovery-plan", `The repair plan is still blocked after ${job.recoveryPhase.corrections ?? 0} plan corrections: ${job.recoveryPhase.planBlockers?.[0] ?? job.error?.message}. Retrying with the same inputs cannot pass review. Revise the specs or prototype inputs to resolve the blockers, then prepare a new plan.`);
+  if (phase === "planning" || phase === "plan_failed") return next("retry-plan", "Retry repair-plan preparation", "recovery-plan", `${phase === "planning" ? "Repair-plan preparation stopped before it finished" : "Repair-plan preparation failed"}, so no plan is approved. Retry repair-plan preparation; Resume cannot continue an unapproved plan.`);
+  if (phase === "ready") return next("approve-plan", "Approve and continue repairs", "recovery-start", "Review and approve the recovery plan before execution; Resume does not start an unapproved plan.");
+  if (repairsExhausted(job, maxRepairs)) return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The repair budget is exhausted. Prepare a repair plan and approve it; Resume does not renew the budget or rerun the same review.");
+  if (inputsChanged(job)) return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The specs or prototype inputs changed after the plan was approved. Prepare a repair plan against the current inputs.");
+  if (job.state === "cancelled") return next("none", null, null, "The owner cancelled this run; start over to build it again.");
+  return next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", phase === "running" ? "Resume continues the approved repair plan from its cursor." : "Resume continues this run from its preserved files.");
+}
+
+// Points resume wording at the action the policy allows. Idempotent, so stored banners can be re-derived.
+function retarget(actions = [], next) {
+  if (next.action === "resume" || !next.label) return actions;
+  const lower = next.label[0].toLowerCase() + next.label.slice(1);
+  const out = actions.map((text) => text
+    .replace(/then resume (?:this|the preserved) run(?: from its preserved files)?\./i, `then ${lower}.`)
+    .replace(/Use Resume on this run's card to continue its preserved files\./, `Use ${next.label} on this run's card.`));
+  return out.some((text) => text.startsWith(next.label)) ? out : [...out, `${next.label}: ${next.reason}`];
+}
+
+// Presentation for API responses: derives the banner from the policy without writing the job.
+export function withContinuation(job, options) {
+  const nextAction = continuationAction(job, options);
+  if (!job.recovery) return { ...job, nextAction };
+  return { ...job, nextAction, recovery: { ...job.recovery, canResume: nextAction.action === "resume", nextAction, actions: retarget(job.recovery.actions, nextAction) } };
+}
+
 export function buildRecovery(job, workspace, diagnostics = job.error?.details?.diagnostics ?? [], { legacy = false, maxRepairs = 2 } = {}) {
   const failedState = inferFailedState(job);
   const timeoutReason = job.error?.details?.timeoutReason;
@@ -1166,17 +1214,19 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
     : timeoutReason === "idle"
       ? `The agent stopped producing activity. ${attempts ? "Its one bounded same-session retry was used." : "A manual resume can continue without starting over."}`
       : "The factory stopped safely. Its existing files and evidence are intact, so recovery does not require a new run.";
+  const nextAction = continuationAction(job, { maxRepairs });
   return {
     version: 2,
     status: job.state === "cancelled" ? "cancelled" : "needs_owner",
     title,
     summary,
     failedState,
-    actions,
+    actions: retarget(actions, nextAction),
     workspace,
     logPath: job.error?.details?.logPath ?? null,
     filesPreserved: true,
-    canResume: job.state !== "cancelled" && !exhausted && !stale,
+    canResume: nextAction.action === "resume",
+    nextAction,
     automaticRetry: reviewBlocked ? "The bounded repair budget stopped this run. Repeating the error in chat does not perform a repair or resume." : legacy
       ? "This run predates activity-aware recovery; no automatic resume was available."
       : diagnostics.length

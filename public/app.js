@@ -535,7 +535,8 @@ function renderJob() {
   if (!state.pausing) $("#pause-button").textContent = "Pause";
   $("#resume-button").textContent = job.state === "paused" ? "Resume" : "Resume current run";
   $("#dismiss-button").classList.toggle("hidden", !terminalFailure || Boolean(job.dismissed));
-  $("#resume-button").classList.toggle("hidden", !job.recovery?.canResume || !terminalFailure);
+  // nextAction is derived by the server's continuation policy; a saved banner's canResume can be stale.
+  $("#resume-button").classList.toggle("hidden", job.nextAction?.action !== "resume" || !terminalFailure);
   $("#copy-recovery-button").classList.toggle("hidden", !job.recovery || !terminalFailure);
   $("#start-over-button").classList.toggle("hidden", !terminalFailure);
   $("#report-run-button").classList.toggle("hidden", !terminalFailure);
@@ -578,7 +579,9 @@ function renderRecovery() {
       catch (error) { showError(error); button.disabled = false; }
     }); features.append(button);
   };
-  if (PARKED.includes(state.job.state) && !state.job.dismissed && (!phase || ["planning", "plan_failed", "ready", "running", "built"].includes(phase.status)) && (state.job.reviewRequest || state.job.featureCursor?.reviewRequest || state.job.error?.code === "inputs_changed" || failedProof(state.job))) action("Prepare repair plan", "recovery-plan");
+  const next = state.job.nextAction;
+  if (next?.action === "retry-plan" || next?.action === "revise-inputs") action(next.label, "recovery-plan");
+  else if (next?.action === "prepare-plan" || (next?.action !== "none" && PARKED.includes(state.job.state) && !state.job.dismissed && (!phase || ["ready", "running", "built"].includes(phase.status)) && (state.job.reviewRequest || state.job.featureCursor?.reviewRequest || state.job.error?.code === "inputs_changed" || failedProof(state.job)))) action("Prepare repair plan", "recovery-plan");
   const list = (title, rows) => {
     if (!rows.length) return;
     const heading = document.createElement("h3"); heading.textContent = title;

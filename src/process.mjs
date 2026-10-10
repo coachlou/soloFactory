@@ -25,6 +25,11 @@ export function subscriptionEnvironment(extra = {}) {
   return env;
 }
 
+function isCutRecord(line) {
+  if (!line.trimStart().startsWith("{")) return false;
+  try { JSON.parse(line); return false; } catch { return true; }
+}
+
 export async function runProcess({
   executable,
   args = [],
@@ -50,6 +55,15 @@ export async function runProcess({
 
   let output = "";
   let lineBuffer = "";
+  // Complete lines only, newest last, bounded like `output`. Diagnostics read these instead of the
+  // character tail, whose first line is usually a fragment of a JSON record cut at the cap.
+  const lines = [];
+  let linesSize = 0;
+  const keepLine = (line) => {
+    lines.push(line);
+    linesSize += line.length;
+    while (linesSize > 200_000 && lines.length > 1) linesSize -= lines.shift().length;
+  };
   let timedOut = false;
   let timeoutReason = null;
   const startedAt = Date.now();
@@ -86,9 +100,9 @@ export async function runProcess({
     output = (output + text).slice(-200_000);
     log?.write(text);
     lineBuffer += text;
-    const lines = lineBuffer.split(/\r?\n/);
-    lineBuffer = lines.pop() ?? "";
-    for (const line of lines) if (line.trim()) onLine?.(line);
+    const complete = lineBuffer.split(/\r?\n/);
+    lineBuffer = complete.pop() ?? "";
+    for (const line of complete) if (line.trim()) { keepLine(line); onLine?.(line); }
   };
   child.stdout.on("data", append);
   child.stderr.on("data", append);
@@ -109,13 +123,19 @@ export async function runProcess({
     if (idleTimer) clearTimeout(idleTimer);
     if (hardTimer) clearTimeout(hardTimer);
     signal?.removeEventListener("abort", terminate);
-    if (lineBuffer.trim()) onLine?.(lineBuffer);
+    if (lineBuffer.trim()) {
+      // An unterminated record cut off by a kill is not evidence: its fragment would fall into
+      // the plain-text diagnostic fallback. A final plain-text line still counts.
+      if (!isCutRecord(lineBuffer)) keepLine(lineBuffer);
+      onLine?.(lineBuffer);
+    }
     log?.end();
   });
 
   return {
     ...result,
     output,
+    lines,
     timedOut,
     timeoutReason,
     durationMs: Date.now() - startedAt,

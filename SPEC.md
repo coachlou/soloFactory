@@ -149,7 +149,10 @@ Agent timeouts are activity-aware. Output resets a six-minute idle deadline; it 
 extend the separate 45-minute total safety cap. An otherwise clean idle timeout may trigger
 one same-session Codex resume after a 15-second backoff. No model is called during backoff,
 and there is no retry loop. Recognized usage-limit, authentication, network, permission, or
-toolchain errors suppress automatic retry so tokens are not spent repeating a known failure.
+toolchain errors suppress automatic retry so tokens are not spent repeating a known failure. Diagnostics read
+only complete output records, so source code in a successful command's output (for example
+an `UNAUTHORIZED` constant) cut at the 200K output cap is never mistaken for a sign-in
+failure and never suppresses the bounded idle resume.
 
 ## 5. Output application contract
 
@@ -461,6 +464,21 @@ runs show the gated slices are not being delivered end-to-end.
 A completed worker turn is not review approval. After build/tests, the controller writes a fresh `.factory/review-request.json` covering every intake must-have (MH-n) and acceptance scenario (SC-n), bound to the run and frozen contract digest. The reviewer writes `.factory/review-result.json` and a human-readable REVIEW.md. Every check must pass with existing project-relative evidence files, verdict must be pass, and blockers must be empty. Missing, stale, malformed, partial, blocked or unevidenced reports fail the gate even if npm test passes. Reviewers must report missing capabilities and required browser/visual evidence instead of waiving scope.
 
 Review failures use the existing bounded repair budget, then park the run. Once that budget is exhausted, Resume is refused: it would only repeat the same review. The card offers **Prepare repair plan** instead (below). Attempt numbers remain monotonic so earlier failure files are retained. Neither Resume nor automatic retries renew this budget. Repairs after review (including deployment repairs) require re-review. The frozen contract cannot be narrowed during repair. Existing completed runs are historical and are not retroactively reclassified. A structured review still depends on honest behavioral assessment; the controller validates coverage, evidence presence and verdict consistency rather than proving arbitrary application semantics.
+
+One continuation policy decides what may continue a parked run, and the controller, the API
+and the dashboard all use it. That way a banner never offers an action the controller would refuse. A run whose
+repair-plan preparation stopped or failed (`planning` or `plan_failed`) continues only with
+**Retry repair-plan preparation**, which starts one planner, keeps the earlier phase in history,
+retains the unfinished checks, keeps spent plan corrections, and runs no implementation or
+deployment. A plan whose review still blocks after its corrections are spent (`plan_blocked`)
+gets no retry: the dashboard lists the review blockers and offers **Revise inputs and prepare a
+new plan**, and `recovery-plan` refuses with `409` until the specs or prototype inputs change. A
+correction budget belongs to the input fingerprint: revised inputs start fresh, and every later
+retry, feedback revision or return to earlier inputs shares what that fingerprint already spent. A `ready` plan continues only with exact approval. An exhausted budget or changed
+inputs continue with **Prepare repair plan**. An approved plan that is `running` resumes from
+its cursor. A run that already has a worker or a queue entry gets no second launch. A refused Resume
+returns `409` with `nextAction` naming the allowed action and its endpoint. Saved banners from
+older versions are re-derived when the API serves them and never rewritten.
 
 Review recovery diagnostics include every unfinished MH/SC with its full requirement, all reviewer blockers, artifact paths and repair-budget guidance. Dashboard Guide receives the selected project’s latest run snapshot and matching recovery evidence; it must not treat an existing PRD as proof of delivery or claim chat resumes execution. Matching older terse failures are enriched read-only without rewriting run history.
 

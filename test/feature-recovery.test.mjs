@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { JobStore } from '../src/store.mjs';
-import { SoloFactory } from '../src/factory.mjs';
+import { SoloFactory, continuationAction, withContinuation } from '../src/factory.mjs';
 import { createFixtureProvider } from '../src/fixture-provider.mjs';
 import { digest, sourceBaseline, validateRecoveryPlan, validateRecoveryApproval } from '../src/feature-recovery.mjs';
 
@@ -112,6 +112,92 @@ test('planning that changes code is rejected without resetting or discarding it'
   assert.equal(result.state, 'failed'); assert.match(result.error.message, /planning turn changed/);
   assert.equal(result.recoveryPhase.status, 'plan_failed');
   assert.equal(await readFile(path.join(env.root, 'unexpected.js'), 'utf8'), 'unexpected change');
+});
+
+test('a failed repair-plan preparation continues only through one planning retry, never Resume', async t => {
+  let first = true;
+  const env = await setup(t, async args => { if (first && /^recovery-plan-(?!review)/.test(args.context.stage)) { first = false; await writeFile(path.join(args.cwd, 'unexpected.js'), 'unexpected change'); } });
+  const failed = await env.factory.planRecovery(env.failed.id);
+  assert.equal(failed.recoveryPhase.status, 'plan_failed');
+  assert.equal(failed.recovery.canResume, false, 'new saves derive the banner from the continuation policy');
+  // A banner saved before the policy existed still claims Resume; presentation derives, never rewrites it.
+  const saved = await env.store.read(failed.id); saved.recovery = { ...saved.recovery, version: 2, canResume: true, actions: ['Review the recovery packet and the named log, then resume this run from its preserved files.'] };
+  saved.recoveryPhase.corrections = 1; // the failed preparation spent its plan correction
+  await env.store.writeState(saved);
+  const raw = await readFile(path.join(env.store.jobDir(failed.id), 'state.json'), 'utf8');
+  const next = continuationAction(saved);
+  assert.deepEqual([next.action, next.label, next.endpoint], ['retry-plan', 'Retry repair-plan preparation', `/api/jobs/${failed.id}/recovery-plan`]);
+  const shown = withContinuation(saved);
+  assert.equal(shown.recovery.canResume, false); assert.equal(shown.nextAction.action, 'retry-plan');
+  assert.ok(!shown.recovery.actions.some(text => /then resume this run/i.test(text)), shown.recovery.actions.join(' | '));
+  assert.equal(await readFile(path.join(env.store.jobDir(failed.id), 'state.json'), 'utf8'), raw);
+  assert.equal(continuationAction(saved, { busy: true }).action, 'none', 'an active writer never gets a duplicate launch');
+  await assert.rejects(env.factory.resume(failed.id), error => error.code === 'recovery_approval_required' && /Retry repair-plan preparation/.test(error.message) && /\/recovery-plan/.test(error.message) && error.details.nextAction.action === 'retry-plan');
+  const before = env.stages.length;
+  const retried = await env.factory.planRecovery(failed.id);
+  const ran = env.stages.slice(before);
+  assert.equal(retried.recoveryPhase.status, 'ready', retried.error?.message);
+  assert.equal(ran.filter(stage => /^recovery-plan-(?!review)/.test(stage)).length, 1, ran.join());
+  assert.ok(ran.every(stage => /^recovery-(plan|correction)/.test(stage)), `only planning ran: ${ran.join()}`);
+  assert.equal(retried.recoveryPhaseHistory.at(-1).status, 'plan_failed');
+  assert.deepEqual(retried.recoveryPhase.request.checks, failed.recoveryPhase.request.checks);
+  assert.equal(retried.attempt, failed.attempt); assert.equal(retried.repairBudgetLimit, failed.repairBudgetLimit);
+  assert.equal(retried.recoveryPhase.corrections, 1, 'a planning retry does not renew plan corrections');
+  assert.equal(env.deployments(), 0);
+  assert.equal(continuationAction(retried).action, 'approve-plan');
+  await assert.rejects(env.factory.resume(retried.id), /approve/);
+});
+
+test('a repair plan still blocked after its corrections offers revised inputs, never a futile retry', async t => {
+  let blocks = Infinity; // plan reviews still to block
+  const env = await setup(t, async args => {
+    if (/^recovery-plan-review-/.test(args.context.stage) && blocks > 0) {
+      blocks -= 1;
+      const file = path.join(args.cwd, '.factory/plan-review-result.json'); const r = JSON.parse(await readFile(file, 'utf8'));
+      r.verdict = 'blocked'; r.blockers = ['SPEC.md §3 contradicts the frozen contract']; await writeFile(file, JSON.stringify(r));
+    }
+  }, { uploads: { 'SPEC.md': '§3 Group by upload day.\n' } });
+  const failed = await env.factory.planRecovery(env.failed.id);
+  assert.equal(failed.recoveryPhase.status, 'plan_failed'); assert.equal(failed.recoveryPhase.corrections, 1);
+  assert.equal(failed.error.code, 'plan_blocked');
+  const next = continuationAction(failed);
+  assert.deepEqual([next.action, next.label, next.endpoint], ['revise-inputs', 'Revise inputs and prepare a new plan', `/api/jobs/${failed.id}/recovery-plan`]);
+  assert.match(next.reason, /SPEC\.md §3 contradicts the frozen contract/);
+  assert.deepEqual(failed.recoveryPhase.planBlockers, ['SPEC.md §3 contradicts the frozen contract']);
+  assert.equal(failed.recovery.canResume, false);
+  assert.ok(failed.recovery.actions.some(text => text.startsWith('Revise inputs and prepare a new plan')), failed.recovery.actions.join(' | '));
+  assert.ok(!failed.recovery.actions.some(text => /retry repair-plan preparation/i.test(text)), failed.recovery.actions.join(' | '));
+  // A run saved before the error code existed is recognized by its message.
+  assert.equal(continuationAction({ ...failed, error: { ...failed.error, code: 'unexpected_error' } }).action, 'revise-inputs');
+  // Unchanged inputs: refused before any turn, nothing written.
+  const raw = await readFile(path.join(env.store.jobDir(failed.id), 'state.json'), 'utf8'); const before = env.stages.length;
+  await assert.rejects(env.factory.planRecovery(failed.id), error => error.code === 'plan_inputs_unchanged' && /contradicts the frozen contract/.test(error.message) && error.details.nextAction.action === 'revise-inputs');
+  assert.equal(env.stages.length, before);
+  assert.equal(await readFile(path.join(env.store.jobDir(failed.id), 'state.json'), 'utf8'), raw);
+  await assert.rejects(env.factory.resume(failed.id), /Revise inputs/);
+  // Revised inputs make a new plan with a fresh correction budget.
+  await writeFile(path.join(env.root, '.factory/uploads/SPEC.md'), '§3 Group by capture day, as the contract says.\n'); blocks = 0;
+  const ready = await env.factory.planRecovery(failed.id);
+  assert.equal(ready.recoveryPhase.status, 'ready', ready.error?.message);
+  assert.equal(ready.recoveryPhase.corrections, 0);
+  assert.deepEqual(ready.recoveryPhase.request.inputsChanged, ['.factory/uploads/SPEC.md']);
+  assert.equal(ready.recoveryPhaseHistory.at(-1).status, 'plan_failed');
+  // The fresh budget belongs to the revised fingerprint: every later preparation against it shares it.
+  const corrections = () => env.stages.filter(stage => /^recovery-correction-/.test(stage)).length;
+  blocks = 1; let spent = corrections();
+  const revisedOnce = await env.factory.planRecovery(failed.id, 'Name the capture-day test');
+  assert.equal(revisedOnce.recoveryPhase.status, 'ready', revisedOnce.error?.message);
+  assert.equal(corrections() - spent, 1); assert.equal(revisedOnce.recoveryPhase.corrections, 1);
+  blocks = Infinity; spent = corrections();
+  const spentOut = await env.factory.planRecovery(failed.id, 'Again');
+  assert.equal(spentOut.recoveryPhase.status, 'plan_failed'); assert.equal(spentOut.error.code, 'plan_blocked');
+  assert.equal(corrections() - spent, 0, 'feedback on a ready plan does not renew its fingerprint budget');
+  // Returning to the first inputs does not renew their spent budget either.
+  await writeFile(path.join(env.root, '.factory/uploads/SPEC.md'), '§3 Group by upload day.\n'); spent = corrections();
+  const reverted = await env.factory.planRecovery(failed.id);
+  assert.equal(reverted.recoveryPhase.status, 'plan_failed'); assert.equal(reverted.recoveryPhase.corrections, 1);
+  assert.equal(corrections() - spent, 0, 'the first fingerprint already spent its corrections');
+  assert.equal(env.deployments(), 0);
 });
 
 test('all features pass but the final review fails: Resume is refused and a repair plan is offered', async t => {

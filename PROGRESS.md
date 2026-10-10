@@ -780,3 +780,24 @@ Recovery run 42852426 — PASS after one fix:
 
 Uncommitted: src/server.mjs (knob), src/feature-recovery.mjs + test/feature-recovery.test.mjs (fix).
 Merge/release remains Lou's separate decision.
+
+## Provider diagnostics and planning continuation (2026-10-10, branch wip/feature-slice-recovery) — implemented, uncommitted
+
+PRD: `spec/PRD-provider-diagnostics-and-planning-continuation.md`.
+- A. `runProcess` returns `lines`, a ring of complete output lines capped at 200K. Codex and Claude diagnostics read those lines, not the
+  character tail, so a JSON record cut at the cap is never plain-text "auth" evidence. `server.mjs ensureRecovery` already
+  reads whole log files.
+- B. `continuationAction(job, {maxRepairs, busy})` in `factory.mjs` is the one policy:
+  - plan_failed after plan review still blocks with corrections spent → revise-inputs (`recovery-plan` refuses until inputs change)
+  - planning/plan_failed otherwise (interruption) → retry-plan (`recovery-plan`)
+  - ready → approve-plan (`recovery-start`)
+  - exhausted or changed inputs → prepare-plan
+  - running or otherwise → resume
+  - busy, dismissed or cancelled → none
+
+  It feeds `buildRecovery` (canResume and wording), the `runResume` refusals (codes unchanged), the `/resume` 409 (`nextAction`), and
+  `withContinuation` in `annotateJobs`, which derives stale saved banners without writing them. The dashboard uses `nextAction`.
+  A planning retry keeps the spent plan corrections (Lou, 2026-10-10: resetting would let retries bypass the limit); the budget is bound to the input fingerprint: revised inputs start fresh, and retries, feedback revisions or a return to earlier inputs share that fingerprint's spent corrections until a plan executes.
+- A trailing record cut off by a kill is dropped from diagnostic lines; a trailing plain-text line still counts.
+- Tests: 194/194 and the distro precheck pass. New tests cover acceptance 1–6 on both Codex and Claude, including the dashboard source check. No real-provider smoke test was run,
+  and the photo-library run was not touched.

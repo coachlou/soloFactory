@@ -105,7 +105,7 @@ async function codexRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = 
       return { ...(schema ? JSON.parse(final) : { message: final.trim() }), sessionId, autoResumes, usage };
     }
 
-    const diagnostics = detectProviderDiagnostics(attempt.result.output);
+    const diagnostics = detectProviderDiagnostics(attempt.result.lines.join("\n"));
     const mayResume =
       attempt.result.timedOut &&
       attempt.result.timeoutReason === "idle" &&
@@ -256,7 +256,7 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
     throw providerFailure({
       provider: "Claude Code",
       result,
-      diagnostics: detectProviderDiagnostics(result.output),
+      diagnostics: detectProviderDiagnostics(result.lines.join("\n")),
       logPath,
       sessionId: null,
       autoResumes: 0,

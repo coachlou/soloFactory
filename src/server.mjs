@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { JobStore } from "./store.mjs";
 import { withReviewDiagnostics } from "./review.mjs";
 import { validateRecoveryApproval } from "./feature-recovery.mjs";
-import { buildRecovery, buildRecoveryPacket, inputsChanged, repairsExhausted, SoloFactory } from "./factory.mjs";
+import { assertPlanInputsRevised, buildRecovery, buildRecoveryPacket, continuationAction, SoloFactory, withContinuation } from "./factory.mjs";
 import {
   INTERVIEW_RESPONSE_SCHEMA,
   buildInterviewPrompt,
@@ -153,8 +153,9 @@ export async function createSoloFactoryServer(options = {}) {
 
   async function annotateJobs(projectId, jobs) {
     const blockedBy = runs.has(projectId) ? null : await blockerFor(projectId);
-    return jobs.map((job) => {
-      const position = queue.findIndex((entry) => entry.jobId === job.id);
+    return jobs.map((stored) => {
+      const position = queue.findIndex((entry) => entry.jobId === stored.id);
+      const job = withContinuation(stored, { maxRepairs, busy: position >= 0 || runs.get(projectId)?.jobId === stored.id });
       if (position < 0) return job;
       return { ...job, queuePosition: position + 1, queuedFor: queue[position].mode, blockedBy: queue[position].mode === "start" ? blockedBy : null };
     });
@@ -419,12 +420,16 @@ export async function createSoloFactoryServer(options = {}) {
         const projectId = jobProject.get(id) ?? active.id;
         const jobStore = storeOfJob(id);
         const job = await jobStore.read(id);
-        if (!PARKED.has(job.state) || job.dismissed || runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start")) return json(response, 409, { error: "Feature recovery requires an idle, unresolved parked run. Pause an active run first." });
+        if (!PARKED.has(job.state) || job.dismissed || runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start")) return json(response, 409, { error: "Feature recovery requires an idle, unresolved parked run. Pause an active run first.", nextAction: continuationAction(job, { maxRepairs, busy: runs.has(projectId) || queue.some(entry => entry.jobId === id) }) });
         const body = await readJson(request);
         if (action === "start") {
           try { await validateRecoveryApproval({ store: jobStore }, job, body.planDigest); }
           catch (error) { return json(response, 409, { error: error.message }); }
         } else if (job.recoveryPhase && !["planning", "plan_failed", "ready", "running", "built"].includes(job.recoveryPhase.status)) return json(response, 409, { error: "This run already has an active recovery plan." });
+        else {
+          try { await assertPlanInputsRevised(jobStore, job, maxRepairs); }
+          catch (error) { return json(response, 409, { error: error.message, nextAction: error.details.nextAction, blockers: error.details.blockers }); }
+        }
         if (body.guidance !== undefined && (typeof body.guidance !== "string" || body.guidance.length > 6000)) return json(response, 400, { error: "Recovery plan feedback must be text of at most 6000 characters." });
         if (runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start")) return json(response, 409, { error: "The project acquired another writer; retry after it parks." });
         await enqueue(projectId, id, `recovery-${action}`, { front: true, planDigest: body.planDigest, guidance: body.guidance ?? "" });
@@ -435,11 +440,8 @@ export async function createSoloFactoryServer(options = {}) {
         const projectId = jobProject.get(resumeMatch[1]) ?? active.id;
         const jobStore = storeFor(projectId);
         const job = await ensureRecovery(await jobStore.read(resumeMatch[1]), jobStore);
-        if (repairsExhausted(job)) return json(response, 409, { error: "The repair budget is exhausted. Prepare a repair plan; Resume does not renew the budget." });
-        if (inputsChanged(job)) return json(response, 409, { error: "The specs or prototype inputs changed after the plan was approved. Prepare a repair plan." });
-        if (!job.recovery?.canResume || ["ready", "planning", "plan_failed"].includes(job.recoveryPhase?.status) || !["failed", "interrupted", "paused"].includes(job.state) || queue.some((entry) => entry.jobId === job.id)) {
-          return json(response, 409, { error: "That run cannot be resumed from its current state." });
-        }
+        const next = continuationAction(job, { maxRepairs, busy: queue.some((entry) => entry.jobId === job.id) || runs.get(projectId)?.jobId === job.id });
+        if (next.action !== "resume") return json(response, 409, { error: next.label ? `${next.reason} Next: ${next.label} (POST ${next.endpoint}).` : next.reason, nextAction: next });
         // Front of the queue: resolving a parked run is what unblocks everything behind it.
         await enqueue(projectId, job.id, "resume", { front: true });
         return json(response, 202, { job, resumed: true, queued: queue.some((entry) => entry.jobId === job.id) });
@@ -473,7 +475,7 @@ export async function createSoloFactoryServer(options = {}) {
         const jobStore = storeOfJob(recoveryMatch[1]);
         const preserved = await ensureRecovery(await jobStore.read(recoveryMatch[1]), jobStore);
         const enriched = await withReviewDiagnostics(preserved, jobStore.appDir());
-        const job = { ...enriched, recovery: enriched.recovery ?? buildRecovery(enriched, jobStore.appDir()) };
+        const job = withContinuation({ ...enriched, recovery: enriched.recovery ?? buildRecovery(enriched, jobStore.appDir(), undefined, { maxRepairs }) }, { maxRepairs });
         if (!job.recovery || !["failed", "interrupted", "cancelled", "paused"].includes(job.state)) {
           return json(response, 409, { error: "That run does not need recovery." });
         }
