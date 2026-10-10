@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nextExecutable, orderSlices, validateFeaturePlan, validateSlicePlan } from "../src/wbs.mjs";
+import { nextExecutable, orderSlices, pendingChecks, pendingObligations, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "../src/wbs.mjs";
 
 const validPlan = {
   slices: [
@@ -213,6 +213,8 @@ test("v2: empty/fuzzy acceptance, malformed proof, forward deps and metadata are
     [(p) => { p.jobId = "other"; }, /this run/],
     [(p) => { delete p.version; }, /version 2/],
     [(p) => { p.compatibility = [{ subject: "sharp on arm64", status: "unknown" }]; }, /Unresolved compatibility: sharp on arm64/],
+    [(p) => { p.slices[2].acceptance[0].proof.pending = "later"; }, /pending may only be "integration"/],
+    [(p) => { p.slices[2].acceptance[0].proof.pending = "integration"; }, /at least one obligation provable when the feature is built/],
   ];
   for (const [mutate, pattern] of cases) {
     const plan = fullPlan();
@@ -220,4 +222,58 @@ test("v2: empty/fuzzy acceptance, malformed proof, forward deps and metadata are
     assert.throws(() => validateFeaturePlan(plan, binding), pattern);
   }
   assert.doesNotThrow(() => validateFeaturePlan(fullPlan(), binding));
+});
+
+test("v2: a proof pending integration keeps the checks it proves pending when its feature is verified", () => {
+  const raw = fullPlan();
+  raw.slices[2].acceptance.push({ ...ob("TREND-2", "Populated trend renders with a month of history", ["SC-1"]), proof: { command: ["node", "--test", "test/populated.test.mjs"], expect: "passes", pending: "integration" } });
+  const plan = validateFeaturePlan(raw, binding);
+  assert.equal(plan.slices[2].acceptance[1].proof.pending, "integration");
+  assert.deepEqual(pendingChecks(plan.slices[2]), ["SC-1"]);
+  assert.deepEqual(pendingChecks(plan.slices[1]), []);
+  assert.deepEqual(pendingObligations(plan).map((item) => item.id), ["TREND-2"]);
+  // A pending obligation anywhere in the plan, or outstanding from an earlier plan, keeps the check pending for whichever feature closes it.
+  const closer = { id: "X", closes: ["SC-1", "MH-1"], acceptance: [] };
+  assert.deepEqual(pendingChecks(closer, { plan }), ["SC-1"]);
+  assert.deepEqual(pendingChecks(closer, { outstanding: [{ status: "pending", refs: ["MH-1"] }, { status: "superseded", refs: ["SC-1"] }] }), ["MH-1"]);
+});
+
+
+test("proof gate identity preserves component boundaries and the full plan digest", () => {
+  const job = {};
+  const item = (id, ref) => ({ id, refs: [ref], proof: { command: ["node", id], pending: "integration" } });
+  recordPendingProofs(job, "a".repeat(64), { id: "A-B", acceptance: [item("C", "MH-1")] });
+  recordPendingProofs(job, "a".repeat(64), { id: "A", acceptance: [item("B-C", "SC-1")] });
+  recordPendingProofs(job, "a".repeat(8) + "b".repeat(56), { id: "A", acceptance: [item("B-C", "SC-1")] });
+  assert.equal(new Set(job.outstandingProofs.map(e => e.key)).size, 3);
+  assert.equal(new Set(job.outstandingProofs.map(e => e.gate)).size, 3);
+  job.error = { code: "quality_gate_failed", details: { gate: job.outstandingProofs[1].gate } };
+  assert.equal(pendingProofFailure(job).obligation.id, "B-C");
+});
+
+
+test("passed proof evidence clears pending checks only for its own plan", async () => {
+  const { createHash } = await import("node:crypto");
+  const plan = fullPlan();
+  const closer = plan.slices[2];
+  closer.acceptance.push({ ...ob("INTEGRATED", "Populated trend is integrated with history", ["SC-1"]), proof: { command: ["node", "--test", "populated.mjs"], expect: "passes", pending: "integration" } });
+  const digest = p => createHash("sha256").update(JSON.stringify(p)).digest("hex");
+  const job = {};
+  recordPendingProofs(job, digest(plan), closer);
+  job.outstandingProofs[0].status = "passed";
+  assert.deepEqual(pendingChecks(closer, { plan, outstanding: job.outstandingProofs }), []);
+  const later = structuredClone(plan); later.slices[2].title += " revised";
+  assert.deepEqual(pendingChecks(later.slices[2], { plan: later, outstanding: job.outstandingProofs }), ["SC-1"]);
+});
+
+
+test("failure mappings distinguish integrated proofs from a feature gate using the same command", () => {
+  const job = {};
+  recordPendingProofs(job, "a".repeat(64), { id: "A", acceptance: [{ id: "B", refs: [], proof: { command: ["npm", "test"], pending: "integration" } }] });
+  job.error = { code: "quality_gate_failed", details: { gate: "test", command: ["npm", "test"], proofKeys: [] } };
+  assert.equal(pendingProofFailure(job), null, "a feature failure must not be treated as integration exhaustion");
+  delete job.error.details.proofKeys;
+  assert.equal(pendingProofFailure(job).obligation.id, "B", "older failures resolve through their command");
+  job.error.details.proofKeys = [job.outstandingProofs[0].key];
+  assert.equal(pendingProofFailure(job).obligation.id, "B", "a deduplicated integration gate preserves its target");
 });

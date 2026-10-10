@@ -62,14 +62,14 @@ function fixtureFeaturePlan({ jobId, contractDigest, checks }) {
         objective: "A running, health-checked Pocket Pulse server with manifest, build, and aggregate metrics.",
         demo: "Start the app and curl /health and /_factory/metrics; both answer with valid JSON.",
         dependsOn: [], closes: [],
-        acceptance: [{ id: "SKELETON-1", behavior: "GET /_factory/metrics returns privacy-preserving aggregate counters", refs: [], proof: { command: ["npm", "test"], expect: "server.test.mjs passes" } }],
+        acceptance: [{ id: "SKELETON-1", behavior: "GET /_factory/metrics returns privacy-preserving aggregate counters", refs: [], sources: [{ path: ".factory/ACCEPTANCE.md", locator: "Acceptance contract" }], proof: { command: ["npm", "test"], expect: "server.test.mjs passes" } }],
       },
       {
         id: "SLICE-UI", title: "Recording UI and docs",
         objective: "A usable recording page with one-command README on top of the walking skeleton.",
         demo: "Open the served page and see the record-your-score form and the README instructions.",
         dependsOn: ["SLICE-SKELETON"], closes: ids,
-        acceptance: [{ id: "UI-1", behavior: "The served page invites the owner to record a daily score", refs: ids, proof: { command: ["npm", "test"], expect: "ui.test.mjs passes" } }],
+        acceptance: [{ id: "UI-1", behavior: "The served page invites the owner to record a daily score", refs: ids, sources: [{ path: ".factory/ACCEPTANCE.md", locator: "Acceptance contract" }], proof: { command: ["npm", "test"], expect: "ui.test.mjs passes" } }],
       },
     ],
   };
@@ -89,14 +89,19 @@ export function createFixtureProvider() {
         };
       }
       await mkdir(path.join(cwd, ".factory"), { recursive: true });
-      if (context.stage.startsWith("recovery-plan-")) {
+      if (/^recovery-plan-review-/.test(context.stage)) {
+        const request = JSON.parse(await readFile(path.join(cwd, ".factory", "plan-review-request.json"), "utf8"));
+        await writeFile(path.join(cwd, ".factory", "plan-review-result.json"), JSON.stringify({ ...request, verdict: "approve", blockers: [] }));
+      } else if (/^recovery-(plan|correction)-/.test(context.stage)) {
         const phase = context.job.recoveryPhase;
+        const source = phase.request.sources[0].path;
         await writeFile(path.join(cwd, phase.planFile), JSON.stringify({
-          version: 1, requestId: phase.id, contractDigest: phase.request.contractDigest,
+          version: 2, jobId: phase.request.jobId, requestId: phase.id, contractDigest: phase.request.contractDigest, compatibility: [],
           slices: phase.request.checks.map((check, index) => ({
-            id: `RECOVERY-${index + 1}`, title: check.text, objective: `Recover ${check.id}`,
-            checks: [check.id], acceptance: [`Execute server.test.mjs to verify ${check.text}`],
-            dependsOn: index ? [`RECOVERY-${index}`] : [], demo: 'Run the executable fixture behavior checks.',
+            id: `RECOVERY-${index + 1}`, title: check.text, objective: `Recover ${check.id}`, closes: [check.id],
+            acceptance: [{ id: `RECOVERY-${index + 1}-1`, behavior: `Executes server.test.mjs to verify ${check.text}`, refs: [check.id],
+              sources: [{ path: source, locator: check.id }], proof: { command: ["npm", "test"], expect: "server.test.mjs passes" } }],
+            dependsOn: index ? [`RECOVERY-${index}`] : [], demo: "Run the executable fixture behavior checks.",
           })),
         }));
       } else if (context.stage.startsWith("specification")) {

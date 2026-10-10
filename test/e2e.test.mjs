@@ -488,7 +488,7 @@ test('Guide and recovery packet receive full matching review diagnostics without
   await app.store.writeState(job);
   const before=JSON.stringify(await app.store.read(job.id));
   const packet=await (await fetch(`${base}/api/jobs/${job.id}/recovery-packet`)).text();
-  for(const text of ['Years and Months browsing','Real EXIF extraction','No metadata pipeline','Resume on this run','2 automatic repairs']) assert.ok(packet.includes(text),text);
+  for(const text of ['Years and Months browsing','Real EXIF extraction','No metadata pipeline','Prepare repair plan','Resume does not renew','2 automatic repairs']) assert.ok(packet.includes(text),text);
   await postJson(`${base}/api/interview/turn`,{provider:'fixture',messages:[{role:'user',content:'What does MH-1 mean?'}]});
   const call=calls.find(x=>x.context.stage==='interview');
   assert.match(call.prompt,/Years and Months browsing/);
@@ -528,7 +528,10 @@ test('HTTP feature recovery requires matching approval and respects the project 
   report.verdict = 'blocked'; report.blockers = ['Missing live rules']; report.checks[0].status = 'missing';
   await writeFile(reportPath, JSON.stringify(report)); await app.store.commit('fixture baseline');
   job.startedAt = new Date().toISOString(); job.state = 'failed'; job.failedState = 'reviewing'; job.error = { code: 'review_rejected', message: 'Missing live rules' };
-  job.recovery = buildRecovery(job, cwd); await app.store.writeState(job);
+  job.attempt = 2; job.recovery = { ...buildRecovery(job, cwd), canResume: true }; await app.store.writeState(job); // stored canResume predates the exhausted gate
+  const exhausted = await fetch(`${base}/api/jobs/${job.id}/resume`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(exhausted.status, 409); assert.match((await exhausted.json()).error, /Prepare a repair plan/);
+  assert.equal((await app.store.read(job.id)).attempt, 2);
   const guide = await postJson(`${base}/api/interview/turn`, { provider: 'fixture', messages: [{ role: 'user', content: 'Queue a later feature after recovery' }] });
   const waiting = await postJson(`${base}/api/jobs`, { provider: 'fixture', transcript: [{ role: 'user', content: 'Build this after the preserved recovery completes' }], coverage: guide.coverage, brief: guide.brief });
   assert.equal(waiting.job.state, 'queued', 'a later release must wait behind the parked run');
@@ -545,4 +548,36 @@ test('HTTP feature recovery requires matching approval and respects the project 
   do { await new Promise(r => setTimeout(r, 100)); after = (await getJson(`${base}/api/jobs/${job.id}`)).job; } while (!['completed', 'failed'].includes(after.state) && Date.now() < deadline);
   assert.equal(after.state, 'completed', after.error?.message);
   assert.equal(after.sdlc, 'single'); assert.deepEqual(after.recoveryPhase.done, ['RECOVERY-1']);
+});
+
+test("HTTP: an image uploaded for another brief while a run builds does not stop that run", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-http-uploads-"));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true });
+  await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const upload = async (name, body) => {
+    const response = await fetch(`${base}/api/interview/upload?name=${name}`, { method: "POST", body });
+    assert.equal(response.ok, true);
+    return (await response.json()).path;
+  };
+
+  const config = await getJson(`${base}/api/config`);
+  const mine = await upload("mockup.png", "own mockup");
+  const transcript = [
+    { role: "assistant", content: config.opening.message },
+    { role: "user", content: `Build a tiny private daily tracker with no login and observable save behavior.\nAttached image: ${mine}` },
+  ];
+  const guide = await postJson(`${base}/api/interview/turn`, { provider: "fixture", messages: transcript });
+  transcript.push({ role: "assistant", content: guide.message });
+  let job = (await postJson(`${base}/api/jobs`, { provider: "fixture", transcript, coverage: guide.coverage, brief: guide.brief })).job;
+  await upload("other-brief.png", "next idea");
+
+  const deadline = Date.now() + 60_000;
+  while (!["completed", "failed"].includes(job.state) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    job = (await getJson(`${base}/api/jobs/${job.id}`)).job;
+  }
+  assert.equal(job.state, "completed", job.error?.message);
+  assert.deepEqual(job.approvedPlan.sources.map((item) => item.path).filter((file) => file.includes("uploads/")), [mine]);
 });

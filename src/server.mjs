@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { JobStore } from "./store.mjs";
 import { withReviewDiagnostics } from "./review.mjs";
 import { validateRecoveryApproval } from "./feature-recovery.mjs";
-import { buildRecovery, buildRecoveryPacket, SoloFactory } from "./factory.mjs";
+import { buildRecovery, buildRecoveryPacket, inputsChanged, repairsExhausted, SoloFactory } from "./factory.mjs";
 import {
   INTERVIEW_RESPONSE_SCHEMA,
   buildInterviewPrompt,
@@ -277,7 +277,7 @@ export async function createSoloFactoryServer(options = {}) {
         const runContext = current ? {
           project: active.id, jobId: current.id, state: current.state, strategy: current.sdlc ?? "single",
           repairAttempts: current.attempt ?? 0,
-          featureRecovery: current.recoveryPhase ? { status: current.recoveryPhase.status, done: current.recoveryPhase.done, current: current.recoveryPhase.current, plan: current.recoveryPhase.plan, remainingRepairs: Math.max(0, (current.repairBudgetLimit ?? 0) - current.attempt) } : null,
+          featureRecovery: current.recoveryPhase ? { status: current.recoveryPhase.status, done: current.recoveryPhase.done, current: current.recoveryPhase.current, plan: current.recoveryPhase.plan, gaps: current.recoveryPhase.request?.checks ?? [], planBlockers: current.recoveryPhase.planBlockers ?? [], remainingRepairs: Math.max(0, (current.repairBudgetLimit ?? 0) - current.attempt) } : null,
           recoveryPacket: PARKED.has(current.state) ? buildRecoveryPacket({ ...current, recovery: current.recovery ?? buildRecovery(current, active.dir) }) : null,
         } : { project: active.id, state: "no-runs" };
         const result = await providerFactory(provider).run({
@@ -422,7 +422,7 @@ export async function createSoloFactoryServer(options = {}) {
         if (action === "start") {
           try { await validateRecoveryApproval({ store: jobStore }, job, body.planDigest); }
           catch (error) { return json(response, 409, { error: error.message }); }
-        } else if (job.recoveryPhase && !["planning", "plan_failed", "ready", "built"].includes(job.recoveryPhase.status)) return json(response, 409, { error: "This run already has an active recovery plan." });
+        } else if (job.recoveryPhase && !["planning", "plan_failed", "ready", "running", "built"].includes(job.recoveryPhase.status)) return json(response, 409, { error: "This run already has an active recovery plan." });
         if (body.guidance !== undefined && (typeof body.guidance !== "string" || body.guidance.length > 6000)) return json(response, 400, { error: "Recovery plan feedback must be text of at most 6000 characters." });
         if (runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start")) return json(response, 409, { error: "The project acquired another writer; retry after it parks." });
         await enqueue(projectId, id, `recovery-${action}`, { front: true, planDigest: body.planDigest, guidance: body.guidance ?? "" });
@@ -433,6 +433,8 @@ export async function createSoloFactoryServer(options = {}) {
         const projectId = jobProject.get(resumeMatch[1]) ?? active.id;
         const jobStore = storeFor(projectId);
         const job = await ensureRecovery(await jobStore.read(resumeMatch[1]), jobStore);
+        if (repairsExhausted(job)) return json(response, 409, { error: "The repair budget is exhausted. Prepare a repair plan; Resume does not renew the budget." });
+        if (inputsChanged(job)) return json(response, 409, { error: "The specs or prototype inputs changed after the plan was approved. Prepare a repair plan." });
         if (!job.recovery?.canResume || ["ready", "planning", "plan_failed"].includes(job.recoveryPhase?.status) || !["failed", "interrupted", "paused"].includes(job.state) || queue.some((entry) => entry.jobId === job.id)) {
           return json(response, 409, { error: "That run cannot be resumed from its current state." });
         }

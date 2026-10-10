@@ -554,9 +554,13 @@ function renderJob() {
   }
 }
 
+// Mirrors pendingProofs / pendingProofFailure in src/wbs.mjs.
+const pendingProofs = (job) => (job.outstandingProofs ?? []).filter((entry) => entry.status === "pending");
+const failedProof = (job) => job.error?.code === "quality_gate_failed" && pendingProofs(job).some((entry) => Array.isArray(job.error.details?.proofKeys) ? job.error.details.proofKeys.includes(entry.key) : job.error.details?.command ? JSON.stringify(entry.obligation.proof.command) === JSON.stringify(job.error.details.command) : entry.gate === job.error.details?.gate);
+
 function renderRecovery() {
   const phase = state.job.recoveryPhase;
-  const recovery = state.job.recovery ?? (phase ? { title: phase.status === "planning" ? "Planning feature recovery" : "Feature recovery", summary: phase.status === "planning" ? "Preparing a feature plan from the preserved files and review findings." : `${phase.done.length}/${phase.plan?.slices.length ?? 0} recovery features verified`, actions: [], workspace: "Preserved project workspace", automaticRetry: "Each feature has bounded repairs; final deployment requires the full original review." } : null);
+  const recovery = state.job.recovery ?? (phase ? { title: phase.status === "planning" ? "Preparing repair plan" : "Repairs", summary: phase.status === "planning" ? "Planning repair features from the review findings and every spec and prototype input." : `${phase.done.length}/${phase.plan?.slices.length ?? 0} recovery features verified`, actions: [], workspace: "Preserved project workspace", automaticRetry: "Each feature has bounded repairs; final deployment requires the full original review." } : null);
   const visible = recovery && (PARKED.includes(state.job.state) || phase);
   $("#recovery-card").classList.toggle("hidden", !visible);
   if (!visible) return;
@@ -574,21 +578,33 @@ function renderRecovery() {
       catch (error) { showError(error); button.disabled = false; }
     }); features.append(button);
   };
-  if (PARKED.includes(state.job.state) && !state.job.dismissed && (!phase || ["planning", "plan_failed", "ready", "built"].includes(phase.status)) && state.job.reviewRequest) action("Plan feature recovery", "recovery-plan");
+  if (PARKED.includes(state.job.state) && !state.job.dismissed && (!phase || ["planning", "plan_failed", "ready", "running", "built"].includes(phase.status)) && (state.job.reviewRequest || state.job.featureCursor?.reviewRequest || state.job.error?.code === "inputs_changed" || failedProof(state.job))) action("Prepare repair plan", "recovery-plan");
+  const list = (title, rows) => {
+    if (!rows.length) return;
+    const heading = document.createElement("h3"); heading.textContent = title;
+    const items = document.createElement("ol");
+    items.append(...rows.map((text) => { const row = document.createElement("li"); row.textContent = text; return row; }));
+    features.append(heading, items);
+  };
+  if (phase?.status === "plan_failed") list("Plan review blockers", phase.planBlockers ?? []);
   if (phase?.plan) {
-    const heading = document.createElement("h3"); heading.textContent = "Recovery features"; features.append(heading);
-    const list = document.createElement("ol");
-    for (const slice of phase.plan.slices) {
-      const row = document.createElement("li"); row.textContent = `${phase.done.includes(slice.id) ? "Verified" : phase.current === slice.id ? "Current" : "Pending"}: ${slice.title} (${slice.checks.join(", ")})`; list.append(row);
-    } features.append(list);
-    const details = document.createElement("details"); const summary = document.createElement("summary"); summary.textContent = "Acceptance checks and dependencies";
+    list("Remaining gaps", (phase.request?.checks ?? []).map((check) => `${check.id}: ${check.text}${check.reason ? ` — ${check.reason}` : ""}`));
+    // Mirrors pendingChecks in src/wbs.mjs: a check is not verified with its feature while any pending
+    // obligation in this plan, or outstanding from an earlier one, still supports it.
+    const refs = new Set([...phase.plan.slices.flatMap((slice) => slice.acceptance.filter((item) => item.proof?.pending && !(state.job.outstandingProofs ?? []).some(entry => entry.planDigest === phase.planDigest && entry.feature === slice.id && entry.obligation.id === item.id && entry.status !== "pending"))), ...pendingProofs(state.job).map((entry) => entry.obligation)].flatMap((item) => item.refs ?? []));
+    const awaiting = (slice) => (slice.closes ?? []).filter((id) => refs.has(id));
+    list("Proposed features", phase.plan.slices.map((slice) => `${phase.done.includes(slice.id) ? "Verified" : phase.current === slice.id ? "Current" : "Pending"}: ${slice.title} (${(slice.closes ?? slice.checks).join(", ")})${awaiting(slice).length ? `; ${awaiting(slice).join(", ")} pending integration proof` : ""}`));
+    list("Outstanding integration proofs", pendingProofs(state.job).map((entry) => `${entry.key}: ${entry.obligation.behavior} — ${entry.obligation.proof.command.join(" ")}`));
+    list("Verification checks", phase.plan.slices.flatMap((slice) => slice.acceptance.map((item) => typeof item === "string" ? item : `${item.id}: ${item.behavior} — ${item.proof.command.join(" ")}${item.proof.pending ? " (runs at integration)" : ""}`)));
+    if (phase.status === "ready") { const allowance = document.createElement("p"); allowance.textContent = `Repair allowance: up to ${2 * (phase.plan.slices.length + 1)} attempts (2 per feature plus 2 for the full final review).`; features.append(allowance); }
+    const details = document.createElement("details"); const summary = document.createElement("summary"); summary.textContent = "Full plan with sources and dependencies";
     const pre = document.createElement("pre"); pre.style.whiteSpace = "pre-wrap"; pre.textContent = JSON.stringify(phase.plan, null, 2); details.append(summary, pre); features.append(details);
     if (phase.status === "ready") {
-      const label = document.createElement("label"); label.htmlFor = "recovery-plan-feedback"; label.textContent = "Changes for the recovery plan (optional)";
+      const label = document.createElement("label"); label.htmlFor = "recovery-plan-feedback"; label.textContent = "Changes for the repair plan (optional)";
       const feedback = document.createElement("textarea"); feedback.id = "recovery-plan-feedback"; feedback.maxLength = 6000; feedback.value = state.recoveryPlanFeedback ?? "";
       feedback.addEventListener("input", () => { state.recoveryPlanFeedback = feedback.value; }); features.append(label, feedback);
     }
-    if (phase.status === "ready") action("Approve and start feature recovery", "recovery-start", { planDigest: phase.planDigest });
+    if (phase.status === "ready") action("Approve and continue repairs", "recovery-start", { planDigest: phase.planDigest });
     if (phase.totalRepairLimit !== undefined) { const budget = document.createElement("p"); budget.textContent = `Repair attempts remaining: ${Math.max(0, (state.job.repairBudgetLimit ?? 0) - state.job.attempt)} for this step; ${Math.max(0, phase.totalRepairLimit - state.job.attempt)} across this recovery phase.`; features.append(budget); }
   }
   $("#recovery-title").textContent = recovery.title;

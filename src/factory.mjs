@@ -8,8 +8,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./process.mjs";
 import { buildPrompt, continuationPrompt, featureBuildPrompt, featurePlanPrompt, featureReviewPrompt, planAuditPrompt, planCorrectionPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
-import { orderSlices, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
-import { contractDigest, originalChecks, preparePlanReview, prepareReview, validatePlanReview, validateReview } from "./review.mjs";
+import { orderSlices, integrationProofs, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
+export { pendingProofFailure };
+import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
 import { archiveReview, digest, planFeatureRecovery, runFeatureRecovery, sourceBaseline } from "./feature-recovery.mjs";
 
@@ -184,6 +185,10 @@ export class SoloFactory {
     if (job.recoveryPhase?.status === "ready" || ["planning", "plan_failed"].includes(job.recoveryPhase?.status)) {
       throw new FactoryError("recovery_approval_required", "Review and approve the recovery plan before execution; retry planning if it failed.");
     }
+    if (repairsExhausted(job, this.maxRepairs)) {
+      throw new FactoryError("repair_plan_required", "The repair budget is exhausted. Prepare a repair plan and approve it; Resume does not renew the budget or rerun the same review.");
+    }
+    if (inputsChanged(job)) throw new FactoryError("repair_plan_required", "The specs or prototype inputs changed after the plan was approved. Prepare a repair plan against the current inputs.");
     if (job.recoveryPhase?.status === "running") return runFeatureRecovery(this, jobId, signal);
     if (job.recoveryPhase?.status === "built") {
       try {
@@ -270,16 +275,6 @@ export class SoloFactory {
       }
 
       if (failedState === "reviewing") {
-        // An owner-requested resume authorizes another bounded recovery cycle.
-        // Keep attempt numbers monotonic so prior failure files are preserved.
-        if (previousError?.code === "review_rejected" && job.planVersion !== 2) {
-          job.repairBudgetLimit = job.attempt + this.maxRepairs;
-          await this.store.writeState(job);
-          await this.emit(job.id, {
-            type: "recovery.budget", state: "reviewing",
-            message: `Owner-requested review recovery allows ${this.maxRepairs} further repair attempts; the frozen contract is unchanged`,
-          });
-        }
         job = await this.reviewAndVerify(job, signal);
         return await this.deployAndComplete(job, signal);
       }
@@ -300,6 +295,14 @@ export class SoloFactory {
     return this.deployAndComplete(job, signal);
   }
 
+  // The final review evaluates the same input set the plan was approved against.
+  async assertInputs(job) {
+    const approved = job.recoveryPhase?.request?.sourcesDigest ?? job.approvedPlan?.sourcesDigest;
+    if (approved && digest(await sourceSet(this.store.appDir(job.id), runInputs(job))) !== approved) {
+      throw new FactoryError("inputs_changed", "The specs or prototype inputs changed after the plan was approved; prepare a repair plan against the current inputs.");
+    }
+  }
+
   async requireReview(job) {
     try {
       return await validateReview(this.store.appDir(job.id), job.reviewRequest);
@@ -312,8 +315,10 @@ export class SoloFactory {
     const appDir = this.store.appDir(job.id);
     for (;;) {
       job = await this.stage(job, "reviewing", "Reviewing against the frozen contract");
+      await this.assertInputs(job);
       let request;
-      try { request = await prepareReview(appDir, job); }
+      const pending = integrationProofs(job).map((entry) => ({ id: entry.key, text: obligationCheck(entry.obligation).text }));
+      try { request = await prepareReview(appDir, job, { checks: [...originalChecks(job.brief), ...pending] }); }
       catch (error) { throw new FactoryError("review_rejected", `Cannot review the frozen contract: ${error.message}`); }
       if (job.reviewContractDigest && request.contractDigest !== job.reviewContractDigest) {
         throw new FactoryError("review_rejected", "Frozen contract changed after the first review; scope cannot be narrowed during repair.");
@@ -335,6 +340,12 @@ export class SoloFactory {
       // Any gate repair changes the app after the verdict; require a fresh review.
       if (attempt !== job.attempt) continue;
       await this.requireReview(job);
+      const candidate = await sourceBaseline(this.store, { head: false });
+      for (const entry of integrationProofs(job)) {
+        if (entry.proofCandidate !== candidate) throw new FactoryError("review_rejected", "Integration proof evidence no longer matches the reviewed source.");
+        Object.assign(entry, { status: "passed", candidate, verifiedAt: new Date().toISOString() });
+      }
+      await this.store.writeState(job);
       await this.emit(job.id, { type: "gate.passed", state: job.state, gate: "review", message: "All intake checks have a passing review with evidence" });
       return job;
     }
@@ -413,21 +424,24 @@ export class SoloFactory {
     const factoryDir = path.join(appDir, ".factory");
     const contract = await contractDigest(appDir);
     const checks = originalChecks(job.brief);
-    await writeFile(path.join(factoryDir, "plan-request.json"), `${JSON.stringify({ version: 1, jobId: job.id, contractDigest: contract, checks }, null, 2)}\n`);
+    // Detailed obligations come from every authoritative input, not only the MH/SC summaries.
+    const sources = await sourceSet(appDir, runInputs(job));
+    await writeFile(path.join(factoryDir, "plan-request.json"), `${JSON.stringify({ version: 1, jobId: job.id, contractDigest: contract, checks, sources }, null, 2)}\n`);
     job = await this.stage(job, "specifying", "Planning features against the frozen contract");
     // Persisted, so a mutation left behind by a parked planning turn still blocks after resume.
     job.planBaseline ??= { source: await sourceBaseline(this.store, { head: false }), contract };
+    job.planBaseline.inputs ??= digest(sources);
     job.planCorrections ??= 0;
     job.planReviews ??= 0;
     await this.store.writeState(job);
     const guard = async () => {
-      if (await sourceBaseline(this.store, { head: false }) !== job.planBaseline.source || await contractDigest(appDir) !== job.planBaseline.contract) {
-        throw new FactoryError("plan_mutation", "A planning turn changed application source or the frozen contract; no feature was built. The changes are preserved for inspection.");
+      if (await sourceBaseline(this.store, { head: false }) !== job.planBaseline.source || await contractDigest(appDir) !== job.planBaseline.contract || digest(await sourceSet(appDir, runInputs(job))) !== job.planBaseline.inputs) {
+        throw new FactoryError("plan_mutation", "A planning turn changed application source, the frozen contract or the supplied specs; no feature was built. The changes are preserved for inspection.");
       }
     };
     const readPlan = async () => {
       try {
-        return validateFeaturePlan(JSON.parse(await readFile(path.join(factoryDir, "slices.json"), "utf8")), { jobId: job.id, contractDigest: contract, checks });
+        return validateFeaturePlan(JSON.parse(await readFile(path.join(factoryDir, "slices.json"), "utf8")), { jobId: job.id, contractDigest: contract, checks, sources: sources.map((item) => item.path) });
       } catch (error) {
         return error;
       }
@@ -446,7 +460,7 @@ export class SoloFactory {
       if (plan instanceof Error) blockers = [plan.message];
       else {
         const planDigest = digest(plan);
-        const request = await preparePlanReview(appDir, job, planDigest);
+        const request = await preparePlanReview(appDir, job, planDigest, { checks, sources });
         job.planReviews += 1;
         await this.store.writeState(job);
         await this.invoke(job, `plan-review-${job.planReviews}`, planAuditPrompt({ followOn: job.followOn }), signal);
@@ -457,7 +471,7 @@ export class SoloFactory {
         }
         try {
           await validatePlanReview(appDir, request);
-          return await this.approvePlan(job, plan, planDigest, request);
+          return await this.approvePlan(job, plan, planDigest, { ...request, sourcesDigest: digest(sources) });
         } catch (error) {
           if (!error.details?.blockers) throw new FactoryError("plan_verdict_invalid", error.message);
           blockers = error.details.blockers.length ? error.details.blockers : [error.message];
@@ -476,7 +490,7 @@ export class SoloFactory {
   }
 
   async approvePlan(job, plan, planDigest, request) {
-    job.approvedPlan = { plan, digest: planDigest, contractDigest: request.contractDigest, token: request.token, approvedAt: new Date().toISOString() };
+    job.approvedPlan = { plan, digest: planDigest, contractDigest: request.contractDigest, sourcesDigest: request.sourcesDigest, sources: request.sources, token: request.token, approvedAt: new Date().toISOString() };
     job.slicePlanIds = plan.slices.map((slice) => slice.id);
     job.sliceIndex = 0;
     await writeFile(path.join(this.store.jobDir(job.id), "approved-plan.json"), `${JSON.stringify(job.approvedPlan, null, 2)}\n`);
@@ -492,8 +506,13 @@ export class SoloFactory {
     const appDir = this.store.appDir(job.id);
     const approved = job.approvedPlan;
     let current = null;
+    const inputs = await sourceSet(appDir, runInputs(job));
+    if (approved.sourcesDigest && digest(inputs) !== approved.sourcesDigest) {
+      throw new FactoryError("inputs_changed", "The specs or prototype inputs changed after the feature plan was approved; execution is blocked. Prepare a repair plan against the current inputs.");
+    }
     try {
-      current = validateFeaturePlan(JSON.parse(await readFile(path.join(appDir, ".factory", "slices.json"), "utf8")), { jobId: job.id, contractDigest: approved.contractDigest, checks: originalChecks(job.brief) });
+      // Plans approved before source citations existed keep validating without them.
+      current = validateFeaturePlan(JSON.parse(await readFile(path.join(appDir, ".factory", "slices.json"), "utf8")), { jobId: job.id, contractDigest: approved.contractDigest, checks: originalChecks(job.brief), sources: approved.sourcesDigest ? inputs.map((item) => item.path) : null });
     } catch {
       // Unreadable or invalid counts as changed.
     }
@@ -532,7 +551,7 @@ export class SoloFactory {
       job.sliceIndex = i + 1;
       job.featureCursor = null;
       await this.store.writeState(job);
-      await this.emit(job.id, { type: "slice.completed", state: job.state, slice: slice.id, message: `Feature ${i + 1}/${slices.length} verified` });
+      await this.emit(job.id, { type: "slice.completed", state: job.state, slice: slice.id, message: `Feature ${i + 1}/${slices.length} verified${pendingNote(pendingChecks(slice, { plan: job.approvedPlan.plan, outstanding: job.outstandingProofs }))}` });
     }
     if (!job.finalBudgetSet) {
       job.repairBudgetLimit = job.attempt + this.maxRepairs;
@@ -544,43 +563,51 @@ export class SoloFactory {
 
   // Cursor substages: implementing → checking → reviewing → committing → verified. Each is
   // persisted before the next stage boundary so pause/resume continues exactly where it stopped.
-  async proveFeature(job, slice, checks, position, signal) {
+  // Recovery passes its own scope (cursor, labels, plan check) so it gets the same safeguards.
+  async proveFeature(job, slice, checks, position, signal, scope = {}) {
     const appDir = this.store.appDir(job.id);
-    const cursor = job.featureCursor;
+    const {
+      cursor = job.featureCursor,
+      assertCurrent = () => this.assertPlanCurrent(job),
+      planDigest = job.approvedPlan?.digest,
+      plan = job.approvedPlan?.plan,
+      planFile,
+      labels = { build: `build-slice-${slice.id}`, resume: `slice-resume-${slice.id}`, review: (n) => `feature-review-${slice.id}-${n}` },
+    } = scope;
     const save = (substage) => { cursor.substage = substage; return this.store.writeState(job); };
     const candidate = () => sourceBaseline(this.store, { head: false });
-    const owned = checks.filter((check) => slice.closes.includes(check.id));
-    const reviewChecks = [
-      ...owned,
-      ...slice.acceptance.map((item) => ({ id: item.id, text: `${item.behavior} (proof: ${item.proof.command.join(" ")} → ${item.proof.expect})` })),
-    ];
+    // Proof pending integration runs before the final review; the checks it proves stay unverified until then.
+    const pending = pendingChecks(slice, { plan, outstanding: job.outstandingProofs });
+    const owned = checks.filter((check) => slice.closes.includes(check.id) && !pending.includes(check.id));
+    const runnable = slice.acceptance.filter((item) => !item.proof?.pending);
+    const reviewChecks = [...owned, ...runnable.map(obligationCheck)];
     for (;;) {
       if (cursor.substage === "implementing") {
         job = await this.stage(job, "building", `Feature ${position} — ${slice.title}`);
         const resumed = cursor.implementStarted;
         cursor.implementStarted = true;
         await this.store.writeState(job);
-        const label = resumed ? `slice-resume-${slice.id}` : `build-slice-${slice.id}`;
-        const prompt = featureBuildPrompt(slice, { owned, planDigest: job.approvedPlan.digest, followOn: job.followOn, resumed });
+        const label = resumed ? labels.resume : labels.build;
+        const prompt = featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed });
         await this.invoke(job, label, prompt, signal, { resumeSessionId: this.resumeSessionFor(job, label) });
         await save("checking");
       }
       if (cursor.substage === "checking") {
-        job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: true, slice, proofs: slice.acceptance });
+        job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: true, slice, proofs: runnable.filter((item) => item.proof) });
         cursor.candidate = await candidate();
         await save("reviewing");
       }
       if (cursor.substage === "reviewing") {
         job = await this.stage(job, "reviewing", `Reviewing feature ${position} — ${slice.title}`);
         if (await candidate() !== cursor.candidate) { await save("checking"); continue; }
-        await this.assertPlanCurrent(job);
+        await assertCurrent();
         if (cursor.reviews >= this.maxRepairs + 2) throw new FactoryError("review_unstable", `Feature ${slice.id} did not reach a stable reviewed candidate after ${cursor.reviews} reviews.`);
         cursor.reviews += 1;
         const request = await prepareReview(appDir, job, { checks: reviewChecks, candidate: cursor.candidate });
         // Kept off job.reviewRequest, which always names the final whole-app review.
         cursor.reviewRequest = request;
         await this.store.writeState(job);
-        const label = `feature-review-${slice.id}-${cursor.reviews}`;
+        const label = labels.review(cursor.reviews);
         await this.invoke(job, label, featureReviewPrompt(slice), signal);
         await archiveReview(this, job, label);
         if (await candidate() !== cursor.candidate) {
@@ -610,7 +637,12 @@ export class SoloFactory {
         cursor.commit = await this.store.git("rev-parse", "HEAD");
         await save("verified");
       }
-      if (cursor.substage === "verified") return job;
+      if (cursor.substage === "verified") {
+        // The durable ledger every later integration gate, final review and repair plan reads.
+        recordPendingProofs(job, planDigest, slice);
+        await this.store.writeState(job);
+        return job;
+      }
     }
   }
 
@@ -686,6 +718,7 @@ export class SoloFactory {
 
   async fail(jobId, signal, error) {
     const job = await this.store.read(jobId);
+    await this.refreshProofEvidence(job);
     if (error.code === "paused") return this.park(job, error.details.before);
     const cancelled = signal.aborted;
     job.failedState = inferFailedState(job);
@@ -698,7 +731,7 @@ export class SoloFactory {
       message: cancelled ? "The owner cancelled this run." : error.message,
       details: error.details ?? {},
     };
-    job.recovery = buildRecovery(job, this.store.appDir(jobId));
+    job.recovery = buildRecovery(job, this.store.appDir(jobId), undefined, { maxRepairs: this.maxRepairs });
     await this.store.writeState(job);
     await this.emit(job.id, {
       type: cancelled ? "job.cancelled" : "job.failed",
@@ -722,7 +755,17 @@ export class SoloFactory {
     return job;
   }
 
+  async refreshProofEvidence(job) {
+    const passed = integrationProofs(job).filter(entry => entry.status === "passed");
+    if (!passed.length) return;
+    const candidate = await sourceBaseline(this.store, { head: false });
+    for (const entry of passed) if (entry.candidate !== candidate) {
+      entry.status = "pending"; delete entry.candidate; delete entry.verifiedAt; delete entry.proofCandidate;
+    }
+  }
+
   async stage(job, state, label) {
+    await this.refreshProofEvidence(job);
     if (this.active?.pauseRequested && PAUSE_POINTS.has(state)) {
       this.active.pauseRequested = false;
       throw new FactoryError("paused", `Paused before ${state}`, { before: state });
@@ -819,11 +862,21 @@ export class SoloFactory {
   }
 
   async verifyWithRepairs(job, manifest, signal, { includeInstall, slice = null, proofs = [] }) {
+    // Without a feature this is the integrated app: every proof pending integration runs here.
+    if (!slice) {
+      for (const entry of integrationProofs(job)) { entry.status = "pending"; delete entry.candidate; delete entry.verifiedAt; delete entry.proofCandidate; }
+      await this.store.writeState(job);
+      proofs = [...proofs, ...integrationProofs(job).map(entry => ({ id: entry.gate.slice("proof-".length), key: entry.key, proof: entry.obligation.proof }))];
+    }
     let current = job;
     for (;;) {
       current = await this.stage(current, "verifying", "Running deterministic quality gates");
       const failure = await this.verify(current, manifest, signal, { includeInstall, proofs });
       if (!failure) {
+        if (!slice && integrationProofs(current).length) {
+          const candidate = await sourceBaseline(this.store, { head: false });
+          if (integrationProofs(current).some(entry => entry.proofCandidate !== candidate)) throw new FactoryError("review_rejected", "Integration gates changed the application source; proof evidence is stale.");
+        }
         const passed = slice ? `slice ${slice.id}` : [...current.stageHistory].reverse().find((s) => !["verifying", "repairing"].includes(s.state))?.state ?? "build";
         await this.commit(current, `factory: ${passed} passed gates`);
         return current;
@@ -849,12 +902,32 @@ export class SoloFactory {
   async verify(job, manifest, signal, { includeInstall, proofs = [] }) {
     const gates = (includeInstall ? ["install", "test", "build"] : ["test", "build"]).map((gate) => [gate, manifest.commands[gate]]);
     // Each distinct obligation proof is its own gate; one identical to an earlier command already ran.
-    const seen = new Set(gates.map(([, command]) => JSON.stringify(command)));
+    const seen = new Map();
+    for (const gate of gates) {
+      const key = JSON.stringify(gate[1]);
+      if (!seen.has(key)) seen.set(key, []);
+      seen.get(key).push(gate);
+    }
     for (const item of proofs) {
       const key = JSON.stringify(item.proof.command);
-      if (!seen.has(key)) { seen.add(key); gates.push([`proof-${item.id}`, item.proof.command]); }
+      if (!seen.has(key)) {
+        const gate = [`proof-${item.id}`, item.proof.command];
+        seen.set(key, [gate]); gates.push(gate);
+      }
+      for (const gate of seen.get(key)) {
+        gate[2] ??= [];
+        if (item.key && !gate[2].includes(item.key)) gate[2].push(item.key);
+      }
     }
-    for (const [gate, command] of gates) {
+    const integrated = proofs.some(item => item.key);
+    let candidate = null;
+    for (const [gate, command, proofKeys = []] of gates) {
+      // Install may create a lockfile before tests run. Bind evidence to the source tested,
+      // including install itself only when it is also an integration proof.
+      if (integrated && candidate === null && (gate !== "install" || proofKeys.length)) {
+        candidate = await sourceBaseline(this.store, { head: false });
+        for (const entry of integrationProofs(job)) entry.proofCandidate = candidate;
+      }
       const started = Date.now();
       job.activeCommand = { gate, command, startedAt: new Date().toISOString() };
       await this.store.writeState(job);
@@ -874,6 +947,7 @@ export class SoloFactory {
           gate,
           command,
           durationMs,
+          proofKeys,
           output: result.output,
         });
       }
@@ -1050,16 +1124,37 @@ export function inferFailedState(job) {
   return [...(job.stageHistory ?? [])].reverse().find((stage) => !TERMINAL.has(stage.state))?.state ?? "building";
 }
 
-export function buildRecovery(job, workspace, diagnostics = job.error?.details?.diagnostics ?? [], { legacy = false } = {}) {
+// A rejected review or failed integration proof with no repair attempts left: another Resume would only rerun it.
+export function repairsExhausted(job, maxRepairs = 2) {
+  return (job.error?.code === "review_rejected" || Boolean(pendingProofFailure(job))) && (job.attempt ?? 0) >= (job.repairBudgetLimit ?? maxRepairs);
+}
+
+// Stopped because approved inputs changed: Resume would stop again; only a new plan can continue.
+export function inputsChanged(job) {
+  return job.error?.code === "inputs_changed";
+}
+
+export function buildRecovery(job, workspace, diagnostics = job.error?.details?.diagnostics ?? [], { legacy = false, maxRepairs = 2 } = {}) {
   const failedState = inferFailedState(job);
   const timeoutReason = job.error?.details?.timeoutReason;
   const primary = diagnostics[0];
   const reviewBlocked = job.error?.code === "review_rejected";
-  const title = reviewBlocked ? "Required functionality or evidence is unfinished" : primary?.title
+  const exhausted = repairsExhausted(job, maxRepairs);
+  const stale = inputsChanged(job);
+  const title = stale ? "Specs or prototype inputs changed" : exhausted ? "Repair budget exhausted" : reviewBlocked ? "Required functionality or evidence is unfinished" : primary?.title
     ?? (timeoutReason === "idle" ? "The coding agent became inactive" : timeoutReason === "hard" ? "The run reached its safety cap" : "The run paused before completion");
   const actions = diagnostics.map((item) => item.action);
   if (!actions.length) {
-    if (reviewBlocked) {
+    if (stale) {
+      actions.push("Prepare repair plan: the factory compares the changed inputs with the approved plan and plans the unfinished work against the current inputs; verified features stay done.");
+      actions.push("Review the plan, then Approve and continue repairs. Resume would stop again on the same changed inputs.");
+    } else if (exhausted) {
+      actions.push(pendingProofFailure(job)
+        ? "Prepare repair plan: the factory plans features for the requirements the failed integration proof supports, from its obligation, command and output."
+        : "Prepare repair plan: the factory plans features for the unfinished checks from the review findings and every spec and prototype input.");
+      actions.push("Review the remaining gaps, proposed features and proof checks, then Approve and continue repairs to start a new bounded repair phase.");
+      actions.push("Resume does not renew the repair budget; dashboard chat explains or shapes briefs and does not resume a run.");
+    } else if (reviewBlocked) {
       actions.push("Read the unfinished checks and reviewer blockers in this packet and .factory/REVIEW.md.");
       actions.push("Implement the missing behavior and run its acceptance checks; preserve the frozen contract and existing data.");
       actions.push("Use Resume on this run's card to continue its preserved files. Dashboard chat explains or shapes briefs; it does not resume a run.");
@@ -1081,7 +1176,7 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
     workspace,
     logPath: job.error?.details?.logPath ?? null,
     filesPreserved: true,
-    canResume: job.state !== "cancelled",
+    canResume: job.state !== "cancelled" && !exhausted && !stale,
     automaticRetry: reviewBlocked ? "The bounded repair budget stopped this run. Repeating the error in chat does not perform a repair or resume." : legacy
       ? "This run predates activity-aware recovery; no automatic resume was available."
       : diagnostics.length
@@ -1108,7 +1203,7 @@ export function buildRecoveryPacket(job) {
   ];
   if (job.error?.details?.output && job.error.details.output !== job.error.message) lines.push("", "Review findings:", job.error.details.output);
   if (job.recoveryPhase?.plan) lines.push("", `Feature recovery: ${job.recoveryPhase.status}; ${job.recoveryPhase.done.length}/${job.recoveryPhase.plan.slices.length} verified.`,
-    ...job.recoveryPhase.plan.slices.map(slice => `- ${job.recoveryPhase.done.includes(slice.id) ? "Verified" : "Unfinished"}: ${slice.title} (${slice.checks.join(", ")})`));
+    ...job.recoveryPhase.plan.slices.map(slice => `- ${job.recoveryPhase.done.includes(slice.id) ? "Verified" : "Unfinished"}: ${slice.title} (${(slice.closes ?? slice.checks).join(", ")})${pendingNote(pendingChecks(slice, { plan: job.recoveryPhase.plan, outstanding: job.outstandingProofs }))}`));
   if (recovery.logPath) lines.push("", `Log: ${recovery.logPath}`);
   lines.push(
     "",
@@ -1176,6 +1271,13 @@ export function validateMetrics(value) {
 // Token totals for a run from its agent.completed events: overall, and per stage label with
 // repeats folded (see stageKind) so runs of any shape line up.
 // Agent labels from invoke(): build-slice-<id>, slice-resume-<id>, repair-<n>, repair-resume, <stage>-resume.
+const pendingNote = (ids) => ids.length ? `; ${ids.join(", ")} pending integration proof` : "";
+
+// One acceptance obligation as a review check: behavior, cited source and proof the reviewer must confirm.
+function obligationCheck(item) {
+  return { id: item.id, text: `${item.behavior}${item.sources ? ` (source: ${item.sources.map((ref) => `${ref.path} ${ref.locator}`).join("; ")})` : ""}${item.proof ? ` (proof: ${item.proof.command.join(" ")} → ${item.proof.expect})` : ""}` };
+}
+
 function stageKind(label = "unknown") {
   if (/^(build-slice|slice-resume)-/.test(label)) return "slice";
   if (label.startsWith("repair")) return "repair";

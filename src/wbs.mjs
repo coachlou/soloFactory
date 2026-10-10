@@ -12,6 +12,7 @@
 //   "[SC-n]" on at least one slice criterion, so the plan provably covers the
 //   contract instead of merely being plausible.
 
+import { createHash } from "node:crypto";
 import { assertAllowedCommand } from "./process.mjs";
 
 export const SLICE_ID_RE = /^[A-Z][A-Z0-9-]{0,63}$/;
@@ -186,9 +187,49 @@ export function nextExecutable(doneIds, plan) {
 
 export const MAX_FEATURES = 30;
 
+// Obligations whose proof can only run on the integrated app. They run before the final review.
+export const pendingObligations = (plan) => (plan?.slices ?? []).flatMap((slice) => (slice.acceptance ?? []).filter((item) => item.proof?.pending === "integration"));
+
+// Outstanding proofs: pending obligations recorded on the job when their feature was verified. Each
+// is keyed by its plan, feature and obligation, so plans sharing obligation ids never collide, and it
+// stays on the run across repair plans until it passes or its feature is explicitly reopened.
+export const proofKey = (planDigest, slice, item) => `${planDigest}:${slice.id}/${item.id}`;
+export const integrationProofs = (job) => (job.outstandingProofs ?? []).filter((entry) => entry.status !== "superseded");
+export const pendingProofs = (job) => (job.outstandingProofs ?? []).filter((entry) => entry.status === "pending");
+export function recordPendingProofs(job, planDigest, slice) {
+  job.outstandingProofs ??= [];
+  for (const item of (slice.acceptance ?? []).filter((item) => item.proof?.pending === "integration")) {
+    const key = proofKey(planDigest, slice, item);
+    const entry = { key, gate: `proof-${planDigest}.${slice.id}.${item.id}`, planDigest, feature: slice.id, obligation: item, refs: [...(item.refs ?? [])], status: "pending" };
+    const at = job.outstandingProofs.findIndex((existing) => existing.key === key);
+    if (at >= 0) job.outstandingProofs[at] = entry; else job.outstandingProofs.push(entry);
+  }
+}
+
+// Commands can serve multiple obligations, including a manifest gate. Preserve every target.
+export function failedIntegrationProofs(job) {
+  if (job.error?.code !== "quality_gate_failed") return [];
+  const { gate, command, proofKeys } = job.error.details ?? {};
+  return integrationProofs(job).filter(entry => Array.isArray(proofKeys) ? proofKeys.includes(entry.key)
+    : command ? JSON.stringify(entry.obligation.proof.command) === JSON.stringify(command) : entry.gate === gate);
+}
+export const pendingProofFailure = job => failedIntegrationProofs(job)[0] ?? null;
+
+// A check a feature closes stays unverified while any obligation that supports it, in any feature of
+// the plan or outstanding from an earlier plan, still waits for its integration proof.
+export function pendingChecks(slice, { plan = null, outstanding = [] } = {}) {
+  const planDigest = plan ? createHash("sha256").update(JSON.stringify(plan)).digest("hex") : null;
+  const planned = pendingObligations(plan ?? { slices: [slice] }).filter(item =>
+    !outstanding.some(entry => entry.obligation?.id === item.id && entry.status !== "pending" && (!planDigest || entry.planDigest === planDigest) &&
+      (plan?.slices ?? [slice]).some(feature => feature.id === entry.feature && feature.acceptance?.includes(item))));
+  const refs = new Set([...planned, ...outstanding.filter((entry) => entry.status === "pending")].flatMap((item) => item.refs ?? []));
+  return (slice.closes ?? []).filter((id) => refs.has(id));
+}
+
 const text = (value, min) => typeof value === "string" && value.trim().length >= min;
 
-export function validateFeaturePlan(raw, { jobId, contractDigest, checks }) {
+// sources (paths), when given, makes every obligation cite the authoritative input it implements.
+export function validateFeaturePlan(raw, { jobId, contractDigest, checks, sources = null }) {
   if (!raw || typeof raw !== "object" || raw.version !== 2) throw new Error("slices.json must be a version 2 feature plan.");
   if (raw.jobId !== jobId || raw.contractDigest !== contractDigest) throw new Error("Feature plan does not match this run and its frozen contract.");
   if (!Array.isArray(raw.slices) || raw.slices.length === 0) throw new Error("slices.json must contain at least one feature.");
@@ -239,11 +280,17 @@ export function validateFeaturePlan(raw, { jobId, contractDigest, checks }) {
       try { assertAllowedCommand(command); if (command.length < 2) throw new Error("needs arguments"); }
       catch (error) { throw new Error(`Obligation ${item.id} needs an executable proof command as an npm/node/npx argument array (${error.message})`); }
       if (!text(item.proof.expect, 3)) throw new Error(`Obligation ${item.id} needs an expected proof result.`);
-      return { id: item.id, behavior: item.behavior.trim(), refs: [...item.refs], proof: { command: [...command], expect: item.proof.expect.trim() } };
+      if (item.proof.pending !== undefined && item.proof.pending !== "integration") throw new Error(`Obligation ${item.id} proof.pending may only be "integration".`);
+      if (sources && (!Array.isArray(item.sources) || !item.sources.length || item.sources.some((ref) => !sources.includes(ref?.path) || !text(ref.locator, 2)))) {
+        throw new Error(`Obligation ${item.id} needs sources [{path, locator}] citing the authoritative input it implements (one of ${sources.join(", ")}).`);
+      }
+      return { id: item.id, behavior: item.behavior.trim(), refs: [...item.refs], proof: { command: [...command], expect: item.proof.expect.trim(), ...(item.proof.pending ? { pending: "integration" } : {}) },
+        ...(sources ? { sources: item.sources.map((ref) => ({ path: ref.path, locator: ref.locator.trim() })) } : {}) };
     });
     for (const id of slice.closes) {
       if (!acceptance.some((item) => item.refs.includes(id))) throw new Error(`${where} closes ${id} but no obligation in it proves ${id}.`);
     }
+    if (acceptance.every((item) => item.proof.pending)) throw new Error(`${where} needs at least one obligation provable when the feature is built; only part of its proof may wait for integration.`);
     return { id: slice.id, title: slice.title.trim(), objective: slice.objective.trim(), demo: slice.demo.trim(), dependsOn: [...dependsOn], closes: [...slice.closes], acceptance };
   });
 

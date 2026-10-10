@@ -648,3 +648,103 @@ Validation: `node --test test/wbs.test.mjs test/review.test.mjs` 39/39; `npm tes
 precheck ok) 145/145; `git diff --check` clean. Not installed; no active run was touched.
 Claude now routes `feature-plan` to the reasoning profile; `plan-correction-N` stays on opus (plan with
 the stronger model, build with the coding model). Codex still has one profile for every stage.
+
+## 2026-10-09 — repair-plan recovery path (exhausted review budget)
+
+Exhausted review → **Prepare repair plan** is the primary action; Resume is refused (409 /
+`repair_plan_required`) and no longer renews the budget or reruns the same review (old
+owner-resume renewal removed). The repair plan is a v2 feature plan validated by
+`validateFeaturePlan` with `sources`: every obligation cites a `.factory/` contract or upload
+path plus locator, with an executable proof. It goes through a plan review and up to two
+corrections, then fails before any build. Approval binds plan digest, reviewed plan, baseline,
+source review token, input snapshot (sha256 of contract + uploads) and contract. Replanning is
+allowed from a parked running phase (mid-phase exhaustion). The dashboard lists the gaps,
+proposed features, verification checks, blockers and allowance. Prior phases, plans and
+evidence are preserved, and the full final review still gates completion. Tests cover all
+features passing then the final review failing, exhausted Resume, omitted detailed
+requirements (uncorrected/corrected), stale approval (specs, reviewed plan), interrupted and
+successful recovery.
+PRD §11: `originalChecks` is still MH/SC-only. Detailed obligations now reach recovery via cited
+sources + reviewer comparison; new-run feature planning does not yet receive sources.
+Validation: `npm test` (distro precheck ok) 154/154; `git diff --check` clean. Docs (README/SPEC)
+updated identically. Not committed, not installed; no active run touched.
+
+## 2026-10-09 — Codex review fixes: recovery shares feature safeguards
+
+1. New-run feature exhaustion → Prepare repair plan works (reads `featureCursor.reviewRequest`;
+   button shown); verified features stay done, gaps = approved plan's unclosed checks.
+2–3, 6. Recovery runs through `proveFeature` with its own cursor: candidate-bound reviews,
+   void-on-reviewer-edit, strict `checkpoint_failed`, substage resume (no re-implementation).
+4. Input fingerprint (contract + uploads) enforced in plan currency, recovery execution, every
+   final-review loop (`inputs_changed`), `validateReview` (so deploy too).
+5. New-run planning gets `sources`; obligations cite path + locator; plan audit blocks omissions.
+Regressions: one per finding in features/feature-recovery/review tests.
+Superseded by round 2: the upload edge and the §11 gap are fixed below.
+Validation: `npm test` 164/164; `git diff --check` clean. README/SPEC identical. Not committed.
+
+## 2026-10-09 — Codex review round 2
+
+1. Run input manifest = uploads the run's own transcript attached (`runInputs`); other briefs'
+   uploads never enter it. Regression: features (mid-build + mid-review), review unit, e2e HTTP.
+2. Changed inputs: `inputs_changed` everywhere, Resume refused, Prepare repair plan replans
+   without a review (`replanForInputs`): names changed files, keeps verified features, reopens
+   features that cited a changed file.
+3. Legacy recovery phase without a cursor resumes at `checking`, budget untouched, no rebuild.
+4. PRD §11: `proof.pending: "integration"` — skipped at feature time, the checks it proves read
+   "pending integration proof", run as `proof-<id>` before the final review, final review covers it.
+   Every feature still needs one proof runnable at build time.
+Validation: `npm test` 172/172; `git diff --check` clean. README/SPEC identical. Not committed.
+Mutation-checked: legacy migration, pending append, pending feature filter each fail their test when removed.
+Left as-is: legacy v1 recovery obligations with `proof: null` stay scoped-review-only (unchanged behavior).
+
+## 2026-10-09 — Codex review round 3: outstanding-proof ledger
+
+Durable `job.outstandingProofs` written when a feature is verified (`recordPendingProofs`, wbs.mjs);
+gates, final review, recovery planning and the dashboard read `pendingProofs(job)` instead of
+re-deriving from whichever plan is current.
+1. Pending proofs survive later repair plans: entries stay `pending` until the gate passes;
+   `replanForInputs` marks a reopened feature's entries `superseded`.
+2. Key `<plan digest 8>:<feature>/<obligation>` is the review check id and gate name — no
+   collisions between an original and a repair plan sharing `POP-1`.
+3. Failed proof gate with budget spent: `pendingProofFailure` → `repairsExhausted`, Resume refused,
+   `replanForProof` builds the request from the obligation, command, expect and output tail
+   (`review: null`); checks = the obligation's refs.
+4. `pendingChecks(slice, { plan, outstanding })`: a check stays pending if any obligation in the
+   plan or the ledger supports it, not only the closing feature's own.
+Validation: `npm test` 176/176; `git diff --check` clean. README/SPEC identical paragraph. Not committed.
+Mutation-checked: removing the ledger write fails 5 of the 6 round-3 tests (the plan-prerequisite case is covered by the plan path, as designed).
+Left as-is: no `supersedes` schema field — only inputs-driven reopening supersedes; a repair plan that re-implements
+a feature does not retire its earlier proof, which still has to pass. No shipped run has pending proofs
+(feature uncommitted), so legacy jobs without the ledger need no migration.
+Also: reviewer prompt now says to copy every requested check id exactly (ledger keys are not MH-n/SC-n);
+dashboard lists outstanding integration proofs. Post-deploy repair (factory.mjs ~698) reruns the
+outstanding proofs before its re-review — intended, the app changed. Untested edges: pause/resume
+mid-final-verification with ledger entries (state-persisted, gates rerun like any other); a reopened
+feature whose supporting pending obligation lives in a non-reopened feature (entry stays pending — correct).
+
+## 2026-10-09 — Codex round-4 fixes completed
+Owner authorized fixes on wip/feature-slice-recovery. Outcome: recover deduplicated and
+standalone integration-proof failures; preserve unambiguous proof identity; resolve pending
+status against the verified source and rerun after repairs. Files: proof ledger, factory gates,
+repair planning, dashboard, regression tests and shared docs. Proof: reproduce both dead ends,
+identity collision and success/source-change transitions, then full suite and HTTP checks.
+No installation, live-run changes, commit or push in this task.
+
+Implemented all four findings. Gates retain all ledger keys when commands are deduplicated,
+including commands shared among manifest gates. Failure mappings are authoritative for new
+runs, with command lookup for older error records; feature failures do not masquerade as
+integration failures. Repair planning includes every failed obligation, using its full ledger
+key as a standalone check when it has no MH/SC refs. Full digest and dot-separated gate
+components prevent prefix/boundary collisions. Passed proof evidence records candidate and
+verification time after integration gates plus final review, invalidates at stage/failure
+boundaries if source changed, and reruns on all integrated verification passes. Ordinary
+installation can create a lockfile before test evidence is bound. Dashboard and shared
+README/SPEC wording updated; input-driven reopening also supersedes passed entries.
+Regression evidence: five tests failed before implementation; eight new tests cover these
+paths, source-change/deployment repair, plan-bound pending status, legacy failure mapping,
+shared manifest commands and installation lockfile creation. Final npm test: 184/184,
+including 14 HTTP tests; distro precheck and git diff --check pass; browser script syntax
+check passes. Tests use isolated fixture projects, fake workers and deployments; no real
+provider run or live installation exercised. Preserved Claude's prior changes. All changes
+remain uncommitted; nothing installed, resumed or pushed. Next: Claude can review this
+round's source/tests alongside the earlier PRD work before committing the combined branch.

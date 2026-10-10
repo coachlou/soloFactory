@@ -79,19 +79,23 @@ test('a failed review repairs within budget then requires a fresh passing verdic
   assert.equal(env.deployments(), 1);
 });
 
-test('exhausted review budget parks; resume obtains a fresh verdict', async t => {
-  let blocked = true;
-  const env = await setup(t, args => blocked ? changeReport(args, r => { r.verdict = 'blocked'; r.blockers = ['Missing evidence']; }) : null, { maxRepairs: 1 });
+test('exhausted review budget parks; resume is refused without renewing the budget or reviewing again', async t => {
+  const env = await setup(t, args => changeReport(args, r => { r.verdict = 'blocked'; r.blockers = ['Missing evidence']; }), { maxRepairs: 1 });
   const failed = await env.factory.start(env.job.id);
   assert.equal(failed.state, 'failed');
   assert.equal(failed.attempt, 1);
   assert.equal(env.reviews(), 2);
+  assert.equal(failed.recovery.canResume, false);
+  assert.equal(failed.recovery.title, 'Repair budget exhausted');
+  assert.match(failed.recovery.actions[0], /^Prepare repair plan/);
+  await assert.rejects(env.factory.resume(env.job.id), /Prepare a repair plan/);
+  const after = await env.store.read(env.job.id);
+  assert.equal(after.state, 'failed');
+  assert.equal(after.attempt, 1);
+  assert.equal(after.repairBudgetLimit, failed.repairBudgetLimit);
+  assert.equal(after.reviewRequest.token, failed.reviewRequest.token);
+  assert.equal(env.reviews(), 2, 'no futile review');
   assert.equal(env.deployments(), 0);
-  const oldToken = failed.reviewRequest.token;
-  blocked = false;
-  const resumed = await env.factory.resume(env.job.id);
-  assert.equal(resumed.state, 'completed', resumed.error?.message);
-  assert.notEqual(resumed.reviewRequest.token, oldToken);
 });
 
 test('repair cannot narrow the frozen contract to satisfy review', async t => {
@@ -128,33 +132,24 @@ test('repair receives every unfinished requirement and blocker, not only the fir
   assert.equal(env.deployments(), 0);
 });
 
-test('owner resume can repair an exhausted review without overwriting prior evidence', async t => {
-  let recovered = false;
+test('an approved repair plan recovers an exhausted review without overwriting prior evidence', async t => {
+  let recovering = false;
   const env = await setup(t, async args => {
-    if (args.context.stage === 'repair-2') recovered = true;
-    if (!recovered) await changeReport(args, r => { r.verdict = 'blocked'; r.blockers = ['Missing live album behavior']; });
+    if (args.context.stage.startsWith('recovery-plan-')) recovering = true;
+    if (!recovering) await changeReport(args, r => { r.verdict = 'blocked'; r.blockers = ['Missing live album behavior']; r.checks[0].status = 'missing'; });
   }, { maxRepairs: 1 });
   const failed = await env.factory.start(env.job.id);
   assert.equal(failed.state, 'failed');
   const oldFailure = await readFile(path.join(env.root, '.factory/last-failure-1.txt'), 'utf8');
-  const resumed = await env.factory.resume(env.job.id);
+  const ready = await env.factory.planRecovery(env.job.id);
+  assert.equal(ready.recoveryPhase.status, 'ready', ready.error?.message);
+  const resumed = await env.factory.startRecovery(env.job.id, ready.recoveryPhase.planDigest);
   assert.equal(resumed.state, 'completed', resumed.error?.message);
   assert.equal(resumed.id, failed.id);
-  assert.equal(resumed.attempt, 2);
   assert.equal(resumed.reviewContractDigest, failed.reviewContractDigest);
+  assert.notEqual(resumed.reviewRequest.token, failed.reviewRequest.token, 'completion needs a fresh full review');
   assert.equal(await readFile(path.join(env.root, '.factory/last-failure-1.txt'), 'utf8'), oldFailure);
-  assert.match(await readFile(path.join(env.root, '.factory/last-failure-2.txt'), 'utf8'), /Missing live album behavior/);
   assert.equal(env.deployments(), 1);
-});
-
-test('owner review resume grants a bounded budget and parks again when still incomplete', async t => {
-  const env = await setup(t, args => changeReport(args, r => { r.verdict = 'blocked'; r.blockers = ['Still incomplete']; }), { maxRepairs: 1 });
-  await env.factory.start(env.job.id);
-  const resumed = await env.factory.resume(env.job.id);
-  assert.equal(resumed.state, 'failed');
-  assert.equal(resumed.attempt, 2);
-  assert.equal(resumed.repairBudgetLimit, 2);
-  assert.equal(env.deployments(), 0);
 });
 
 // --- registry, candidate binding and plan verdicts (no factory) ---
@@ -212,4 +207,17 @@ test('plan verdicts bind token, plan digest and contract; blocked names its bloc
   const fresh = await preparePlanReview(dir, { id: 'job-1' }, 'p'.repeat(64));
   assert.notEqual(fresh.token, req.token);
   await assert.rejects(validatePlanReview(dir, fresh), /no readable verdict/);
+});
+
+test('a review is void when its own supplied inputs change, not when another brief uploads', async t => {
+  const dir = await contractDir(t);
+  await mkdir(path.join(dir, '.factory/uploads'));
+  await writeFile(path.join(dir, '.factory/uploads/spec.md'), 'v1');
+  const req = await prepareReview(dir, { id: 'job-1', brief: { mustHaves: ['a'] }, transcript: [{ role: 'user', content: 'Attached image: .factory/uploads/spec.md' }] });
+  assert.deepEqual(req.sources.map(item => item.path).at(-1), '.factory/uploads/spec.md');
+  await writeFile(path.join(dir, '.factory/review-result.json'), JSON.stringify(passReport(req)));
+  await writeFile(path.join(dir, '.factory/uploads/other-brief.png'), 'another brief');
+  await validateReview(dir, req);
+  await writeFile(path.join(dir, '.factory/uploads/spec.md'), 'v2');
+  await assert.rejects(validateReview(dir, req), /inputs changed/);
 });

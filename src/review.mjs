@@ -12,6 +12,24 @@ export async function contractDigest(appDir) {
   return hash.digest("hex");
 }
 
+// Every authoritative input a plan or review must reconcile: the frozen contract plus the specs,
+// mockups and prototype handoffs this run was given. The shared uploads folder also holds files for
+// other briefs, so a run's uploads are exactly those its own intake transcript attached.
+export function runInputs(job) {
+  return [...new Set(JSON.stringify(job.transcript ?? []).match(/\.factory\/uploads\/[A-Za-z0-9._-]+/g) ?? [])].sort();
+}
+
+// A missing input hashes as deleted, so removal changes the digest instead of throwing.
+export async function sourceSet(appDir, uploads) {
+  const files = [...contractFiles.map((file) => `.factory/${file}`), ...uploads];
+  return Promise.all(files.map(async (file) => {
+    const body = await readFile(path.join(appDir, file)).catch((error) => { if (error.code === "ENOENT" && file.startsWith(".factory/uploads/")) return null; throw error; });
+    return { path: file, sha256: body ? createHash("sha256").update(body).digest("hex") : "deleted" };
+  }));
+}
+
+const uploadsOf = (sources) => sources.map((item) => item.path).filter((file) => file.startsWith(".factory/uploads/"));
+
 // The one original-check registry: full review, feature plans and scoped reviews all use these IDs.
 export function originalChecks(brief) {
   return [
@@ -24,6 +42,7 @@ export function originalChecks(brief) {
 export async function prepareReview(appDir, job, { checks = originalChecks(job.brief), candidate } = {}) {
   const request = {
     version: 1, jobId: job.id, token: randomUUID(), contractDigest: await contractDigest(appDir), checks,
+    sources: await sourceSet(appDir, runInputs(job)),
     ...(candidate ? { candidate } : {}),
   };
   if (!request.checks.length) throw new Error("Review requires at least one intake requirement or acceptance scenario.");
@@ -35,6 +54,7 @@ export async function prepareReview(appDir, job, { checks = originalChecks(job.b
 export async function validateReview(appDir, request) {
   if (!request) throw new Error("No current review request; a fresh review is required.");
   if (await contractDigest(appDir) !== request.contractDigest) throw new Error("Frozen contract changed during or after review.");
+  if (request.sources && JSON.stringify(await sourceSet(appDir, uploadsOf(request.sources))) !== JSON.stringify(request.sources)) throw new Error("Specs or prototype inputs changed during or after review.");
   const report = JSON.parse(await readFile(path.join(appDir, ".factory", "review-result.json"), "utf8"));
   if (report.version !== 1 || report.jobId !== request.jobId || report.token !== request.token || report.contractDigest !== request.contractDigest) {
     throw new Error("Review verdict is stale or does not match this run and frozen contract.");
@@ -92,8 +112,8 @@ export async function validateReview(appDir, request) {
 }
 
 // Planning verdicts bind approval to the exact plan bytes and frozen contract; a finished turn is not approval.
-export async function preparePlanReview(appDir, job, planDigest) {
-  const request = { version: 1, jobId: job.id, token: randomUUID(), contractDigest: await contractDigest(appDir), planDigest };
+export async function preparePlanReview(appDir, job, planDigest, extra = {}) {
+  const request = { ...extra, version: 1, jobId: job.id, token: randomUUID(), contractDigest: await contractDigest(appDir), planDigest };
   await rm(path.join(appDir, ".factory", "plan-review-result.json"), { force: true });
   await writeFile(path.join(appDir, ".factory", "plan-review-request.json"), JSON.stringify(request, null, 2) + "\n");
   return request;
