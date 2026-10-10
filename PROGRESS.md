@@ -820,6 +820,23 @@ PRD: `spec/PRD-run-watchdog-and-bounded-recovery.md` (its header names wip/featu
   budget (recovery phases, `SOLOFACTORY_MAX_REPAIRS`).
 - Blocked: real-provider smoke test (no paid calls; live photo-library run untouched). Do not install or merge until it passes.
 
+## Real-provider smoke test of 77159ff (2026-10-10, isolated fixture) — PASS, two bugs found
+
+Clean detached worktree at 77159ff (main checkout had foreign uncommitted watchdog edits), :4204, home
+`.solofactory/smoke-v3`, project habit-v3, run 2026-10-10-3cd9dae7, Claude, brief `.solofactory/smoke/job-ordered.json`.
+- Features 3/3 verified. A seed fault tripped the app's own unit tests first (test gate, 2/2 → Resume; only proof and review
+  exhaustion count as exhausted). An e2e-only fault (`/health` check) then failed the integration proof on Resume without
+  renewing the budget → nextAction prepare-plan. PASS.
+- MAX_REPAIRS=0, recovery-plan: the real reviewer blocked (4 proof-coverage blockers) → plan_blocked, phase.blocked,
+  nextAction revise-inputs. PASS.
+- Second recovery-plan on unchanged inputs: 409 "These inputs have exhausted their plan corrections…", nextAction
+  revise-inputs, 4 blockers, agent.started 15→15, state.json byte-identical. PASS.
+- Not exercised here: revised inputs → fresh budget → approve → repair (fixture-tested; approve path passed in run 42852426).
+- BUG 1: stopping the server mid-planning recorded `job.cancelled` "The owner cancelled this run."
+- BUG 2: for that cancelled run continuationAction offered retry-plan (phase check precedes the cancelled check), but
+  planFeatureRecovery rejects `cancelled` → "Repair planning requires an unresolved parked run." and flipped the run to
+  failed/unexpected_error (after which retry worked). Policy and executor disagree. Unfixed, awaiting Lou.
+
 ## Exhausted plan corrections: supervised plan amendment (2026-10-10, branch fix/exhausted-plan-amendment off 1d5d37b) — implemented, committed, not installed
 
 PRD: `spec/PRD-exhausted-plan-amendment-recovery.md`.

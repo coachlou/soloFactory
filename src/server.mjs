@@ -429,7 +429,9 @@ export async function createSoloFactoryServer(options = {}) {
         const projectId = jobProject.get(id) ?? active.id;
         const jobStore = storeOfJob(id);
         const job = await jobStore.read(id);
-        if (!PARKED.has(job.state) || job.dismissed || runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start")) return json(response, 409, { error: "Feature recovery requires an idle, unresolved parked run. Pause an active run first.", nextAction: continuationAction(job, { maxRepairs, busy: runs.has(projectId) || queue.some(entry => entry.jobId === id) }) });
+        const next = continuationAction(job, { maxRepairs, busy: runs.has(projectId) || queue.some(entry => entry.jobId === id) });
+        if (!PARKED.has(job.state) || job.dismissed || runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start")) return json(response, 409, { error: "Feature recovery requires an idle, unresolved parked run. Pause an active run first.", nextAction: next });
+        if (next.action === "none") return json(response, 409, { error: next.reason, nextAction: next });
         const body = await readJson(request);
         if (action === "start") {
           try { await validateRecoveryApproval({ store: jobStore }, job, body.planDigest); }
@@ -551,7 +553,7 @@ export async function createSoloFactoryServer(options = {}) {
       closing = true;
       queue.length = 0;
       const live = [...runs.values()];
-      await Promise.all(live.map((run) => run.factory.cancel(run.jobId).catch(() => {})));
+      await Promise.all(live.map((run) => run.factory.cancel(run.jobId, { shutdown: true }).catch(() => {})));
       await Promise.all(live.map((run) => run.promise));
       await draining;
       await Promise.all([...factories.values()].map((factory) => factory.shutdown()));

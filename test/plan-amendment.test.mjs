@@ -281,7 +281,8 @@ test('HTTP: packet download, a 540KB bounded submission, refusals that change no
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const post = (route, body) => fetch(`${base}/api/jobs/${job.id}/${route}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: typeof body === 'string' ? body : JSON.stringify(body) });
   const read = async () => (await (await fetch(`${base}/api/jobs/${job.id}`)).json()).job;
-  const settle = async () => { let now; const deadline = Date.now() + 30_000; do { await new Promise(r => setTimeout(r, 50)); now = await read(); } while (!['paused', 'failed'].includes(now.state) && Date.now() < deadline); return now; };
+  // Parked state lands a beat before the scheduler releases the run; until then the API still answers busy (nextAction none).
+  const settle = async () => { let now; const deadline = Date.now() + 30_000; do { await new Promise(r => setTimeout(r, 50)); now = await read(); } while ((!['paused', 'failed'].includes(now.state) || now.nextAction?.action === 'none') && Date.now() < deadline); return now; };
   const job = await app.store.create({ brief: { workingName: 'Amendment HTTP', mustHaves: ['Edit live albums'], acceptanceScenarios: ['New photos enter a saved album'] }, transcript: [{ role: 'user', content: 'Recover existing behavior' }], provider: 'fixture', sdlc: 'single' });
   const cwd = app.store.appDir();
   await mkdir(path.join(cwd, '.factory'), { recursive: true });
