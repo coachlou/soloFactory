@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { JobStore } from "../src/store.mjs";
-import { SoloFactory } from "../src/factory.mjs";
+import { SoloFactory, continuationAction } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
 import { digest } from "../src/feature-recovery.mjs";
 
@@ -568,4 +568,40 @@ test("integration evidence binds the source after ordinary installation creates 
   assert.ok(installed);
   const reviewed = await run.factory.reviewAndVerify(checked);
   assert.equal(reviewed.outstandingProofs[0].status, "passed");
+});
+
+// Smoke 2026-10-10: an ordinary test gate that exhausted its repairs offered Resume, which only reran it.
+test("an ordinary test gate that exhausts its repairs needs a repair plan; Resume is refused without a write", async () => {
+  let failing = false;
+  const commandRunner = async ({ executable, args }) => failing && [executable, ...args].join(" ") === "npm test" ? { code: 1, output: "ui.test.mjs: 1 failing" } : { code: 0, output: "passed" };
+  let edits = 0;
+  const { store, job, make } = await plannedRun({ commandRunner, after: async (stage, cwd) => {
+    if (stage === "build-slice-SLICE-UI") failing = true;
+    // Each repair changes the code, so this is budget exhaustion, not a repeated-failure loop.
+    if (stage.startsWith("repair-")) await writeFile(path.join(cwd, `repair-${++edits}.txt`), "attempt");
+  } });
+  const failed = await make().start(job.id);
+  assert.equal(failed.state, "failed");
+  assert.equal(failed.error.code, "quality_gate_failed");
+  assert.equal(failed.error.details.gate, "test");
+  assert.equal(failed.error.details.loop, undefined);
+  assert.equal(failed.recovery.nextAction?.action ?? continuationAction(failed).action, "prepare-plan");
+  const before = await readFile(path.join(store.jobDir(job.id), "state.json"), "utf8");
+  await assert.rejects(make().resume(job.id), { code: "repair_plan_required" });
+  assert.equal(await readFile(path.join(store.jobDir(job.id), "state.json"), "utf8"), before, "a refused Resume leaves the saved run unchanged");
+
+  failing = false;
+  const ready = await make().planRecovery(job.id);
+  assert.equal(ready.recoveryPhase.status, "ready", ready.error?.message);
+  assert.ok(ready.recoveryPhase.request.checks.some((check) => check.id === "GATE-test"), "the failed gate is a repair target");
+  assert.ok(ready.recoveryPhase.request.blockers.some((text) => text.includes("ui.test.mjs: 1 failing")), "the gate output is a planning finding");
+  const result = await make().startRecovery(job.id, ready.recoveryPhase.planDigest);
+  assert.equal(result.state, "completed", result.error?.message);
+});
+
+test("an ordinary gate failure with repairs left continues with Resume", () => {
+  const job = { id: "j", state: "failed", error: { code: "quality_gate_failed", details: { gate: "test" } }, attempt: 1 };
+  assert.equal(continuationAction(job, { maxRepairs: 2 }).action, "resume");
+  assert.equal(continuationAction({ ...job, attempt: 2 }, { maxRepairs: 2 }).action, "prepare-plan");
+  assert.equal(continuationAction({ ...job, attempt: 1, repairBudgetLimit: 1 }, { maxRepairs: 2 }).action, "prepare-plan");
 });

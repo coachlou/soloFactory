@@ -108,8 +108,9 @@ export function exhaustedPreparations(job) {
 export async function planFeatureRecovery(factory, id, signal, guidance = '') {
   let job = await factory.store.read(id);
   const appDir = factory.store.appDir();
+  // Outside the try: a refused plan must not be recorded as a failure of the run.
+  if (!['failed', 'interrupted', 'paused'].includes(job.state) || job.dismissed || (job.recoveryPhase && !['planning', 'plan_failed', 'ready', 'running', 'built'].includes(job.recoveryPhase.status))) throw new Error('Repair planning requires an unresolved parked run.');
   try {
-    if (!['failed', 'interrupted', 'paused'].includes(job.state) || job.dismissed || (job.recoveryPhase && !['planning', 'plan_failed', 'ready', 'running', 'built'].includes(job.recoveryPhase.status))) throw new Error('Repair planning requires an unresolved parked run.');
     const prior = job.recoveryPhase;
     // Which review stopped the run decides the gaps:
     // - a not-yet-run plan is revised against its own review and gaps;
@@ -123,6 +124,7 @@ export async function planFeatureRecovery(factory, id, signal, guidance = '') {
     // A deterministic integration proof failed: its obligation is the finding; no reviewer rejection exists to bind.
     const failedProof = pendingProofFailure(job);
     if (failedProof) return await replanForProof(factory, job, signal, guidance, { prior, executed, failedProof });
+    if (job.error?.code === 'quality_gate_failed') return await replanForGate(factory, job, signal, guidance, { prior, executed });
     // Revising a stale-input plan that was never executed reuses its assessment; there is still no review to bind.
     if (prior && !executed && prior.request.review === null) return await draftRepairPlan(factory, job, signal, { ...prior.request, id: randomUUID(), guidance, baseline: await sourceBaseline(factory.store), priorPlan: prior.plan ?? prior.request.priorPlan }, prior);
     const revising = ['planning', 'plan_failed', 'ready'].includes(prior?.status) && prior.request.review;
@@ -201,6 +203,23 @@ async function replanForProof(factory, job, signal, guidance, { prior, executed,
   const blockers = failed.map(({ obligation, feature }) => `${feature}/${obligation.id} failed its integration proof: ${obligation.behavior}\nProof command: ${obligation.proof.command.join(' ')} — expected: ${obligation.proof.expect}${output ? `\nProof output (tail):\n${String(output).slice(-2000)}` : ''}`);
   const sources = await sourceSet(appDir, runInputs(job));
   const request = { id: randomUUID(), jobId: job.id, contractDigest: frozen, review: null, reviewToken: null, failedProof: failedProof.key, checks, blockers, sources, sourcesDigest: digest(sources), baseline: await sourceBaseline(factory.store), guidance, priorPlan: plan, completed: done };
+  return draftRepairPlan(factory, job, signal, request, prior);
+}
+
+// An ordinary gate (tests, build) failed with its repairs spent: its command and output are the finding.
+// A synthetic gate check makes the plan own the fix; the unfinished checks keep the rest of the run planned.
+async function replanForGate(factory, job, signal, guidance, { prior, executed }) {
+  const appDir = factory.store.appDir();
+  const frozen = await contractDigest(appDir);
+  if (frozen !== (job.reviewContractDigest ?? job.approvedPlan?.contractDigest ?? prior?.request.contractDigest)) throw new Error('Frozen contract changed; recovery cannot waive or replace it.');
+  const plan = executed ? prior.plan : job.approvedPlan?.plan ?? null;
+  const done = executed ? prior.done : job.sliceDone ?? [];
+  const closed = new Set((plan?.slices ?? []).filter(slice => done.includes(slice.id)).flatMap(sliceChecks));
+  const { gate = 'quality', command = [], output = '' } = job.error.details ?? {};
+  const checks = [...(executed ? prior.request.checks : originalChecks(job.brief)).filter(check => !closed.has(check.id)), { id: `GATE-${gate}`, text: `The ${gate} gate passes: ${command.join(' ')}` }];
+  const blockers = [`The ${gate} gate failed with its repairs spent: ${command.join(' ')}${output ? `\nGate output (tail):\n${String(output).slice(-2000)}` : ''}`];
+  const sources = await sourceSet(appDir, runInputs(job));
+  const request = { id: randomUUID(), jobId: job.id, contractDigest: frozen, review: null, reviewToken: null, failedGate: gate, checks, blockers, sources, sourcesDigest: digest(sources), baseline: await sourceBaseline(factory.store), guidance, priorPlan: plan, completed: done };
   return draftRepairPlan(factory, job, signal, request, prior);
 }
 

@@ -13,7 +13,7 @@ export { pendingProofFailure };
 import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
 import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, watchConfig, workerAlive } from "./watchdog.mjs";
-import { archiveReview, digest, exhaustedPreparations, planFeatureRecovery, runFeatureRecovery, sourceBaseline } from "./feature-recovery.mjs";
+import { archiveReview, digest, exhaustedPreparations, planFeatureRecovery, runFeatureRecovery, sourceBaseline, validateRecoveryApproval } from "./feature-recovery.mjs";
 
 // Which harness produced a run, so runs.jsonl can compare harness changes. Read once at load.
 const harnessRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -67,17 +67,30 @@ export class SoloFactory {
     return this.activate(jobId, (signal) => this.run(jobId, signal));
   }
 
+  // Refusals happen here, before activate writes anything: a refused action leaves the saved run unchanged.
   async resume(jobId) {
+    const job = await this.continuable(jobId);
+    const next = continuationAction(job, { maxRepairs: this.maxRepairs });
+    if (next.action !== "resume") throw new FactoryError(["prepare-plan", "revise-inputs"].includes(next.action) ? "repair_plan_required" : "recovery_approval_required", `${next.reason} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next });
     return this.activate(jobId, (signal) => this.runResume(jobId, signal));
   }
 
   async planRecovery(jobId, guidance = "") {
-    await assertPlanInputsRevised(this.store, await this.store.read(jobId));
+    await assertPlanInputsRevised(this.store, await this.continuable(jobId));
     return this.activate(jobId, signal => planFeatureRecovery(this, jobId, signal, guidance));
   }
 
   async startRecovery(jobId, planDigest) {
+    await validateRecoveryApproval(this, await this.continuable(jobId), planDigest);
     return this.activate(jobId, signal => runFeatureRecovery(this, jobId, signal, planDigest));
+  }
+
+  // The policy's "none" (owner-cancelled, dismissed, not parked) refuses every continuation.
+  async continuable(jobId) {
+    const job = await this.store.read(jobId);
+    const next = continuationAction(job, { maxRepairs: this.maxRepairs });
+    if (next.action === "none") throw new FactoryError("not_continuable", next.reason, { nextAction: next });
+    return job;
   }
 
   // Rewinds a parked slice run to the commit before `sliceId` and rebuilds from there.
@@ -157,9 +170,10 @@ export class SoloFactory {
     return this.active?.jobId === job.id ? this.active.monitor : null;
   }
 
-  async cancel(jobId) {
+  // `shutdown`: the server is stopping, not the owner cancelling; the run parks as interrupted.
+  async cancel(jobId, { shutdown = false } = {}) {
     if (this.active?.jobId !== jobId) throw new FactoryError("not_active", "That run is not active.");
-    this.active.controller.abort();
+    this.active.controller.abort(shutdown ? "shutdown" : undefined);
   }
 
   // Takes effect at the next stage boundary (between slices in slice mode), never mid-turn.
@@ -222,9 +236,9 @@ export class SoloFactory {
     if (!TERMINAL.has(job.state) || job.state === "completed") {
       throw new FactoryError("not_resumable", "Only a failed, cancelled, or interrupted run can be resumed.");
     }
-    // ponytail: "none" (cancelled, dismissed) stays resumable here as before; the API refuses it.
+    // resume() refused every other action before activation; this guards direct callers.
     const next = continuationAction(job, { maxRepairs: this.maxRepairs });
-    if (!["resume", "none"].includes(next.action)) {
+    if (next.action !== "resume") {
       throw new FactoryError(["prepare-plan", "revise-inputs"].includes(next.action) ? "repair_plan_required" : "recovery_approval_required", `${next.reason} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next });
     }
     if (job.recoveryPhase?.status === "running") return runFeatureRecovery(this, jobId, signal);
@@ -758,13 +772,15 @@ export class SoloFactory {
     const job = await this.store.read(jobId);
     await this.refreshProofEvidence(job);
     if (error.code === "paused") return this.park(job, error.details.before);
-    const cancelled = signal.aborted;
+    // Same outcome as a restart finding the run mid-flight: interrupted, with its stage, cursor and budgets kept.
+    const interrupted = signal.aborted && signal.reason === "shutdown";
+    const cancelled = signal.aborted && !interrupted;
     job.failedState = inferFailedState(job);
     const previous = job.stageHistory.at(-1);
     if (previous && !previous.endedAt) previous.endedAt = new Date().toISOString();
-    job.state = cancelled ? "cancelled" : "failed";
-    job.stage = cancelled ? "Cancelled" : "Run paused — action needed";
-    job.error = {
+    job.state = interrupted ? "interrupted" : cancelled ? "cancelled" : "failed";
+    job.stage = interrupted ? "Interrupted by shutdown" : cancelled ? "Cancelled" : "Run paused — action needed";
+    job.error = interrupted ? { code: "process_restarted", message: "The factory stopped during this run. Its files are preserved and can be resumed.", details: {} } : {
       code: cancelled ? "cancelled" : error.code ?? "unexpected_error",
       message: cancelled ? "The owner cancelled this run." : error.message,
       details: error.details ?? {},
@@ -774,7 +790,7 @@ export class SoloFactory {
     job.watch.incident = incidentRecord(job);
     await this.store.writeState(job);
     await this.emit(job.id, {
-      type: cancelled ? "job.cancelled" : "job.failed",
+      type: interrupted ? "job.interrupted" : cancelled ? "job.cancelled" : "job.failed",
       state: job.state,
       message: job.error.message,
     });
@@ -1226,9 +1242,9 @@ export function inferFailedState(job) {
   return [...(job.stageHistory ?? [])].reverse().find((stage) => !TERMINAL.has(stage.state))?.state ?? "building";
 }
 
-// A rejected review or failed integration proof with no repair attempts left: another Resume would only rerun it.
+// A rejected review, failed gate or failed integration proof with no repair attempts left: another Resume would only rerun it.
 export function repairsExhausted(job, maxRepairs = 2) {
-  return (job.error?.code === "review_rejected" || Boolean(pendingProofFailure(job))) && (job.attempt ?? 0) >= (job.repairBudgetLimit ?? maxRepairs);
+  return (["review_rejected", "quality_gate_failed"].includes(job.error?.code) || Boolean(pendingProofFailure(job))) && (job.attempt ?? 0) >= (job.repairBudgetLimit ?? maxRepairs);
 }
 
 // Stopped because approved inputs changed: Resume would stop again; only a new plan can continue.
@@ -1265,6 +1281,7 @@ export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
   const phase = job.recoveryPhase?.status;
   if (job.dismissed || !PARKED_STATES.has(job.state)) return next("none", null, null, "Only an unresolved parked run can continue.");
   if (busy) return next("none", null, null, "A worker is already running or queued for this run; wait for it to park.");
+  if (job.state === "cancelled") return next("none", null, null, "The owner cancelled this run; start over to build it again.");
   // Restart reconciliation: never a second writer while the old worker may still write.
   if (job.error?.code === "worker_unconfirmed" && workerAlive(job.error.details?.pid)) return next("stop-worker", `Stop worker ${job.error.details.pid}`, null, `A ${job.error.details.kind ?? "worker"} from before the restart (pid ${job.error.details.pid}, ${job.error.details.label}) is still running and may write to the workspace. Stop that process; Resume becomes available once it has exited.`);
   if (planBlockedOut(job)) return next("revise-inputs", "Revise inputs and prepare a new plan", "recovery-plan", `The repair plan is still blocked after ${job.recoveryPhase.corrections ?? 0} plan corrections: ${job.recoveryPhase.planBlockers?.[0] ?? job.error?.message}. Retrying with the same inputs cannot pass review. Revise the specs or prototype inputs to resolve the blockers, then prepare a new plan.`);
@@ -1275,7 +1292,6 @@ export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
     ? next("prepare-plan", "Prepare repair plan", "recovery-plan", "The same failure repeated on unchanged code, so repeating repairs cannot help. Prepare a repair plan and approve it; Resume does not renew the budget.")
     : next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", "The same failure repeated on unchanged code. Change the code or inputs first: Resume reruns the checks, and no repair turn runs while the code is unchanged.");
   if (inputsChanged(job)) return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The specs or prototype inputs changed after the plan was approved. Prepare a repair plan against the current inputs.");
-  if (job.state === "cancelled") return next("none", null, null, "The owner cancelled this run; start over to build it again.");
   return next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", phase === "running" ? "Resume continues the approved repair plan from its cursor." : "Resume continues this run from its preserved files.");
 }
 
@@ -1321,7 +1337,9 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
     } else if (exhausted) {
       actions.push(pendingProofFailure(job)
         ? "Prepare repair plan: the factory plans features for the requirements the failed integration proof supports, from its obligation, command and output."
-        : "Prepare repair plan: the factory plans features for the unfinished checks from the review findings and every spec and prototype input.");
+        : job.error.code === "quality_gate_failed"
+          ? `Prepare repair plan: the factory plans a fix for the failed ${job.error.details?.gate ?? "quality"} gate from its command and output, with the unfinished checks and every spec and prototype input.`
+          : "Prepare repair plan: the factory plans features for the unfinished checks from the review findings and every spec and prototype input.");
       actions.push("Review the remaining gaps, proposed features and proof checks, then Approve and continue repairs to start a new bounded repair phase.");
       actions.push("Resume does not renew the repair budget; dashboard chat explains or shapes briefs and does not resume a run.");
     } else if (reviewBlocked) {

@@ -644,3 +644,90 @@ test("HTTP: an image uploaded for another brief while a run builds does not stop
   assert.equal(job.state, "completed", job.error?.message);
   assert.deepEqual(job.approvedPlan.sources.map((item) => item.path).filter((file) => file.includes("uploads/")), [mine]);
 });
+
+// A parked run whose repair budget is spent, with repair-plan preparation held mid-turn until aborted.
+async function planningInFlight(home) {
+  const { prepareReview } = await import("../src/review.mjs");
+  const { buildRecovery } = await import("../src/factory.mjs");
+  const fixture = createFixtureProvider();
+  let planningStarted;
+  const sawPlan = new Promise((resolve) => { planningStarted = resolve; });
+  const providerFactory = () => ({ id: "fixture", async run(args) {
+    if (args.context.stage.startsWith("recovery-plan-")) {
+      planningStarted();
+      await new Promise((resolve) => args.signal.aborted ? resolve() : args.signal.addEventListener("abort", resolve, { once: true }));
+      throw Object.assign(new Error("worker stopped"), { code: "agent_failed" });
+    }
+    return fixture.run(args);
+  } });
+  const app = await createSoloFactoryServer({ home, fixtureMode: true, providerFactory });
+  await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const job = await app.store.create({ brief: { workingName: "Shutdown fixture", mustHaves: ["Edit live albums"], acceptanceScenarios: ["New photos enter a saved album"] }, transcript: [{ role: "user", content: "Recover existing behavior" }], provider: "fixture", sdlc: "single" });
+  const cwd = app.store.appDir();
+  await mkdir(path.join(cwd, ".factory"), { recursive: true });
+  await writeFile(path.join(cwd, ".factory/requirements.json"), JSON.stringify(job.brief));
+  for (const stage of ["specification", "build"]) await fixture.run({ cwd, context: { stage, job } });
+  job.reviewRequest = await prepareReview(cwd, job); job.reviewContractDigest = job.reviewRequest.contractDigest;
+  await fixture.run({ cwd, context: { stage: "review", job } });
+  const reportPath = path.join(cwd, ".factory/review-result.json"); const report = JSON.parse(await readFile(reportPath));
+  report.verdict = "blocked"; report.blockers = ["Missing live rules"]; report.checks[0].status = "missing";
+  await writeFile(reportPath, JSON.stringify(report)); await app.store.commit("fixture baseline");
+  job.startedAt = new Date().toISOString(); job.state = "failed"; job.failedState = "reviewing"; job.error = { code: "review_rejected", message: "Missing live rules" };
+  job.attempt = 2; job.recovery = buildRecovery(job, cwd); await app.store.writeState(job);
+  await postJson(`${base}/api/jobs/${job.id}/recovery-plan`, {});
+  await sawPlan;
+  return { app, base, job, providerFactory };
+}
+const stateFile = (app, id) => readFile(path.join(app.store.jobDir(id), "state.json"), "utf8");
+const post = (url, body = {}) => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+// Smoke 2026-10-10: stopping the server mid-plan saved the run as owner-cancelled and offered Retry plan.
+test("HTTP: server shutdown interrupts an active run and keeps its stage, budget and continuation", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-http-shutdown-"));
+  const { app, job, providerFactory } = await planningInFlight(home);
+  const live = JSON.parse(await stateFile(app, job.id));
+  assert.equal(live.state, "specifying");
+  await app.close();
+  const saved = JSON.parse(await stateFile(app, job.id));
+  assert.equal(saved.state, "interrupted", saved.error?.message);
+  assert.equal(saved.error.code, "process_restarted");
+  assert.equal(saved.failedState, live.state, "the stage it stopped in is preserved, as a restart records it");
+  assert.equal(saved.attempt, 2, "the spent repair budget is preserved");
+  assert.deepEqual(saved.featureCursor, live.featureCursor);
+  assert.equal(saved.recoveryPhase.request.id, live.recoveryPhase.request.id, "the interrupted preparation's evidence is kept");
+  const events = await app.store.events(job.id, 1000);
+  assert.ok(events.some((event) => event.type === "job.interrupted"));
+  assert.ok(!events.some((event) => event.type === "job.cancelled"));
+
+  const again = await createSoloFactoryServer({ home, fixtureMode: true, providerFactory });
+  const base = await listen(again, t);
+  const reopened = (await getJson(`${base}/api/jobs/${job.id}`)).job;
+  assert.equal(reopened.state, "interrupted");
+  assert.equal(reopened.nextAction.action, "retry-plan");
+});
+
+test("HTTP: owner cancellation is final; plan, resume and start are refused and the saved run is unchanged", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-http-owner-cancel-"));
+  const { app, base, job } = await planningInFlight(home);
+  t.after(() => app.close());
+  assert.equal((await post(`${base}/api/jobs/${job.id}/cancel`)).status, 202);
+  const cancelled = await waitForJob(base, job.id, ["cancelled"]);
+  assert.equal(cancelled.state, "cancelled", cancelled.error?.message);
+  assert.equal(cancelled.error.code, "cancelled");
+  assert.equal(cancelled.nextAction.action, "none");
+  assert.equal(cancelled.recovery.canResume, false);
+  const before = await stateFile(app, job.id);
+  for (const [action, body] of [["recovery-plan", {}], ["resume", {}], ["recovery-start", { planDigest: "anything" }]]) {
+    const response = await post(`${base}/api/jobs/${job.id}/${action}`, body);
+    assert.equal(response.status, 409, action);
+    assert.equal(await stateFile(app, job.id), before, `${action} leaves the saved run unchanged`);
+  }
+  // The controller refuses the same actions directly, before any write.
+  const { SoloFactory } = await import("../src/factory.mjs");
+  const factory = new SoloFactory({ store: app.store, provider: createFixtureProvider() });
+  await assert.rejects(factory.planRecovery(job.id));
+  await assert.rejects(factory.resume(job.id));
+  await assert.rejects(factory.startRecovery(job.id, "anything"));
+  assert.equal(await stateFile(app, job.id), before, "a refused controller action leaves the saved run unchanged");
+});
