@@ -149,6 +149,22 @@ file never leaves your machine; `GET /api/errors?limit=50` returns the latest en
   15-second backoff; the wait itself makes no model call. Set
   `SOLOFACTORY_AGENT_IDLE_MINUTES`, `SOLOFACTORY_AGENT_HARD_MINUTES`, and
   `SOLOFACTORY_AGENT_BACKOFF_SECONDS` to change those bounds.
+- While the factory server runs, it supervises its own active run (nothing is watched while
+  the server is stopped, and preview servers are never watched). Each run card shows a
+  supervision status beside the lifecycle state: **Working**, **Waiting for command** (a
+  gate inside its own deadline, with its age and limit), **Progress unknown** (a worker that
+  produces no output), **Progress needs checking** (output keeps arriving but no gate, commit
+  or approved plan has landed within `SOLOFACTORY_PROGRESS_MINUTES`, default 20, 0–240, 0
+  turns it off), **Recovering**, or **Action needed**. The warning never stops a worker; the
+  idle and hard caps stay the deadlines.
+- The one automatic continuation per stage is recorded in the run before it is dispatched, so
+  Resume or a restart never grants another. When the same check fails the same way
+  `SOLOFACTORY_LOOP_THRESHOLD` times (default 3, 2–10) on unchanged code, the factory stops
+  repairing and says so instead of spending the rest of the repair budget. Repairs that do
+  change the code are still bounded by the normal budget.
+- If the server restarts while a worker it launched is still running, the run parks with
+  **Stop worker** and its pid; Resume appears once that process has exited. A worker that
+  started before this version recorded no pid, so its liveness cannot be checked.
 - Usage limits, authentication errors, network failures, toolchain failures, and permissions
   are never blindly retried. The dashboard explains the blocker and preserves a recovery
   packet that can be pasted into Codex for human-guided recovery. Diagnostics read

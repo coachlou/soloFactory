@@ -4,6 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { workerAlive } from "./watchdog.mjs";
 
 const execFileAsync = promisify(execFile);
 const templatesRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "project");
@@ -206,7 +207,13 @@ export class JobStore {
         job.failedState = job.state;
         job.state = "interrupted";
         job.stage = "Interrupted by restart";
-        job.error = { code: "process_restarted", message: "The factory stopped during this run. Its files are preserved and can be resumed." };
+        const worker = job.worker;
+        // Restart reconciliation: a recorded worker that still exists may still write, so park on it
+        // instead of offering Resume. Downtime is never read as inactivity.
+        job.error = worker && workerAlive(worker.pid)
+          ? { code: "worker_unconfirmed", message: `The factory restarted while ${worker.label} (pid ${worker.pid}) was running, and that process still exists. Stop it before continuing; its files are preserved.`, details: { pid: worker.pid, label: worker.label, kind: worker.kind } }
+          : { code: "process_restarted", message: "The factory stopped during this run. Its files are preserved and can be resumed." };
+        delete job.worker;
         await this.writeState(job);
         await this.appendEvent(job.id, { type: "job.interrupted", state: job.state, message: job.error.message });
       }

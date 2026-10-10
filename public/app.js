@@ -524,6 +524,7 @@ function renderJob() {
   const railStage = progressState === "repairing" ? "verifying" : progressState;
   const activeRail = document.querySelector(`[data-stage="${railStage}"]`);
   if (activeRail) activeRail.classList.add("active");
+  renderSupervision();
   renderEvents();
   renderArtifacts();
   renderAppMetrics();
@@ -553,6 +554,24 @@ function renderJob() {
     $("#app-live").textContent = "Stopped";
     $("#app-live").classList.add("muted");
   }
+}
+
+// Supervision is shown beside the lifecycle state, never instead of it.
+function renderSupervision() {
+  const watch = state.job.supervision;
+  let line = $("#supervision");
+  if (!line) {
+    line = document.createElement("p"); line.id = "supervision"; line.className = "muted";
+    $("#run-subtitle").after(line);
+  }
+  line.classList.toggle("hidden", !watch);
+  if (!watch) return;
+  const when = (iso) => iso ? `${formatDuration(Date.now() - new Date(iso).getTime())} ago` : "none yet";
+  const worker = watch.worker;
+  const waiting = worker?.kind === "command" ? ` · waiting on ${worker.gate ?? "command"} for ${formatDuration(worker.ageMs)}${worker.hardLimitMs ? ` of ${formatDuration(worker.hardLimitMs)}` : ""}` : "";
+  const used = state.job.watch?.continuations ? Object.values(state.job.watch.continuations).reduce((sum, n) => sum + n, 0) : 0;
+  line.textContent = `Supervision: ${watch.status}${watch.stage ? ` · ${watch.stage}` : ""}${waiting} · last activity ${when(watch.lastActivityAt)} · last confirmed progress ${when(watch.lastProgressAt)}`
+    + ` · ${state.job.attempt ?? 0} repairs, ${used} automatic continuation${used === 1 ? "" : "s"} used · ${watch.monitoring ? "monitored while the factory server runs" : "not monitored while parked"}`;
 }
 
 // Mirrors pendingProofs / pendingProofFailure in src/wbs.mjs.
@@ -589,6 +608,8 @@ function renderRecovery() {
     items.append(...rows.map((text) => { const row = document.createElement("li"); row.textContent = text; return row; }));
     features.append(heading, items);
   };
+  const incident = state.job.watch?.incident;
+  if (incident && PARKED.includes(state.job.state)) list("Incident", [`Observed: ${incident.observed}`, `Uncertain: ${incident.uncertain}`, `Tried: ${incident.tried}`, `Preserved: ${incident.preserved}`, `Next: ${state.job.nextAction?.label ?? state.job.nextAction?.reason ?? incident.nextAction}`, ...incident.logs.map((log) => `Log: ${log}`)]);
   if (phase?.status === "plan_failed") list("Plan review blockers", phase.planBlockers ?? []);
   if (phase?.plan) {
     list("Remaining gaps", (phase.request?.checks ?? []).map((check) => `${check.id}: ${check.text}${check.reason ? ` — ${check.reason}` : ""}`));

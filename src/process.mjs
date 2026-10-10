@@ -42,6 +42,8 @@ export async function runProcess({
   hardTimeoutMs,
   signal,
   onLine,
+  onSpawn,
+  onActivity,
   keepAlive = false,
 }) {
   if (logPath) await mkdir(path.dirname(logPath), { recursive: true });
@@ -52,6 +54,7 @@ export async function runProcess({
     stdio: ["pipe", "pipe", "pipe"],
     detached: false,
   });
+  if (child.pid) onSpawn?.(child);
 
   let output = "";
   let lineBuffer = "";
@@ -97,6 +100,7 @@ export async function runProcess({
   const append = (chunk) => {
     const text = chunk.toString();
     resetIdleTimer();
+    onActivity?.();
     output = (output + text).slice(-200_000);
     log?.write(text);
     lineBuffer += text;

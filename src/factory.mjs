@@ -12,6 +12,7 @@ import { orderSlices, integrationProofs, pendingChecks, pendingProofFailure, rec
 export { pendingProofFailure };
 import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
+import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, watchConfig, workerAlive } from "./watchdog.mjs";
 import { archiveReview, digest, exhaustedPreparations, planFeatureRecovery, runFeatureRecovery, sourceBaseline } from "./feature-recovery.mjs";
 
 // Which harness produced a run, so runs.jsonl can compare harness changes. Read once at load.
@@ -47,8 +48,9 @@ export class FactoryError extends Error {
 const liveByProject = new Map();
 
 export class SoloFactory {
-  constructor({ store, provider, maxRepairs = 2, commandRunner = runProcess, deployer } = {}) {
+  constructor({ store, provider, maxRepairs = 2, commandRunner = runProcess, deployer, watch = watchConfig() } = {}) {
     this.store = store;
+    this.watch = watch;
     this.provider = provider;
     this.maxRepairs = maxRepairs;
     this.commandRunner = commandRunner;
@@ -111,12 +113,48 @@ export class SoloFactory {
   async activate(jobId, runner) {
     if (this.active) throw new FactoryError("factory_busy", `Run ${this.active.jobId} is already active.`);
     const controller = new AbortController();
-    const promise = runner(controller.signal).finally(async () => {
+    // One monitor per active run; it only observes, and stops with the run.
+    const monitor = new RunMonitor({ jobId, config: this.watch, emit: (event) => this.store.appendEvent(jobId, event) }).start();
+    this.active = { jobId, controller, monitor };
+    // A new invocation starts without the last park's incident; attempts and continuations stay durable.
+    const promise = (async () => {
+      const job = await this.store.read(jobId).catch(() => null);
+      if (job?.watch?.incident || job?.watch?.observed) {
+        delete job.watch.incident; delete job.watch.observed;
+        await this.store.writeState(job);
+      }
+      return runner(controller.signal);
+    })().finally(async () => {
+      monitor.stop();
       if (this.active?.jobId === jobId) this.active = null;
       await this.logRun(jobId).catch(() => {});
     });
-    this.active = { jobId, controller, promise };
+    this.active.promise = promise;
     return promise;
+  }
+
+  // Live supervision for the active run, or null when this factory is not running it.
+  supervision(jobId) {
+    return this.active?.jobId === jobId ? this.active.monitor.snapshot() : null;
+  }
+
+  // Durable worker ownership: a restart checks this pid before anything may write again.
+  trackWorker(job, child, info) {
+    job.worker = { pid: child.pid, serverPid: process.pid, kind: info.kind, label: info.label, startedAt: new Date().toISOString() };
+    this.monitorOf(job)?.spawned({ ...info, pid: child.pid });
+    return this.store.writeState(job);
+  }
+
+  async releaseWorker(job, pending) {
+    await pending;
+    this.monitorOf(job)?.exited();
+    if (!job.worker) return;
+    job.worker = null;
+    await this.store.writeState(job);
+  }
+
+  monitorOf(job) {
+    return this.active?.jobId === job.id ? this.active.monitor : null;
   }
 
   async cancel(jobId) {
@@ -732,6 +770,8 @@ export class SoloFactory {
       details: error.details ?? {},
     };
     job.recovery = buildRecovery(job, this.store.appDir(jobId), undefined, { maxRepairs: this.maxRepairs });
+    job.watch = { ...job.watch, observed: { ...this.supervision(jobId), status: "Action needed", monitoring: false } };
+    job.watch.incident = incidentRecord(job);
     await this.store.writeState(job);
     await this.emit(job.id, {
       type: cancelled ? "job.cancelled" : "job.failed",
@@ -783,6 +823,7 @@ export class SoloFactory {
   }
 
   async emit(jobId, event) {
+    if (this.active?.jobId === jobId) this.active.monitor.observe(event);
     return this.store.appendEvent(jobId, event);
   }
 
@@ -799,16 +840,33 @@ export class SoloFactory {
     const appDir = this.store.appDir(job.id);
     const logPath = path.join(appDir, ".factory", "logs", `${label}.log`);
     await this.emit(job.id, { type: "agent.started", state: job.state, message: `${this.provider.id} started ${label}` });
-    const result = await this.provider.run({
-      cwd: appDir,
-      prompt,
-      logPath,
-      signal,
-      mode: "write",
-      resumeSessionId,
-      onEvent: (event) => this.emit(job.id, { ...event, state: job.state }),
-      context: { stage: label, job },
-    });
+    const monitor = this.monitorOf(job);
+    let spawned;
+    let result;
+    try {
+      result = await this.provider.run({
+        cwd: appDir,
+        prompt,
+        logPath,
+        signal,
+        mode: "write",
+        resumeSessionId,
+        onEvent: (event) => {
+          monitor?.activity();
+          if (event.type === "agent.backoff") monitor?.recovering();
+          return this.emit(job.id, { ...event, state: job.state });
+        },
+        context: {
+          stage: label,
+          job,
+          onActivity: () => monitor?.activity(),
+          onSpawn: (child, { hardTimeoutMs } = {}) => { spawned = this.trackWorker(job, child, { kind: "agent", label, hardLimitMs: hardTimeoutMs ?? null }); },
+          allowContinuation: () => this.allowContinuation(job, label),
+        },
+      });
+    } finally {
+      await this.releaseWorker(job, spawned);
+    }
     if (result.sessionId) {
       job.agentSessions ||= {};
       job.agentSessions[label] = result.sessionId;
@@ -816,6 +874,24 @@ export class SoloFactory {
     }
     await this.emit(job.id, { type: "agent.completed", state: job.state, stage: label, usage: result.usage ?? null, message: `${label} worker completed` });
     return result;
+  }
+
+  // The one automatic transient continuation per stage invocation, shared by the provider's idle
+  // retry and any later process: recorded durably before dispatch, never renewed by Resume or restart.
+  // ponytail: a manual resume's `-resume` label shares its stage's allowance; keyed by label text.
+  async allowContinuation(job, label) {
+    const key = label.replace(/-resume(?:-\d+)?$/, "");
+    job.watch ??= {};
+    job.watch.continuations ??= {};
+    const used = job.watch.continuations[key] ?? 0;
+    if (used >= 1) {
+      await this.emit(job.id, { type: "watchdog.decision", state: job.state, decision: "continuation_refused", message: `No automatic continuation for ${label}: this stage already used its one allowance.` });
+      return false;
+    }
+    job.watch.continuations[key] = used + 1;
+    await this.store.writeState(job);
+    await this.emit(job.id, { type: "watchdog.decision", state: job.state, decision: "continuation", message: `Continuing ${label} once in its preserved session (1 of 1 automatic continuations).` });
+    return true;
   }
 
   // `before` is the repo's top-level listing before the spec turn: the repo already holds
@@ -889,6 +965,12 @@ export class SoloFactory {
 
   // One repair turn against a recorded failure. Throws the failure itself once the budget is spent.
   async repair(job, failure, signal, slice = null) {
+    await this.recordAttempt(job, failure, slice);
+    const loop = repeatedFailure(job.watch.attempts.filter((item) => item.scope === job.watch.attempts.at(-1).scope), this.watch.loopThreshold);
+    if (loop) {
+      await this.emit(job.id, { type: "watchdog.decision", state: job.state, decision: "loop", message: `Stopped repeated work: ${failure.details?.gate ?? failure.code} failed the same way ${loop.count} times on unchanged code.` });
+      throw new FactoryError(failure.code ?? "quality_gate_failed", `${failure.message} The same failure repeated ${loop.count} times on unchanged code, so no further repair turn runs.`, { ...failure.details, loop });
+    }
     if (job.attempt >= (job.repairBudgetLimit ?? this.maxRepairs)) throw failure;
     job.attempt += 1;
     await this.store.writeState(job);
@@ -897,6 +979,17 @@ export class SoloFactory {
     job = await this.stage(job, "repairing", `Repairing failed ${failure.details?.gate ?? "unknown"} gate`);
     await this.invoke(job, `repair-${job.attempt}`, repairPrompt(failureRelative, slice), signal);
     return job;
+  }
+
+  // A completed failed attempt, recorded before any repair is dispatched. Never cleared by
+  // Resume, retry or restart, so a new invocation cannot evade a detected loop.
+  async recordAttempt(job, failure, slice) {
+    let candidate = null;
+    try { candidate = await sourceBaseline(this.store, { head: false }); } catch {}
+    const scope = `${slice?.id ?? job.recoveryPhase?.cursor?.id ?? job.featureCursor?.id ?? "app"}:${failure.details?.gate ?? failure.code}`;
+    job.watch ??= {};
+    job.watch.attempts = [...(job.watch.attempts ?? []), { ...failureSignature(failure, { scope, candidate }), log: failure.details?.gate ? `.factory/logs/${failure.details.gate}-${job.attempt}.log` : null, at: new Date().toISOString() }].slice(-30);
+    await this.store.writeState(job);
   }
 
   async verify(job, manifest, signal, { includeInstall, proofs = [] }) {
@@ -932,14 +1025,23 @@ export class SoloFactory {
       job.activeCommand = { gate, command, startedAt: new Date().toISOString() };
       await this.store.writeState(job);
       await this.emit(job.id, { type: "gate.started", state: job.state, gate, message: `${gate}: ${command.join(" ")}` });
-      const result = await this.commandRunner({
-        executable: command[0],
-        args: command.slice(1),
-        cwd: this.store.appDir(job.id),
-        logPath: path.join(this.store.appDir(job.id), ".factory", "logs", `${gate}-${job.attempt}.log`),
-        timeoutMs: gate === "install" ? 10 * 60_000 : 5 * 60_000,
-        signal,
-      });
+      const timeoutMs = gate === "install" ? 10 * 60_000 : 5 * 60_000;
+      let spawned;
+      let result;
+      try {
+        result = await this.commandRunner({
+          executable: command[0],
+          args: command.slice(1),
+          cwd: this.store.appDir(job.id),
+          logPath: path.join(this.store.appDir(job.id), ".factory", "logs", `${gate}-${job.attempt}.log`),
+          timeoutMs,
+          signal,
+          // A command inside its own deadline is waiting, not stalled; the progress window never stops it.
+          onSpawn: (child) => { spawned = this.trackWorker(job, child, { kind: "command", label: gate, gate, command, hardLimitMs: timeoutMs }); },
+        });
+      } finally {
+        await this.releaseWorker(job, spawned);
+      }
       const durationMs = Date.now() - started;
       if (result.code !== 0) {
         await this.emit(job.id, { type: "gate.failed", state: job.state, gate, durationMs, message: `${gate} failed` });
@@ -1163,10 +1265,15 @@ export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
   const phase = job.recoveryPhase?.status;
   if (job.dismissed || !PARKED_STATES.has(job.state)) return next("none", null, null, "Only an unresolved parked run can continue.");
   if (busy) return next("none", null, null, "A worker is already running or queued for this run; wait for it to park.");
+  // Restart reconciliation: never a second writer while the old worker may still write.
+  if (job.error?.code === "worker_unconfirmed" && workerAlive(job.error.details?.pid)) return next("stop-worker", `Stop worker ${job.error.details.pid}`, null, `A ${job.error.details.kind ?? "worker"} from before the restart (pid ${job.error.details.pid}, ${job.error.details.label}) is still running and may write to the workspace. Stop that process; Resume becomes available once it has exited.`);
   if (planBlockedOut(job)) return next("revise-inputs", "Revise inputs and prepare a new plan", "recovery-plan", `The repair plan is still blocked after ${job.recoveryPhase.corrections ?? 0} plan corrections: ${job.recoveryPhase.planBlockers?.[0] ?? job.error?.message}. Retrying with the same inputs cannot pass review. Revise the specs or prototype inputs to resolve the blockers, then prepare a new plan.`);
   if (phase === "planning" || phase === "plan_failed") return next("retry-plan", "Retry repair-plan preparation", "recovery-plan", `${phase === "planning" ? "Repair-plan preparation stopped before it finished" : "Repair-plan preparation failed"}, so no plan is approved. Retry repair-plan preparation; Resume cannot continue an unapproved plan.`);
   if (phase === "ready") return next("approve-plan", "Approve and continue repairs", "recovery-start", "Review and approve the recovery plan before execution; Resume does not start an unapproved plan.");
   if (repairsExhausted(job, maxRepairs)) return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The repair budget is exhausted. Prepare a repair plan and approve it; Resume does not renew the budget or rerun the same review.");
+  if (job.error?.details?.loop) return job.error.code === "review_rejected" || pendingProofFailure(job)
+    ? next("prepare-plan", "Prepare repair plan", "recovery-plan", "The same failure repeated on unchanged code, so repeating repairs cannot help. Prepare a repair plan and approve it; Resume does not renew the budget.")
+    : next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", "The same failure repeated on unchanged code. Change the code or inputs first: Resume reruns the checks, and no repair turn runs while the code is unchanged.");
   if (inputsChanged(job)) return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The specs or prototype inputs changed after the plan was approved. Prepare a repair plan against the current inputs.");
   if (job.state === "cancelled") return next("none", null, null, "The owner cancelled this run; start over to build it again.");
   return next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", phase === "running" ? "Resume continues the approved repair plan from its cursor." : "Resume continues this run from its preserved files.");
@@ -1196,11 +1303,19 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
   const reviewBlocked = job.error?.code === "review_rejected";
   const exhausted = repairsExhausted(job, maxRepairs);
   const stale = inputsChanged(job);
-  const title = stale ? "Specs or prototype inputs changed" : exhausted ? "Repair budget exhausted" : reviewBlocked ? "Required functionality or evidence is unfinished" : primary?.title
+  const loop = job.error?.details?.loop;
+  const unconfirmed = job.error?.code === "worker_unconfirmed";
+  const title = unconfirmed ? "A worker from before the restart may still be running" : loop ? "Repeated failure on unchanged code" : stale ? "Specs or prototype inputs changed" : exhausted ? "Repair budget exhausted" : reviewBlocked ? "Required functionality or evidence is unfinished" : primary?.title
     ?? (timeoutReason === "idle" ? "The coding agent became inactive" : timeoutReason === "hard" ? "The run reached its safety cap" : "The run paused before completion");
   const actions = diagnostics.map((item) => item.action);
   if (!actions.length) {
-    if (stale) {
+    if (unconfirmed) {
+      actions.push(`Stop process ${job.error.details.pid} (${job.error.details.label}) or wait for it to exit; the factory will not start a second worker beside it.`);
+      actions.push("Once it has exited, Resume continues this run from its preserved files.");
+    } else if (loop) {
+      actions.push(`Read the repeated failure in ${loop.logs?.at(-1) ?? "the named log"}; the last repairs did not change the code.`);
+      actions.push("Change the code or inputs, or prepare a repair plan; Resume does not renew the repair budget.");
+    } else if (stale) {
       actions.push("Prepare repair plan: the factory compares the changed inputs with the approved plan and plans the unfinished work against the current inputs; verified features stay done.");
       actions.push("Review the plan, then Approve and continue repairs. Resume would stop again on the same changed inputs.");
     } else if (exhausted) {
@@ -1216,7 +1331,9 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
     } else actions.push("Review the recovery packet and the named log, then resume this run from its preserved files.");
   }
   const attempts = job.error?.details?.autoResumes ?? 0;
-  const summary = reviewBlocked ? `The review did not approve the app. ${job.attempt ?? 0} automatic repairs have been used; green tests do not prove the missing features are complete.` : diagnostics.length
+  const summary = unconfirmed ? `The factory restarted while ${job.error.details.label} (pid ${job.error.details.pid}) was running. Nothing new starts until that process has exited, so two workers never write at once.`
+    : loop ? `${loop.gate ?? "A check"} failed the same way ${loop.count} times without any code change, so the factory stopped repeating it. Files and evidence are preserved.`
+    : reviewBlocked ? `The review did not approve the app. ${job.attempt ?? 0} automatic repairs have been used; green tests do not prove the missing features are complete.` : diagnostics.length
     ? `${diagnostics.map((item) => item.title).join("; ")}. The partial app and completed specification are intact.`
     : timeoutReason === "idle"
       ? `The agent stopped producing activity. ${attempts ? "Its one bounded same-session retry was used." : "A manual resume can continue without starting over."}`
@@ -1261,6 +1378,10 @@ export function buildRecoveryPacket(job) {
   if (job.error?.details?.output && job.error.details.output !== job.error.message) lines.push("", "Review findings:", job.error.details.output);
   if (job.recoveryPhase?.plan) lines.push("", `Feature recovery: ${job.recoveryPhase.status}; ${job.recoveryPhase.done.length}/${job.recoveryPhase.plan.slices.length} verified.`,
     ...job.recoveryPhase.plan.slices.map(slice => `- ${job.recoveryPhase.done.includes(slice.id) ? "Verified" : "Unfinished"}: ${slice.title} (${(slice.closes ?? slice.checks).join(", ")})${pendingNote(pendingChecks(slice, { plan: job.recoveryPhase.plan, outstanding: job.outstandingProofs }))}`));
+  const incident = job.watch?.incident ?? (job.error ? incidentRecord(job) : null);
+  if (incident) lines.push("", "Incident:", `- Trigger: ${incident.trigger}`, `- Observed: ${incident.observed}`, `- Uncertain: ${incident.uncertain}`, `- Tried: ${incident.tried}`, `- Preserved: ${incident.preserved}`,
+    `- Last activity: ${incident.lastActivityAt ?? "unknown"}; last confirmed progress: ${incident.lastProgressAt ? `${incident.lastProgressAt} (${incident.lastProgressType})` : "none recorded"}`,
+    ...(incident.fingerprint ? [`- Candidate fingerprint: ${incident.fingerprint}`] : []), ...incident.logs.map((log) => `- Log: ${log}`));
   if (recovery.logPath) lines.push("", `Log: ${recovery.logPath}`);
   lines.push(
     "",

@@ -6,6 +6,7 @@ import { JobStore } from "./store.mjs";
 import { withReviewDiagnostics } from "./review.mjs";
 import { validateRecoveryApproval } from "./feature-recovery.mjs";
 import { assertPlanInputsRevised, buildRecovery, buildRecoveryPacket, continuationAction, SoloFactory, withContinuation } from "./factory.mjs";
+import { watchConfig } from "./watchdog.mjs";
 import {
   INTERVIEW_RESPONSE_SCHEMA,
   buildInterviewPrompt,
@@ -79,6 +80,7 @@ export async function createSoloFactoryServer(options = {}) {
   const fixtureMode = options.fixtureMode ?? process.env.SOLOFACTORY_DEMO === "1";
   // Repair turns per gate budget. Only a smoke test lowers it, to reach an exhausted budget on a real provider.
   const maxRepairs = /^\d+$/.test(process.env.SOLOFACTORY_MAX_REPAIRS ?? "") ? Number(process.env.SOLOFACTORY_MAX_REPAIRS) : 2;
+  watchConfig(); // fails fast on an invalid progress window or loop threshold
   const providerFactory = options.providerFactory ?? ((id) => {
     if (id === "fixture" && fixtureMode) return createFixtureProvider();
     // Runs made with SOLOFACTORY_DEMO=1 persist in the project; outside demo mode they can't run.
@@ -155,7 +157,12 @@ export async function createSoloFactoryServer(options = {}) {
     const blockedBy = runs.has(projectId) ? null : await blockerFor(projectId);
     return jobs.map((stored) => {
       const position = queue.findIndex((entry) => entry.jobId === stored.id);
-      const job = withContinuation(stored, { maxRepairs, busy: position >= 0 || runs.get(projectId)?.jobId === stored.id });
+      const run = runs.get(projectId);
+      const live = run?.jobId === stored.id ? run.factory.supervision(stored.id) : null;
+      // Supervision is a label beside the lifecycle, never a replacement: live while this server owns the run,
+      // the last observation once it parks.
+      const supervision = live ?? (PARKED.has(stored.state) && stored.error && stored.watch?.observed ? { ...stored.watch.observed, status: "Action needed", monitoring: false } : null);
+      const job = { ...withContinuation(stored, { maxRepairs, busy: position >= 0 || run?.jobId === stored.id }), supervision };
       if (position < 0) return job;
       return { ...job, queuePosition: position + 1, queuedFor: queue[position].mode, blockedBy: queue[position].mode === "start" ? blockedBy : null };
     });
@@ -223,7 +230,8 @@ export async function createSoloFactoryServer(options = {}) {
     try {
       const url = new URL(request.url, "http://127.0.0.1");
       if (request.method === "GET" && url.pathname === "/api/health") {
-        return json(response, 200, { ok: true, project: active.id, ...schedulerStatus() });
+        // Server alive is this response; worker progress is each active run's supervision status.
+        return json(response, 200, { ok: true, project: active.id, ...schedulerStatus(), workers: [...runs].map(([projectId, run]) => ({ projectId, jobId: run.jobId, supervision: run.factory.supervision(run.jobId) })) });
       }
       if (request.method === "GET" && url.pathname === "/api/board") {
         return json(response, 200, await board());
@@ -441,7 +449,7 @@ export async function createSoloFactoryServer(options = {}) {
         const jobStore = storeFor(projectId);
         const job = await ensureRecovery(await jobStore.read(resumeMatch[1]), jobStore);
         const next = continuationAction(job, { maxRepairs, busy: queue.some((entry) => entry.jobId === job.id) || runs.get(projectId)?.jobId === job.id });
-        if (next.action !== "resume") return json(response, 409, { error: next.label ? `${next.reason} Next: ${next.label} (POST ${next.endpoint}).` : next.reason, nextAction: next });
+        if (next.action !== "resume") return json(response, 409, { error: next.endpoint ? `${next.reason} Next: ${next.label} (POST ${next.endpoint}).` : next.reason, nextAction: next });
         // Front of the queue: resolving a parked run is what unblocks everything behind it.
         await enqueue(projectId, job.id, "resume", { front: true });
         return json(response, 202, { job, resumed: true, queued: queue.some((entry) => entry.jobId === job.id) });

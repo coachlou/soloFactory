@@ -254,7 +254,32 @@ Only one job may be active because the target user does not benefit from resourc
 - **Start over** is a separate explicit action and creates a new run. It is not the default
   response to a recoverable interruption.
 - Cancellation sends termination to the active child and records `cancelled`.
-- Process restart converts ambiguous in-flight state to `interrupted`.
+- Process restart converts ambiguous in-flight state to `interrupted`. A run whose recorded
+  worker pid still exists is parked as `worker_unconfirmed`; its next action is `stop-worker`
+  (no endpoint) until that process has exited, so no second writer starts beside it.
+
+### Run supervision (src/watchdog.mjs)
+
+- One timer per active run, started and stopped with the run, active only while the server
+  owns the run. It observes and never writes state, starts a worker or retries.
+- Activity is output, provider events and heartbeats. Progress is an accepted result:
+  `gate.passed`, `git.committed`, `plan.approved`, `slice.completed`,
+  `recovery.slice.completed`, `job.completed`, counted once per stage. Agent prose is never
+  progress. Elapsed time uses a monotonic clock, so downtime and clock changes are not idleness.
+- Supervision status (a label beside the lifecycle, never instead of it): Working, Waiting for
+  command, Progress unknown, Progress needs checking, Recovering, Action needed. Only
+  transitions into or out of Progress needs checking or Recovering emit `supervision.changed`.
+- Continuations: at most one automatic transient continuation per stage invocation, shared
+  with Codex's idle retry, persisted in `job.watch.continuations` before dispatch
+  (`watchdog.decision` events). Read-mode stages still get none.
+- Loops: every completed failed gate attempt is recorded in `job.watch.attempts` before any
+  repair (scope, code, gate, checks, normalized output digest, source candidate). When the
+  last `SOLOFACTORY_LOOP_THRESHOLD` attempts in a scope are identical on the same candidate,
+  repair stops with the original error code and `details.loop`. An unknown candidate never
+  counts. History is never cleared by Resume or restart.
+- A parked run keeps `job.watch.observed` and a bounded, redacted `job.watch.incident`
+  (trigger, cursor, observed, uncertain, tried, preserved, next action, fingerprint,
+  attempts, logs) that the recovery packet includes.
 
 ## 8. Security boundary
 
@@ -270,7 +295,8 @@ Only one job may be active because the target user does not benefit from resourc
 ## 9. HTTP surface
 
 - `GET /manual` — the self-contained HTML user manual (`docs/manual/index.html`), linked from the header.
-- `GET /api/health` — factory health, active project, busy run, `activeRuns`, `maxActiveRuns`.
+- `GET /api/health` — factory health, active project, busy run, `activeRuns`, `maxActiveRuns`, and
+  `workers` (each active run's supervision snapshot: server alive is not worker progressing).
 - `GET /api/board` — every run of every project grouped by column (queued, specifying,
   building, reviewing, deploying, parked, completed; completed capped at five per project)
   with slice progress and `blockedBy`, plus `active`/`maxActiveRuns`.

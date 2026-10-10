@@ -801,3 +801,21 @@ PRD: `spec/PRD-provider-diagnostics-and-planning-continuation.md`.
 - A trailing record cut off by a kill is dropped from diagnostic lines; a trailing plain-text line still counts.
 - Tests: 194/194 and the distro precheck pass. New tests cover acceptance 1–6 on both Codex and Claude, including the dashboard source check. No real-provider smoke test was run,
   and the photo-library run was not touched.
+
+## Run watchdog and bounded recovery (2026-10-10, branch feature/run-watchdog off 77159ff) — implemented, committed, not installed
+
+PRD: `spec/PRD-run-watchdog-and-bounded-recovery.md` (its header names wip/feature-slice-recovery; work is on feature/run-watchdog).
+- `src/watchdog.mjs`: `RunMonitor` (one unref'd timer per active run, monotonic clock, observe-only), `supervisionStatus`,
+  `failureSignature`/`repeatedFailure`, `incidentRecord`, `workerAlive`, `watchConfig` (`SOLOFACTORY_PROGRESS_MINUTES` 20, 0–240;
+  `SOLOFACTORY_LOOP_THRESHOLD` 3, 2–10).
+- Controller: `trackWorker`/`releaseWorker` persist `job.worker` (pid); `allowContinuation` persists the one continuation per stage
+  in `job.watch.continuations` before Codex dispatches it; `repair` records `job.watch.attempts` and stops on an unchanged loop
+  (original code + `details.loop`); `fail` saves `watch.observed` + `watch.incident`; `activate` clears those two (never attempts or continuations).
+- Restart: `recoverInterrupted` parks a live recorded pid as `worker_unconfirmed` → `stop-worker` until it exits.
+- API: health `workers[]`, job `supervision`. Dashboard: supervision line, incident list.
+- Tests: 203/203 pass with the distro precheck; mutations of loop, accounting, observation and incident clearing each fail a test.
+- Gaps: no controller-level Claude-silence test; continuation test drives `invoke`, not `start`; no concurrent-click test: the existing
+  `factory_busy` guard has no test at all; legacy runs have no recorded pid; grandchildren are not tracked.
+- With the default maxRepairs=2 and threshold 3 the loop stops at the same point the budget does; it saves turns only with a larger
+  budget (recovery phases, `SOLOFACTORY_MAX_REPAIRS`).
+- Blocked: real-provider smoke test (no paid calls; live photo-library run untouched). Do not install or merge until it passes.

@@ -138,6 +138,8 @@
     <tr><td><code>SOLOFACTORY_AGENT_IDLE_MINUTES</code></td><td>Agent idle deadline, reset by any output. Default 6.</td></tr>
     <tr><td><code>SOLOFACTORY_AGENT_HARD_MINUTES</code></td><td>Agent total safety cap. Default 45.</td></tr>
     <tr><td><code>SOLOFACTORY_AGENT_BACKOFF_SECONDS</code></td><td>Wait before the one automatic Codex resume. Default 15.</td></tr>
+    <tr><td><code>SOLOFACTORY_PROGRESS_MINUTES</code></td><td>Show "Progress needs checking" when a busy worker lands no gate, commit or approved plan for this long. A warning only; nothing is stopped. Default 20, 0–240, 0 turns it off.</td></tr>
+    <tr><td><code>SOLOFACTORY_LOOP_THRESHOLD</code></td><td>Stop repairing after this many identical failures on unchanged code. Default 3, 2–10.</td></tr>
     <tr><td><code>SOLOFACTORY_DEMO=1</code></td><td>Run with the deterministic fixture provider instead of a real agent.</td></tr>
     <tr><td><code>SOLOFACTORY_ISSUES_URL</code></td><td>Where feedback reports are filed.</td></tr>
   </table>

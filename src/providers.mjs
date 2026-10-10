@@ -66,7 +66,7 @@ export function discoverProviders() {
   ];
 }
 
-async function codexRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = "write", resumeSessionId = null }) {
+async function codexRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = "write", resumeSessionId = null, context = {} }) {
   await mkdir(cwd, { recursive: true });
   const idleTimeoutMs = minutesFromEnv("SOLOFACTORY_AGENT_IDLE_MINUTES", 6);
   const hardTimeoutMs = minutesFromEnv("SOLOFACTORY_AGENT_HARD_MINUTES", 45);
@@ -97,6 +97,7 @@ async function codexRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = 
       hardTimeoutMs: remainingHardMs,
       model,
       reasoningEffort,
+      context,
     });
     sessionId = attempt.sessionId ?? sessionId;
     usage = addUsage(usage, attempt.usage);
@@ -112,7 +113,10 @@ async function codexRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = 
       diagnostics.length === 0 &&
       sessionId &&
       autoResumes < maxAutoResumes &&
-      Date.now() - overallStarted + backoffMs < hardTimeoutMs;
+      Date.now() - overallStarted + backoffMs < hardTimeoutMs &&
+      // The controller's durable allowance for this stage invocation: recorded before the
+      // continuation is dispatched, and refused when an earlier process already used it.
+      (await context.allowContinuation?.() ?? true);
 
     if (mayResume) {
       autoResumes += 1;
@@ -153,6 +157,7 @@ async function runCodexAttempt({
   hardTimeoutMs,
   model,
   reasoningEffort,
+  context = {},
 }) {
   const nonce = randomUUID();
   const resultPath = path.join(cwd, ".factory", `agent-result-${nonce}.txt`);
@@ -205,6 +210,8 @@ async function runCodexAttempt({
     signal,
     idleTimeoutMs,
     hardTimeoutMs,
+    onSpawn: (child) => context.onSpawn?.(child, { hardTimeoutMs }),
+    onActivity: context.onActivity,
     onLine(line) {
       try {
         const event = JSON.parse(line);
@@ -248,6 +255,8 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
     // was losing real progress (observed 2026-09-03 on the Snap & Go build).
     idleTimeoutMs: null,
     hardTimeoutMs: minutesFromEnv("SOLOFACTORY_AGENT_HARD_MINUTES", 45),
+    onSpawn: (child) => context.onSpawn?.(child, { hardTimeoutMs: minutesFromEnv("SOLOFACTORY_AGENT_HARD_MINUTES", 45) }),
+    onActivity: context.onActivity,
     onLine(line) {
       onEvent?.({ type: "agent_output", message: line.slice(0, 500) });
     },
