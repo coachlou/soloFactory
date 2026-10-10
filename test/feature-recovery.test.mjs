@@ -40,6 +40,12 @@ for (const [name, mutate] of Object.entries({
   'omitted gap': p => { p.slices.pop(); },
   'other request': p => p.requestId = 'other',
 })) test(`rejects v2 repair plan with ${name}`, () => { const p = v2Plan(); mutate(p); assert.throws(() => validateRecoveryPlan(p, v2Request)); });
+// Seen on a real Claude repair plan: the fix feature depended on a feature the original plan already built.
+test('v2 repair plans may depend on already completed features but not on unknown ones', () => {
+  const p = v2Plan(); p.slices[0].dependsOn = ['MONTHLY-SUMMARY'];
+  assert.deepEqual(validateRecoveryPlan(p, { ...v2Request, completed: ['MONTHLY-SUMMARY'] }).slices[0].dependsOn, []);
+  assert.throws(() => validateRecoveryPlan(p, v2Request), /unknown slice MONTHLY-SUMMARY/);
+});
 
 async function setup(t, mutate = async () => {}, { uploads = {} } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'solo-feature-recovery-'));

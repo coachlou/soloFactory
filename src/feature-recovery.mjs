@@ -30,6 +30,9 @@ export async function sourceBaseline(store, { head = true } = {}) {
 export function validateRecoveryPlan(raw, request) {
   if (raw?.version === 2) {
     if (raw.requestId !== request.id) throw new Error('Repair plan does not match its request.');
+    // A dependency on an already built feature is satisfied; only ids in this plan are validated.
+    const built = new Set(request.completed ?? []);
+    raw = { ...raw, slices: raw.slices?.map(slice => Array.isArray(slice?.dependsOn) ? { ...slice, dependsOn: slice.dependsOn.filter(dep => !built.has(dep)) } : slice) };
     return { ...validateFeaturePlan(raw, { jobId: request.jobId, contractDigest: request.contractDigest, checks: request.checks, sources: request.sources.map(item => item.path) }), requestId: request.id };
   }
   if (raw?.version !== 1 || raw.requestId !== request.id || raw.contractDigest !== request.contractDigest) throw new Error('Recovery plan does not match its request and frozen contract.');
