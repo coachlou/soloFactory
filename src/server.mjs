@@ -77,6 +77,8 @@ export async function createSoloFactoryServer(options = {}) {
   }
   const skill = await readFile(path.join(projectRoot, "skills", "factory-guide.md"), "utf8");
   const fixtureMode = options.fixtureMode ?? process.env.SOLOFACTORY_DEMO === "1";
+  // Repair turns per gate budget. Only a smoke test lowers it, to reach an exhausted budget on a real provider.
+  const maxRepairs = /^\d+$/.test(process.env.SOLOFACTORY_MAX_REPAIRS ?? "") ? Number(process.env.SOLOFACTORY_MAX_REPAIRS) : 2;
   const providerFactory = options.providerFactory ?? ((id) => {
     if (id === "fixture" && fixtureMode) return createFixtureProvider();
     // Runs made with SOLOFACTORY_DEMO=1 persist in the project; outside demo mode they can't run.
@@ -102,7 +104,7 @@ export async function createSoloFactoryServer(options = {}) {
       const projectStore = storeFor(entry.projectId);
       await projectStore.init();
       const job = await projectStore.read(entry.jobId);
-      const factory = new SoloFactory({ store: projectStore, provider: providerFactory(job.provider) });
+      const factory = new SoloFactory({ store: projectStore, provider: providerFactory(job.provider), maxRepairs });
       factories.set(job.id, factory);
       const run = { jobId: job.id, factory };
       runs.set(entry.projectId, run);
@@ -320,7 +322,7 @@ export async function createSoloFactoryServer(options = {}) {
           const jobStore = storeOfJob(feedback.jobId);
           const job = await jobStore.read(feedback.jobId);
           if (!REPORTABLE_STATES.includes(job.state)) return json(response, 409, { error: "Diagnostics are only available for failed, interrupted, or cancelled runs.", code: "feedback_not_reportable" });
-          const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider) });
+          const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider), maxRepairs });
           const { summary } = await factory.telemetry(job.id);
           diagnostics = buildDiagnostics({ job, events: await jobStore.events(job.id, 500), summary, version });
         }
@@ -360,7 +362,7 @@ export async function createSoloFactoryServer(options = {}) {
       if (request.method === "GET" && telemetryMatch) {
         const jobStore = storeOfJob(telemetryMatch[1]);
         const job = await jobStore.read(telemetryMatch[1]);
-        const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider) });
+        const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider), maxRepairs });
         return json(response, 200, await factory.telemetry(job.id));
       }
       const artifactMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/artifacts\/([a-z]+)$/);
@@ -446,7 +448,7 @@ export async function createSoloFactoryServer(options = {}) {
       if (request.method === "POST" && relaunchMatch) {
         const jobStore = storeOfJob(relaunchMatch[1]);
         const job = await jobStore.read(relaunchMatch[1]);
-        const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider) });
+        const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider), maxRepairs });
         factories.set(job.id, factory); // keeps the relaunched child reachable for shutdown
         try {
           return json(response, 200, { job: await factory.relaunch(job.id) });
