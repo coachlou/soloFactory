@@ -71,8 +71,9 @@ Request:
 ${JSON.stringify(request, null, 2)}`;
 }
 
-function repairPlanAuditPrompt(planFile) {
-  return `You are the independent repair-plan reviewer. No repair has started. Read .factory/plan-review-request.json (the unfinished checks, review findings and the authoritative sources), .factory/REVIEW.md, EVERY source file it lists, the existing app and tests, and ${planFile}.
+function repairPlanAuditPrompt(planFile, priorBlockers = null) {
+  const amended = priorBlockers ? `\nThis plan is an owner-submitted correction after automatic corrections ran out. Its previous review blocked it for:\n${priorBlockers.map(item => `- ${item}`).join('\n')}\nAssess each of those blockers explicitly, then judge the whole plan on its merits.` : '';
+  return `You are the independent repair-plan reviewer. No repair has started.${amended} Read .factory/plan-review-request.json (the unfinished checks, review findings and the authoritative sources), .factory/REVIEW.md, EVERY source file it lists, the existing app and tests, and ${planFile}.
 Do NOT modify ${planFile} or any file except .factory/plan-review-result.json. Editing the plan voids your verdict. Write:
 { "version": 1, "jobId", "token", "contractDigest", "planDigest" copied exactly from plan-review-request.json, "verdict": "approve" | "blocked", "blockers": ["<concrete problem>"] }
 Block when any detailed obligation a source states for an unfinished check is missing from the plan, an obligation cites the wrong source or locator, a finding is not addressed, a proof is not an executable test of real behavior, negative/failure cases are missing, a feature is too large to verify alone, or a required model, package or tool is unverified. Approve only a plan you would execute as written.`;
@@ -103,6 +104,25 @@ function spentCorrections(job, sourcesDigest) {
 // Preparations in the ledger whose plan review still blocked after the fingerprint's corrections ran out.
 export function exhaustedPreparations(job) {
   return budgetLedger(job).filter(phase => phase.blocked);
+}
+
+// A plan's content identity: formatting, key order and the request id never make a corrected plan.
+const stable = value => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value;
+export const planKey = plan => digest(stable({ ...plan, requestId: undefined }));
+
+// Every plan already put to the independent reviewer for this input fingerprint since the last executed plan.
+// Durable in the phases, so a restart, a switch back to an earlier candidate or a double click cannot get a free review.
+export async function reviewedPlanKeys(appDir, job, sourcesDigest) {
+  const keys = new Set();
+  for (const phase of budgetLedger(job).filter(item => item.request?.sourcesDigest === sourcesDigest)) {
+    for (const key of phase.reviewedPlans ?? []) keys.add(key);
+    if (phase.plan) keys.add(planKey(phase.plan));
+    // ponytail: phases saved before reviewedPlans: the plan file they last reviewed, while it still validates.
+    if (!phase.reviewedPlans && phase.reviews) {
+      try { keys.add(planKey(validateRecoveryPlan(JSON.parse(await readFile(path.join(appDir, phase.planFile), 'utf8')), phase.request))); } catch { /* a plan that never validated was never reviewed */ }
+    }
+  }
+  return keys;
 }
 
 export async function planFeatureRecovery(factory, id, signal, guidance = '') {
@@ -204,20 +224,39 @@ async function replanForProof(factory, job, signal, guidance, { prior, executed,
   return draftRepairPlan(factory, job, signal, request, prior);
 }
 
-async function draftRepairPlan(factory, job, signal, request, prior) {
+// `amendment` is the owner's supervised path once corrections are exhausted: `{ text }` reviews the submitted
+// plan once as a new phase of the same request (no planner, no correction budget); `{ resume }` continues an
+// interrupted amendment's review only. Both reuse this review, token, digest and approval machinery.
+async function draftRepairPlan(factory, job, signal, request, prior, amendment = null) {
   const id = job.id;
   const appDir = factory.store.appDir();
+  const jobDir = factory.store.jobDir(id);
   const { checks, blockers, sources } = request;
   const frozen = request.contractDigest;
   try {
-    const planFile = `.factory/recovery-plan-${request.id}.json`;
-    await archiveReview(factory, job, `recovery-${request.id}-source`);
-    await writeFile(path.join(factory.store.jobDir(id), `recovery-${request.id}-request.json`), JSON.stringify(request, null, 2));
-    // Stale-input plans have no current review to bind; review-backed plans bind the source verdict.
-    const sourceReport = request.review ? JSON.parse(await readFile(path.join(appDir, '.factory/review-result.json'), 'utf8')) : null;
-    if (prior) { job.recoveryPhaseHistory ??= []; job.recoveryPhaseHistory.push(prior); }
-    const corrections = spentCorrections(job, request.sourcesDigest);
-    job.recoveryPhase = { id: request.id, status: 'planning', request, sourceReportDigest: sourceReport && digest(sourceReport), planFile, done: [], index: 0, stats: {}, reviews: 0, corrections };
+    const phaseId = amendment?.resume ? job.recoveryPhase.id : amendment ? randomUUID() : request.id;
+    const planFile = amendment?.resume ? job.recoveryPhase.planFile : `.factory/recovery-plan-${phaseId}.json`;
+    if (amendment?.resume) {
+      // The reviewer may have touched the plan: the submitted copy is the only candidate this review can approve.
+      await writeFile(path.join(appDir, planFile), await readFile(path.join(jobDir, `recovery-${phaseId}-submitted.json`)));
+      job.recoveryPhase.status = 'planning';
+    } else {
+      await archiveReview(factory, job, `recovery-${phaseId}-source`);
+      await writeFile(path.join(jobDir, `recovery-${phaseId}-request.json`), JSON.stringify(request, null, 2));
+      if (amendment) {
+        // The failed plan stays as raw evidence even when it never parsed; the replacement is its own file.
+        const old = await readFile(path.join(appDir, prior.planFile)).catch(() => null);
+        if (old) await writeFile(path.join(jobDir, `recovery-${phaseId}-prior-plan.json`), old);
+        await writeFile(path.join(jobDir, `recovery-${phaseId}-submitted.json`), amendment.text);
+        await writeFile(path.join(appDir, planFile), amendment.text);
+      }
+      // Stale-input plans have no current review to bind; review-backed plans bind the source verdict.
+      const sourceReport = request.review && !amendment ? JSON.parse(await readFile(path.join(appDir, '.factory/review-result.json'), 'utf8')) : null;
+      if (prior) { job.recoveryPhaseHistory ??= []; job.recoveryPhaseHistory.push(prior); }
+      const corrections = spentCorrections(job, request.sourcesDigest);
+      job.recoveryPhase = { id: phaseId, status: 'planning', request, sourceReportDigest: amendment ? prior.sourceReportDigest : sourceReport && digest(sourceReport), planFile, done: [], index: 0, stats: {}, reviews: 0, corrections, reviewedPlans: [],
+        ...(amendment && { amendment: { priorPhase: prior.id, priorBlockers: prior.planBlockers ?? [], submittedAt: new Date().toISOString() } }) };
+    }
     const phase = job.recoveryPhase;
     job.error = null; job.failedState = null; job.recovery = null;
     job = await factory.stage(job, 'specifying', 'Preparing a repair plan from preserved files');
@@ -228,7 +267,7 @@ async function draftRepairPlan(factory, job, signal, request, prior) {
       try { return validateRecoveryPlan(JSON.parse(await readFile(path.join(appDir, planFile), 'utf8')), request); }
       catch (error) { return error; }
     };
-    await factory.invoke(job, `recovery-plan-${request.id}`, repairPlanPrompt(planFile, request), signal);
+    if (!amendment) await factory.invoke(job, `recovery-plan-${request.id}`, repairPlanPrompt(planFile, request), signal);
     await guard();
     let plan = await readPlan();
     // Same structured gate as feature planning: a separate reviewer approves this exact plan, or it is corrected.
@@ -237,10 +276,12 @@ async function draftRepairPlan(factory, job, signal, request, prior) {
       if (plan instanceof Error) planBlockers = [plan.message];
       else {
         const planDigest = digest(plan);
-        const review = await preparePlanReview(appDir, job, planDigest, { kind: 'repair', requestId: request.id, planFile, checks, findings: blockers, sources });
+        const key = planKey(plan);
+        if (!phase.reviewedPlans.includes(key)) phase.reviewedPlans.push(key);
+        const review = await preparePlanReview(appDir, job, planDigest, { kind: 'repair', requestId: request.id, planFile, checks, findings: blockers, sources, ...(phase.amendment && { amendment: true, priorBlockers: phase.amendment.priorBlockers }) });
         phase.reviews += 1;
         await factory.store.writeState(job);
-        await factory.invoke(job, `recovery-plan-review-${request.id}-${phase.reviews}`, repairPlanAuditPrompt(planFile), signal);
+        await factory.invoke(job, `recovery-plan-review-${phaseId}-${phase.reviews}`, repairPlanAuditPrompt(planFile, phase.amendment?.priorBlockers), signal);
         await guard();
         const after = await readPlan();
         if (after instanceof Error || digest(after) !== planDigest) throw new Error('The repair plan reviewer changed the plan, so its verdict cannot approve it.');
@@ -255,7 +296,7 @@ async function draftRepairPlan(factory, job, signal, request, prior) {
       }
       phase.planBlockers = planBlockers;
       await factory.emit(id, { type: 'plan.blocked', state: job.state, message: planBlockers[0] });
-      if (phase.corrections >= factory.maxRepairs) phase.blocked = true;
+      if (phase.amendment || phase.corrections >= factory.maxRepairs) phase.blocked = true;
       if (phase.blocked) throw Object.assign(new Error(`The repair plan is still blocked after ${phase.corrections} corrections: ${planBlockers[0]}`), { code: 'plan_blocked', details: { blockers: planBlockers } });
       phase.corrections += 1;
       await factory.store.writeState(job);
@@ -267,7 +308,7 @@ async function draftRepairPlan(factory, job, signal, request, prior) {
     phase.planDigest = digest(plan);
     phase.planBlockers = [];
     phase.status = 'ready';
-    await writeFile(path.join(factory.store.jobDir(id), `recovery-${request.id}-approved-candidate.json`), JSON.stringify(plan, null, 2));
+    await writeFile(path.join(jobDir, `recovery-${phaseId}-approved-candidate.json`), JSON.stringify(plan, null, 2));
     job = await factory.stage(job, 'paused', 'Repair plan ready for approval');
     job.failedState = 'building';
     job.recovery = { canResume: false, title: 'Repair plan ready', summary: 'Review the remaining gaps, proposed features and proof checks, then approve to continue repairs. Existing files are preserved.', actions: ['Approve and continue repairs, or send feedback to prepare a revised plan.'], workspace: appDir, automaticRetry: 'No repair runs until the plan is approved.' };
@@ -284,11 +325,54 @@ export async function validateRecoveryApproval(factory, job, planDigest) {
   if (phase?.status !== 'ready' || phase.planDigest !== planDigest || digest(phase.plan) !== planDigest) throw new Error('Recovery approval does not match the ready plan.');
   validateRecoveryPlan(phase.plan, phase.request);
   if (phase.plan.version === 2 && phase.planReview?.planDigest !== planDigest) throw new Error('Recovery approval does not match the reviewed plan.');
-  if (await contractDigest(factory.store.appDir()) !== phase.request.contractDigest || await sourceBaseline(factory.store) !== phase.request.baseline) throw new Error('Recovery approval is stale; source or contract changed after planning.');
-  if (phase.request.sourcesDigest && digest(await sourceSet(factory.store.appDir(), runInputs(job))) !== phase.request.sourcesDigest) throw new Error('Recovery approval is stale; specs or prototype inputs changed after planning.');
+  await assertPlanningCurrent(factory.store, job, phase, 'Recovery approval');
+}
+
+// The contract, source baseline, inputs and source review a phase was planned from are all still current.
+export async function assertPlanningCurrent(store, job, phase, subject) {
+  if (await contractDigest(store.appDir()) !== phase.request.contractDigest || await sourceBaseline(store) !== phase.request.baseline) throw new Error(`${subject} is stale; source or contract changed after planning.`);
+  if (phase.request.sourcesDigest && digest(await sourceSet(store.appDir(), runInputs(job))) !== phase.request.sourcesDigest) throw new Error(`${subject} is stale; specs or prototype inputs changed after planning.`);
   if (phase.request.review === null) return; // stale-input plan: no review to bind
-  const source = JSON.parse(await readFile(path.join(factory.store.appDir(), '.factory/review-result.json'), 'utf8'));
-  if (source.token !== (phase.request.reviewToken ?? job.reviewRequest.token) || source.jobId !== job.id || digest(source) !== phase.sourceReportDigest) throw new Error('Recovery approval is stale; source review changed after planning.');
+  const source = JSON.parse(await readFile(path.join(store.appDir(), '.factory/review-result.json'), 'utf8'));
+  if (source.token !== (phase.request.reviewToken ?? job.reviewRequest.token) || source.jobId !== job.id || digest(source) !== phase.sourceReportDigest) throw new Error(`${subject} is stale; source review changed after planning.`);
+}
+
+// Owner-submitted corrected plan (already admitted by assertPlanAmendable under writer ownership): one review.
+export const amendRepairPlan = (factory, id, signal, { plan }) => factory.store.read(id)
+  .then(job => draftRepairPlan(factory, job, signal, job.recoveryPhase.request, job.recoveryPhase, { text: JSON.stringify(plan, null, 2) }));
+
+// An interrupted amendment continues its review only; the planner never runs and no correction is renewed.
+export const resumeAmendedReview = (factory, id, signal) => factory.store.read(id)
+  .then(job => draftRepairPlan(factory, job, signal, job.recoveryPhase.request, null, { resume: true }));
+
+// Everything an owner or their coding agent needs to correct the blocked plan, as one download.
+export async function amendmentPacket(store, job) {
+  const phase = job.recoveryPhase; const appDir = store.appDir();
+  const { priorPlan, review, ...request } = phase.request;
+  const packet = {
+    kind: 'solofactory-plan-correction-packet', version: 1, runId: job.id, phaseId: phase.id, requestId: phase.request.id, workspace: appDir,
+    instructions: [
+      'Automatic plan corrections are exhausted and no repairs have started. The independent reviewer still blocks this plan.',
+      'Correct the plan so that every blocker below is resolved. Do not narrow, waive or drop a requirement. Change the requirements only if the inputs themselves are wrong.',
+      'Read each file in request.sources (paths are relative to the workspace) before editing. Keep jobId, requestId and contractDigest exactly as given.',
+      `Save the corrected plan as a new JSON file and submit it with "Submit corrected plan for review" in the dashboard, or POST {"phaseId": "${phase.id}", "plan": <the corrected plan>} to /api/jobs/${job.id}/recovery-review.`,
+      'A submitted plan gets exactly one independent review, no new automatic corrections, and still needs your approval before any repair runs.',
+    ],
+    blockers: phase.planBlockers ?? [], correctionsUsed: phase.corrections ?? 0, repairsStarted: false,
+    submit: { method: 'POST', endpoint: `/api/jobs/${job.id}/recovery-review`, body: { phaseId: phase.id, plan: '<corrected plan JSON>' } },
+    request, planSchema: PLAN_SCHEMA,
+  };
+  // Containment: only the phase's own plan artifact under the workspace is ever read.
+  if (/^\.factory\/recovery-plan-[0-9a-f-]+\.json$/.test(phase.planFile ?? '')) {
+    try {
+      const file = await realpath(path.join(appDir, phase.planFile));
+      if (path.relative(await realpath(appDir), file).startsWith('..')) throw new Error('outside the workspace');
+      const raw = await readFile(file, 'utf8');
+      try { packet.currentPlan = JSON.parse(raw); } catch (error) { packet.currentPlanRaw = raw; packet.currentPlanProblem = error.message; }
+      if (packet.currentPlan) { try { validateRecoveryPlan(packet.currentPlan, phase.request); } catch (error) { packet.currentPlanProblem = error.message; } }
+    } catch (error) { packet.currentPlanProblem = `The plan file could not be read: ${error.message}`; }
+  }
+  return packet;
 }
 
 export async function runFeatureRecovery(factory, id, signal, approval = null) {

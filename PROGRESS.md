@@ -819,3 +819,21 @@ PRD: `spec/PRD-run-watchdog-and-bounded-recovery.md` (its header names wip/featu
 - With the default maxRepairs=2 and threshold 3 the loop stops at the same point the budget does; it saves turns only with a larger
   budget (recovery phases, `SOLOFACTORY_MAX_REPAIRS`).
 - Blocked: real-provider smoke test (no paid calls; live photo-library run untouched). Do not install or merge until it passes.
+
+## Exhausted plan corrections: supervised plan amendment (2026-10-10, branch fix/exhausted-plan-amendment off 1d5d37b) — implemented, committed, not installed
+
+PRD: `spec/PRD-exhausted-plan-amendment-recovery.md`.
+- Policy: `continuationAction` returns `amend-plan` (endpoint `recovery-review`, alternative `revise-inputs`) for `plan_blocked`, and `retry-plan`
+  labelled "Resume plan review" for an interrupted amendment. Controller, API and dashboard all read it.
+- Controller: `amendRecovery` validates (`assertPlanAmendable`) before and again under writer ownership (`activate`'s new `admit` hook runs before
+  the incident-clear write, so a refusal leaves state.json byte-identical and starts no turn). It reuses `draftRepairPlan`'s review, token, digest
+  and approval path: a new phase (same request) with the submitted plan, no planner call, `amendment: true` plus prior blockers in the review
+  request, `blocked` after one review. Corrections are neither spent nor renewed. Duplicates are caught by `planKey` (canonical JSON minus
+  `requestId`) against `phase.reviewedPlans` across the same input fingerprint (legacy phases: the on-disk plan).
+- API: `POST recovery-review` (4MB plan limit, 413 when exceeded, 400/409 from the shared preflight), `GET recovery-plan-packet` (attachment,
+  only while `amend-plan`). `readBytes` now drains an oversized body so the client receives the 413.
+- Dashboard: explanation, blockers, help-packet link, advanced file input (selection kept in `state.amendment`), alternative revise-inputs button.
+- Tests: `test/plan-amendment.test.mjs` (controller and HTTP; PRD acceptance 1-9), existing recovery and e2e tests updated for the new action; 10 is
+  covered by the existing fresh-budget assertions kept in `feature-recovery.test.mjs`.
+- Gaps: no real-provider smoke test; no browser-driven test of the file input (source checks only); duplicate detection for legacy phases is
+  best-effort (only the last on-disk plan); Node 24 was not available, tests ran on Node v26.5.0.

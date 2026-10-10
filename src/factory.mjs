@@ -13,7 +13,7 @@ export { pendingProofFailure };
 import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
 import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, watchConfig, workerAlive } from "./watchdog.mjs";
-import { archiveReview, digest, exhaustedPreparations, planFeatureRecovery, runFeatureRecovery, sourceBaseline } from "./feature-recovery.mjs";
+import { amendRepairPlan, archiveReview, assertPlanningCurrent, digest, exhaustedPreparations, planFeatureRecovery, planKey, resumeAmendedReview, reviewedPlanKeys, runFeatureRecovery, sourceBaseline, validateRecoveryPlan } from "./feature-recovery.mjs";
 
 // Which harness produced a run, so runs.jsonl can compare harness changes. Read once at load.
 const harnessRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -72,8 +72,18 @@ export class SoloFactory {
   }
 
   async planRecovery(jobId, guidance = "") {
-    await assertPlanInputsRevised(this.store, await this.store.read(jobId));
+    const job = await this.store.read(jobId);
+    await assertPlanInputsRevised(this.store, job);
+    // An interrupted amendment review continues as a review; it never becomes a fresh planner run.
+    if (await amendmentResumable(this.store, job)) return this.activate(jobId, signal => resumeAmendedReview(this, jobId, signal));
     return this.activate(jobId, signal => planFeatureRecovery(this, jobId, signal, guidance));
+  }
+
+  // The owner's corrected plan gets one independent review. Admission re-validates under writer ownership,
+  // before activation writes anything, so a rejection leaves the saved run untouched.
+  async amendRecovery(jobId, submission) {
+    return this.activate(jobId, (signal) => amendRepairPlan(this, jobId, signal, submission),
+      async () => assertPlanAmendable(this.store, await this.store.read(jobId), submission, { maxRepairs: this.maxRepairs }));
   }
 
   async startRecovery(jobId, planDigest) {
@@ -110,14 +120,17 @@ export class SoloFactory {
     });
   }
 
-  async activate(jobId, runner) {
+  async activate(jobId, runner, admit) {
     if (this.active) throw new FactoryError("factory_busy", `Run ${this.active.jobId} is already active.`);
     const controller = new AbortController();
     // One monitor per active run; it only observes, and stops with the run.
     const monitor = new RunMonitor({ jobId, config: this.watch, emit: (event) => this.store.appendEvent(jobId, event) }).start();
     this.active = { jobId, controller, monitor };
     // A new invocation starts without the last park's incident; attempts and continuations stay durable.
+    let rejected = false;
     const promise = (async () => {
+      // `admit` validates under ownership before the incident below is cleared; a refusal writes nothing.
+      try { await admit?.(); } catch (error) { rejected = true; throw error; }
       const job = await this.store.read(jobId).catch(() => null);
       if (job?.watch?.incident || job?.watch?.observed) {
         delete job.watch.incident; delete job.watch.observed;
@@ -127,7 +140,7 @@ export class SoloFactory {
     })().finally(async () => {
       monitor.stop();
       if (this.active?.jobId === jobId) this.active = null;
-      await this.logRun(jobId).catch(() => {});
+      if (!rejected) await this.logRun(jobId).catch(() => {});
     });
     this.active.promise = promise;
     return promise;
@@ -225,7 +238,7 @@ export class SoloFactory {
     // ponytail: "none" (cancelled, dismissed) stays resumable here as before; the API refuses it.
     const next = continuationAction(job, { maxRepairs: this.maxRepairs });
     if (!["resume", "none"].includes(next.action)) {
-      throw new FactoryError(["prepare-plan", "revise-inputs"].includes(next.action) ? "repair_plan_required" : "recovery_approval_required", `${next.reason} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next });
+      throw new FactoryError(["prepare-plan", "revise-inputs", "amend-plan"].includes(next.action) ? "repair_plan_required" : "recovery_approval_required", `${next.reason} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next });
     }
     if (job.recoveryPhase?.status === "running") return runFeatureRecovery(this, jobId, signal);
     if (job.recoveryPhase?.status === "built") {
@@ -1242,19 +1255,46 @@ export function planBlockedOut(job) {
   return job.recoveryPhase?.status === "plan_failed" && (job.error?.code === "plan_blocked" || /plan is still blocked after \d+ corrections/.test(job.error?.message ?? ""));
 }
 
+// An interrupted amendment review that the current inputs still match: its continuation is a review, not a plan.
+async function amendmentResumable(store, job) {
+  const phase = job.recoveryPhase;
+  if (!phase?.amendment || !["planning", "plan_failed"].includes(phase.status) || planBlockedOut(job)) return false;
+  return digest(await sourceSet(store.appDir(), runInputs(job))) === phase.request.sourcesDigest;
+}
+
 // Refuses a futile repair-plan preparation before any turn runs: the current inputs' fingerprint already
 // exhausted its corrections in the budget ledger (the latest plan, or earlier inputs switched back to).
 export async function assertPlanInputsRevised(store, job) {
   const exhausted = exhaustedPreparations(job);
   // ponytail: runs saved before the `blocked` flag are recognized only for their latest preparation.
   if (planBlockedOut(job) && !exhausted.includes(job.recoveryPhase)) exhausted.push(job.recoveryPhase);
-  if (!exhausted.length) return;
+  if (!exhausted.length || await amendmentResumable(store, job)) return;
   const now = digest(await sourceSet(store.appDir(), runInputs(job)));
   const phase = exhausted.find((item) => item.request?.sourcesDigest === now);
   if (!phase) return;
   const blockers = phase.planBlockers ?? [];
-  const next = { action: "revise-inputs", label: "Revise inputs and prepare a new plan", endpoint: `/api/jobs/${job.id}/recovery-plan`, reason: "These inputs have exhausted their plan corrections. Revise the specs or prototype to prepare a new plan." };
-  throw new FactoryError("plan_inputs_unchanged", `${next.reason}${blockers.length ? ` Plan review blockers: ${blockers.join("; ")}.` : ""} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next, blockers });
+  const policy = continuationAction(job);
+  const next = policy.action === "amend-plan" ? policy : { action: "revise-inputs", label: "Revise inputs and prepare a new plan", endpoint: `/api/jobs/${job.id}/recovery-plan`, reason: "Approve the ready plan, or change the specs or prototype only if the inputs themselves are wrong." };
+  throw new FactoryError("plan_inputs_unchanged", `These inputs have exhausted their plan corrections. ${next.reason}${blockers.length ? ` Plan review blockers: ${blockers.join("; ")}.` : ""} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next, blockers });
+}
+
+// Preflight for a submitted corrected plan, run by the HTTP route and again under writer ownership. It reads only:
+// every refusal precedes any state write, archive or provider turn. status: 400 malformed, 409 stale or duplicate.
+export const MAX_AMENDED_PLAN_BYTES = 4_000_000;
+export async function assertPlanAmendable(store, job, { phaseId, plan } = {}, { maxRepairs = 2, busy = false } = {}) {
+  const refuse = (code, message, status) => new FactoryError(code, message, { status });
+  const next = continuationAction(job, { maxRepairs, busy });
+  if (next.action !== "amend-plan") throw refuse("amendment_not_allowed", `A corrected plan cannot be reviewed now. ${next.reason}`, 409);
+  const prior = job.recoveryPhase;
+  if (phaseId !== prior.id) throw refuse("amendment_stale", "The plan was prepared for a different recovery phase than the one now waiting. Download the current help packet and correct that plan.", 409);
+  if (!plan || typeof plan !== "object" || Array.isArray(plan) || plan.version !== 2) throw refuse("amendment_invalid", "The corrected plan must be a version 2 repair plan (a JSON object).", 400);
+  if (Buffer.byteLength(JSON.stringify(plan)) > MAX_AMENDED_PLAN_BYTES) throw refuse("amendment_too_large", `The corrected plan exceeds ${MAX_AMENDED_PLAN_BYTES} bytes.`, 413);
+  let valid;
+  try { valid = validateRecoveryPlan(plan, prior.request); }
+  catch (error) { throw refuse("amendment_invalid", `The corrected plan is not valid for this request: ${error.message}`, 400); }
+  try { await assertPlanningCurrent(store, job, prior, "The corrected plan"); }
+  catch (error) { throw refuse("amendment_inputs_changed", `${error.message} Prepare a new plan against the current inputs instead.`, 409); }
+  if ((await reviewedPlanKeys(store.appDir(), job, prior.request.sourcesDigest)).has(planKey(valid))) throw refuse("amendment_duplicate", "This plan, ignoring formatting and its request id, was already reviewed for these inputs. Submit a corrected plan that differs in content.", 409);
 }
 
 // The one continuation policy: the controller, the HTTP API and the dashboard all ask this which
@@ -1267,7 +1307,9 @@ export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
   if (busy) return next("none", null, null, "A worker is already running or queued for this run; wait for it to park.");
   // Restart reconciliation: never a second writer while the old worker may still write.
   if (job.error?.code === "worker_unconfirmed" && workerAlive(job.error.details?.pid)) return next("stop-worker", `Stop worker ${job.error.details.pid}`, null, `A ${job.error.details.kind ?? "worker"} from before the restart (pid ${job.error.details.pid}, ${job.error.details.label}) is still running and may write to the workspace. Stop that process; Resume becomes available once it has exited.`);
-  if (planBlockedOut(job)) return next("revise-inputs", "Revise inputs and prepare a new plan", "recovery-plan", `The repair plan is still blocked after ${job.recoveryPhase.corrections ?? 0} plan corrections: ${job.recoveryPhase.planBlockers?.[0] ?? job.error?.message}. Retrying with the same inputs cannot pass review. Revise the specs or prototype inputs to resolve the blockers, then prepare a new plan.`);
+  if (planBlockedOut(job)) return { ...next("amend-plan", "Submit corrected plan for review", "recovery-review", "Automatic plan corrections are exhausted. The plan still has review blockers. Correct the plan and submit it for review. Change the requirements only if the inputs themselves are wrong."),
+    alternatives: [next("revise-inputs", "Revise inputs and prepare a new plan", "recovery-plan", "Use this only if the specs or prototype inputs themselves are wrong or ambiguous; it prepares a new plan with a fresh correction budget.")] };
+  if (job.recoveryPhase?.amendment && (phase === "planning" || phase === "plan_failed")) return next("retry-plan", "Resume plan review", "recovery-plan", "The review of the submitted corrected plan stopped before it finished. Resume plan review: it only reviews that plan again; it does not start the planner or renew plan corrections.");
   if (phase === "planning" || phase === "plan_failed") return next("retry-plan", "Retry repair-plan preparation", "recovery-plan", `${phase === "planning" ? "Repair-plan preparation stopped before it finished" : "Repair-plan preparation failed"}, so no plan is approved. Retry repair-plan preparation; Resume cannot continue an unapproved plan.`);
   if (phase === "ready") return next("approve-plan", "Approve and continue repairs", "recovery-start", "Review and approve the recovery plan before execution; Resume does not start an unapproved plan.");
   if (repairsExhausted(job, maxRepairs)) return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The repair budget is exhausted. Prepare a repair plan and approve it; Resume does not renew the budget or rerun the same review.");
@@ -1305,13 +1347,18 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
   const stale = inputsChanged(job);
   const loop = job.error?.details?.loop;
   const unconfirmed = job.error?.code === "worker_unconfirmed";
-  const title = unconfirmed ? "A worker from before the restart may still be running" : loop ? "Repeated failure on unchanged code" : stale ? "Specs or prototype inputs changed" : exhausted ? "Repair budget exhausted" : reviewBlocked ? "Required functionality or evidence is unfinished" : primary?.title
+  const planBlocked = planBlockedOut(job);
+  const title = unconfirmed ? "A worker from before the restart may still be running" : planBlocked ? "The repair plan needs a correction" : loop ? "Repeated failure on unchanged code" : stale ? "Specs or prototype inputs changed" : exhausted ? "Repair budget exhausted" : reviewBlocked ? "Required functionality or evidence is unfinished" : primary?.title
     ?? (timeoutReason === "idle" ? "The coding agent became inactive" : timeoutReason === "hard" ? "The run reached its safety cap" : "The run paused before completion");
   const actions = diagnostics.map((item) => item.action);
   if (!actions.length) {
     if (unconfirmed) {
       actions.push(`Stop process ${job.error.details.pid} (${job.error.details.label}) or wait for it to exit; the factory will not start a second worker beside it.`);
       actions.push("Once it has exited, Resume continues this run from its preserved files.");
+    } else if (planBlocked) {
+      actions.push(`Download the plan help packet: the blocked plan, the request, the reviewer's blockers and the source references. Fix the plan yourself or hand the packet to your coding agent.`);
+      actions.push("Submit corrected plan for review: it gets one independent review and, if it passes, waits for your approval before any repair runs.");
+      actions.push("Revise inputs and prepare a new plan only if the specs or prototype themselves are wrong or ambiguous.");
     } else if (loop) {
       actions.push(`Read the repeated failure in ${loop.logs?.at(-1) ?? "the named log"}; the last repairs did not change the code.`);
       actions.push("Change the code or inputs, or prepare a repair plan; Resume does not renew the repair budget.");
@@ -1332,6 +1379,7 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
   }
   const attempts = job.error?.details?.autoResumes ?? 0;
   const summary = unconfirmed ? `The factory restarted while ${job.error.details.label} (pid ${job.error.details.pid}) was running. Nothing new starts until that process has exited, so two workers never write at once.`
+    : planBlocked ? `Automatic plan corrections are exhausted (${job.recoveryPhase.corrections ?? 0} used) and the independent reviewer still blocks the plan. No repairs have started; the plan, its logs and your files are preserved.`
     : loop ? `${loop.gate ?? "A check"} failed the same way ${loop.count} times without any code change, so the factory stopped repeating it. Files and evidence are preserved.`
     : reviewBlocked ? `The review did not approve the app. ${job.attempt ?? 0} automatic repairs have been used; green tests do not prove the missing features are complete.` : diagnostics.length
     ? `${diagnostics.map((item) => item.title).join("; ")}. The partial app and completed specification are intact.`

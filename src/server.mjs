@@ -4,8 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JobStore } from "./store.mjs";
 import { withReviewDiagnostics } from "./review.mjs";
-import { validateRecoveryApproval } from "./feature-recovery.mjs";
-import { assertPlanInputsRevised, buildRecovery, buildRecoveryPacket, continuationAction, SoloFactory, withContinuation } from "./factory.mjs";
+import { amendmentPacket, validateRecoveryApproval } from "./feature-recovery.mjs";
+import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, assertPlanInputsRevised, buildRecovery, buildRecoveryPacket, continuationAction, SoloFactory, withContinuation } from "./factory.mjs";
 import { watchConfig } from "./watchdog.mjs";
 import {
   INTERVIEW_RESPONSE_SCHEMA,
@@ -111,6 +111,7 @@ export async function createSoloFactoryServer(options = {}) {
       const run = { jobId: job.id, factory };
       runs.set(entry.projectId, run);
       const launch = entry.mode === "recovery-plan" ? factory.planRecovery(job.id, entry.guidance)
+        : entry.mode === "recovery-review" ? factory.amendRecovery(job.id, entry.submission)
         : entry.mode === "recovery-start" ? factory.startRecovery(job.id, entry.planDigest)
         : entry.mode === "resume" ? factory.resume(job.id) : entry.mode === "restart" ? factory.restartFromSlice(job.id, entry.fromSlice) : factory.start(job.id);
       run.promise = launch
@@ -443,6 +444,31 @@ export async function createSoloFactoryServer(options = {}) {
         await enqueue(projectId, id, `recovery-${action}`, { front: true, planDigest: body.planDigest, guidance: body.guidance ?? "" });
         return json(response, 202, { accepted: true, jobId: id });
       }
+      const amendMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/recovery-review$/);
+      if (request.method === "POST" && amendMatch) {
+        const [ , id] = amendMatch;
+        const projectId = jobProject.get(id) ?? active.id;
+        const jobStore = storeOfJob(id);
+        const job = await jobStore.read(id);
+        const busy = runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start");
+        // Bounded, never truncated: the plan plus a small envelope; the controller repeats every check under ownership.
+        let body;
+        try { body = await readJson(request, MAX_AMENDED_PLAN_BYTES + 100_000); }
+        catch (error) { return json(response, error.code === "body_too_large" ? 413 : 400, { error: error.code === "body_too_large" ? `The corrected plan exceeds ${MAX_AMENDED_PLAN_BYTES} bytes.` : error.message, code: error.code === "body_too_large" ? "amendment_too_large" : "amendment_invalid" }); }
+        try { await assertPlanAmendable(jobStore, job, { phaseId: body.phaseId, plan: body.plan }, { maxRepairs, busy: busy || queue.some(entry => entry.jobId === id) }); }
+        catch (error) { return json(response, error.details?.status ?? 500, { error: error.message, code: error.code, nextAction: continuationAction(job, { maxRepairs, busy }) }); }
+        await enqueue(projectId, id, "recovery-review", { front: true, submission: { phaseId: body.phaseId, plan: body.plan } });
+        return json(response, 202, { accepted: true, jobId: id });
+      }
+      const packetMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/recovery-plan-packet$/);
+      if (request.method === "GET" && packetMatch) {
+        const jobStore = storeOfJob(packetMatch[1]);
+        const job = await jobStore.read(packetMatch[1]);
+        const next = continuationAction(job, { maxRepairs });
+        if (next.action !== "amend-plan") return json(response, 409, { error: next.reason, nextAction: next });
+        response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "content-disposition": `attachment; filename="plan-help-${job.id}.json"` });
+        return response.end(JSON.stringify(await amendmentPacket(jobStore, job), null, 2));
+      }
       const resumeMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/resume$/);
       if (request.method === "POST" && resumeMatch) {
         const projectId = jobProject.get(resumeMatch[1]) ?? active.id;
@@ -595,14 +621,15 @@ async function readBytes(request, limit) {
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > limit) throw new Error("Request body is too large.");
-    chunks.push(chunk);
+    // Keep reading (not storing) past the limit so the client gets its answer instead of a reset connection.
+    if (size <= limit) chunks.push(chunk);
   }
+  if (size > limit) throw Object.assign(new Error("Request body is too large."), { code: "body_too_large" });
   return Buffer.concat(chunks);
 }
 
-async function readJson(request) {
-  const data = (await readBytes(request, 1_000_000)).toString("utf8");
+async function readJson(request, limit = 1_000_000) {
+  const data = (await readBytes(request, limit)).toString("utf8");
   try {
     return JSON.parse(data || "{}");
   } catch {

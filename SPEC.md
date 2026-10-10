@@ -497,8 +497,23 @@ repair-plan preparation stopped or failed (`planning` or `plan_failed`) continue
 **Retry repair-plan preparation**, which starts one planner, keeps the earlier phase in history,
 retains the unfinished checks, keeps spent plan corrections, and runs no implementation or
 deployment. A plan whose review still blocks after its corrections are spent (`plan_blocked`)
-gets no retry: the dashboard lists the review blockers and offers **Revise inputs and prepare a
-new plan**, and `recovery-plan` refuses with `409`, before any planner or reviewer turn, while the inputs
+gets no retry: the dashboard lists the review blockers, says that automatic corrections are
+exhausted and that no repairs have started, and offers **Submit corrected plan for review**
+(`POST /api/jobs/:id/recovery-review` with `{"phaseId","plan"}`). That runs exactly one independent
+review of the submitted plan: no planner, no automatic correction, no renewed correction budget.
+The failed phase is archived with its plan untouched (a malformed one is kept as raw evidence), the
+prior blockers go into the review request, and a pass parks the run `ready`, so the owner still approves
+the exact plan digest. A block records the new findings and parks again; every further review needs a
+new explicit, different plan, since a plan already reviewed for these inputs (ignoring formatting and
+the request id) is refused, also after a restart. An interrupted amendment review resumes the review
+only (**Resume plan review**). The submission is refused with `409`/`400`/`413`, before any state write
+or provider turn, for a stale phase, malformed or incomplete plan, changed inputs, contract, source or
+review evidence, a dismissed or completed run, or an active writer; the checks repeat under writer
+ownership. The limit is 4,000,000 bytes of plan, and nothing is truncated. **Download plan help
+packet** (`GET /api/jobs/:id/recovery-plan-packet`) gives the plan, request, blockers, sources and
+instructions for the owner or their coding agent, and the dashboard's advanced file input submits the
+corrected file. **Revise inputs and prepare a new plan** remains for inputs that are genuinely wrong:
+`recovery-plan` still refuses with `409`, before any planner or reviewer turn, while the inputs
 match any fingerprint that exhausted its corrections since the last executed plan. A
 correction budget belongs to the input fingerprint: revised inputs start fresh, and every later
 retry, feedback revision or return to earlier inputs shares what that fingerprint already spent. A `ready` plan continues only with exact approval. An exhausted budget or changed

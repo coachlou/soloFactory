@@ -584,7 +584,7 @@ test('HTTP: a saved plan_failed run with a stale Resume banner presents planning
   assert.match(dashboard, /next\?\.action === "retry-plan"/);
 });
 
-test('HTTP: a repair plan blocked after its corrections offers revised inputs and refuses an unchanged retry', async t => {
+test('HTTP: a repair plan blocked after its corrections offers a corrected-plan review and refuses an unchanged retry', async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'solo-http-plan-blocked-'));
   const app = await createSoloFactoryServer({ home, fixtureMode: true });
   await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
@@ -601,16 +601,17 @@ test('HTTP: a repair plan blocked after its corrections offers revised inputs an
   await app.store.writeState(job);
   const { job: shown } = await getJson(`${base}/api/jobs/${job.id}`);
   const saved = await readFile(path.join(app.store.jobDir(job.id), 'state.json'), 'utf8');
-  assert.equal(shown.nextAction.action, 'revise-inputs');
-  assert.match(shown.nextAction.reason, /MH-1 has no obligation/);
-  assert.ok(shown.recovery.actions.some(text => text.startsWith('Revise inputs and prepare a new plan')), shown.recovery.actions.join(' | '));
+  assert.equal(shown.nextAction.action, 'amend-plan');
+  assert.match(shown.nextAction.reason, /Automatic plan corrections are exhausted/);
+  assert.equal(shown.nextAction.alternatives[0].action, 'revise-inputs');
+  assert.ok(shown.recovery.actions.some(text => text.startsWith('Submit corrected plan for review')), shown.recovery.actions.join(' | '));
   assert.ok(!shown.recovery.actions.some(text => /retry repair-plan/i.test(text)));
   const refused = await fetch(`${base}/api/jobs/${job.id}/recovery-plan`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   assert.equal(refused.status, 409);
   const body = await refused.json();
-  assert.match(body.error, /Revise inputs and prepare a new plan/); assert.equal(body.nextAction.action, 'revise-inputs'); assert.deepEqual(body.blockers, ['MH-1 has no obligation']);
+  assert.match(body.error, /Submit corrected plan for review/); assert.equal(body.nextAction.action, 'amend-plan'); assert.deepEqual(body.blockers, ['MH-1 has no obligation']);
   assert.equal(await readFile(path.join(app.store.jobDir(job.id), 'state.json'), 'utf8'), saved);
-  assert.match(await readFile(new URL('../public/app.js', import.meta.url), 'utf8'), /next\?\.action === "revise-inputs"/);
+  assert.match(await readFile(new URL('../public/app.js', import.meta.url), 'utf8'), /next\?\.action === "amend-plan"/);
 });
 
 test("HTTP: an image uploaded for another brief while a run builds does not stop that run", async (t) => {

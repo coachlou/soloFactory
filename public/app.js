@@ -578,6 +578,50 @@ function renderSupervision() {
 const pendingProofs = (job) => (job.outstandingProofs ?? []).filter((entry) => entry.status === "pending");
 const failedProof = (job) => job.error?.code === "quality_gate_failed" && pendingProofs(job).some((entry) => Array.isArray(job.error.details?.proofKeys) ? job.error.details.proofKeys.includes(entry.key) : job.error.details?.command ? JSON.stringify(entry.obligation.proof.command) === JSON.stringify(job.error.details.command) : entry.gate === job.error.details?.gate);
 
+// Bounded like MAX_AMENDED_PLAN_BYTES in src/factory.mjs; the server repeats every check.
+const MAX_AMENDED_PLAN_BYTES = 4_000_000;
+
+// Exhausted plan corrections: explain, offer the help packet, and take a corrected plan from a file.
+// The selection lives in state so polling re-renders and server errors never erase it.
+function renderAmendment(features, next, phase, action) {
+  const pending = state.amendment?.jobId === state.job.id && state.amendment.phaseId === phase.id ? state.amendment : null;
+  if (!pending) state.amendment = null;
+  const note = document.createElement("p"); note.textContent = `${next.reason} ${phase.corrections ?? 0} automatic correction${phase.corrections === 1 ? "" : "s"} used; no repairs have started.`;
+  const packet = document.createElement("a"); packet.href = `/api/jobs/${state.job.id}/recovery-plan-packet`; packet.download = ""; packet.className = "button"; packet.textContent = "Download plan help packet";
+  const details = document.createElement("details"); details.open = Boolean(pending); details.addEventListener("toggle", () => { state.amendmentOpen = details.open; });
+  if (state.amendmentOpen) details.open = true;
+  const summary = document.createElement("summary"); summary.textContent = "Advanced: submit corrected plan for review";
+  const label = document.createElement("label"); label.htmlFor = "amendment-file"; label.textContent = "Corrected plan file (.json)";
+  const file = document.createElement("input"); file.type = "file"; file.id = "amendment-file"; file.accept = ".json,application/json";
+  const status = document.createElement("p"); status.id = "amendment-status";
+  const submit = document.createElement("button"); submit.type = "button"; submit.textContent = "Submit corrected plan for review"; submit.disabled = !pending?.plan;
+  const show = () => {
+    status.textContent = pending ? (pending.error ? pending.error : `${pending.name} (${pending.size.toLocaleString()} bytes) will be reviewed once, for recovery phase ${phase.id}.`) : "No file selected.";
+    status.className = pending?.error ? "error" : "muted"; submit.disabled = !pending?.plan;
+  };
+  file.addEventListener("change", async () => {
+    const chosen = file.files[0]; if (!chosen) return;
+    const entry = state.amendment = { jobId: state.job.id, phaseId: phase.id, name: chosen.name, size: chosen.size, plan: null, error: null };
+    if (chosen.size > MAX_AMENDED_PLAN_BYTES) entry.error = `${chosen.name} is larger than ${MAX_AMENDED_PLAN_BYTES.toLocaleString()} bytes.`;
+    else {
+      try { const plan = JSON.parse(await chosen.text()); if (!plan || typeof plan !== "object" || Array.isArray(plan)) throw new Error("not an object"); entry.plan = plan; }
+      catch { entry.error = `${chosen.name} is not a JSON repair plan.`; }
+    }
+    renderRecovery();
+  });
+  submit.addEventListener("click", async () => {
+    if (!pending?.plan) return;
+    submit.disabled = true; clearError();
+    try { await api(`/api/jobs/${state.job.id}/recovery-review`, { method: "POST", body: { phaseId: pending.phaseId, plan: pending.plan } }); state.amendment = null; await poll(); startPolling(); }
+    catch (error) { pending.error = error.message; showError(error); show(); }
+  });
+  show();
+  details.append(summary, label, file, status, submit);
+  features.append(note, packet, details);
+  const alternative = next.alternatives?.[0];
+  if (alternative) { const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = alternative.reason; features.append(hint); action(alternative.label, "recovery-plan"); }
+}
+
 function renderRecovery() {
   const phase = state.job.recoveryPhase;
   const recovery = state.job.recovery ?? (phase ? { title: phase.status === "planning" ? "Preparing repair plan" : "Repairs", summary: phase.status === "planning" ? "Planning repair features from the review findings and every spec and prototype input." : `${phase.done.length}/${phase.plan?.slices.length ?? 0} recovery features verified`, actions: [], workspace: "Preserved project workspace", automaticRetry: "Each feature has bounded repairs; final deployment requires the full original review." } : null);
@@ -599,7 +643,8 @@ function renderRecovery() {
     }); features.append(button);
   };
   const next = state.job.nextAction;
-  if (next?.action === "retry-plan" || next?.action === "revise-inputs") action(next.label, "recovery-plan");
+  if (next?.action === "amend-plan" && phase) renderAmendment(features, next, phase, action);
+  else if (next?.action === "retry-plan" || next?.action === "revise-inputs") action(next.label, "recovery-plan");
   else if (next?.action === "prepare-plan" || (next?.action !== "none" && PARKED.includes(state.job.state) && !state.job.dismissed && (!phase || ["ready", "running", "built"].includes(phase.status)) && (state.job.reviewRequest || state.job.featureCursor?.reviewRequest || state.job.error?.code === "inputs_changed" || failedProof(state.job)))) action("Prepare repair plan", "recovery-plan");
   const list = (title, rows) => {
     if (!rows.length) return;

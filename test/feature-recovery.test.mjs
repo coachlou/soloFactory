@@ -148,7 +148,7 @@ test('a failed repair-plan preparation continues only through one planning retry
   await assert.rejects(env.factory.resume(retried.id), /approve/);
 });
 
-test('a repair plan still blocked after its corrections offers revised inputs, never a futile retry', async t => {
+test('a repair plan still blocked after its corrections offers a corrected-plan review, never a futile retry', async t => {
   let blocks = Infinity; // plan reviews still to block
   const env = await setup(t, async args => {
     if (/^recovery-plan-review-/.test(args.context.stage) && blocks > 0) {
@@ -161,20 +161,21 @@ test('a repair plan still blocked after its corrections offers revised inputs, n
   assert.equal(failed.recoveryPhase.status, 'plan_failed'); assert.equal(failed.recoveryPhase.corrections, 1);
   assert.equal(failed.error.code, 'plan_blocked');
   const next = continuationAction(failed);
-  assert.deepEqual([next.action, next.label, next.endpoint], ['revise-inputs', 'Revise inputs and prepare a new plan', `/api/jobs/${failed.id}/recovery-plan`]);
-  assert.match(next.reason, /SPEC\.md §3 contradicts the frozen contract/);
+  assert.deepEqual([next.action, next.label, next.endpoint], ['amend-plan', 'Submit corrected plan for review', `/api/jobs/${failed.id}/recovery-review`]);
+  assert.match(next.reason, /Automatic plan corrections are exhausted/);
+  assert.equal(next.alternatives[0].action, 'revise-inputs');
   assert.deepEqual(failed.recoveryPhase.planBlockers, ['SPEC.md §3 contradicts the frozen contract']);
   assert.equal(failed.recovery.canResume, false);
-  assert.ok(failed.recovery.actions.some(text => text.startsWith('Revise inputs and prepare a new plan')), failed.recovery.actions.join(' | '));
+  assert.ok(failed.recovery.actions.some(text => text.startsWith('Submit corrected plan for review')), failed.recovery.actions.join(' | '));
   assert.ok(!failed.recovery.actions.some(text => /retry repair-plan preparation/i.test(text)), failed.recovery.actions.join(' | '));
   // A run saved before the error code existed is recognized by its message.
-  assert.equal(continuationAction({ ...failed, error: { ...failed.error, code: 'unexpected_error' } }).action, 'revise-inputs');
+  assert.equal(continuationAction({ ...failed, error: { ...failed.error, code: 'unexpected_error' } }).action, 'amend-plan');
   // Unchanged inputs: refused before any turn, nothing written.
   const raw = await readFile(path.join(env.store.jobDir(failed.id), 'state.json'), 'utf8'); const before = env.stages.length;
-  await assert.rejects(env.factory.planRecovery(failed.id), error => error.code === 'plan_inputs_unchanged' && /contradicts the frozen contract/.test(error.message) && error.details.nextAction.action === 'revise-inputs');
+  await assert.rejects(env.factory.planRecovery(failed.id), error => error.code === 'plan_inputs_unchanged' && /Submit corrected plan for review/.test(error.message) && error.details.nextAction.action === 'amend-plan');
   assert.equal(env.stages.length, before);
   assert.equal(await readFile(path.join(env.store.jobDir(failed.id), 'state.json'), 'utf8'), raw);
-  await assert.rejects(env.factory.resume(failed.id), /Revise inputs/);
+  await assert.rejects(env.factory.resume(failed.id), /Submit corrected plan/);
   // Revised inputs make a new plan with a fresh correction budget.
   await writeFile(path.join(env.root, '.factory/uploads/SPEC.md'), '§3 Group by capture day, as the contract says.\n'); blocks = 0;
   const ready = await env.factory.planRecovery(failed.id);
@@ -196,8 +197,8 @@ test('a repair plan still blocked after its corrections offers revised inputs, n
   await writeFile(path.join(env.root, '.factory/uploads/SPEC.md'), '§3 Group by upload day.\n');
   const turns = env.stages.length; const saved = await readFile(path.join(env.store.jobDir(failed.id), 'state.json'), 'utf8');
   await assert.rejects(env.factory.planRecovery(failed.id), error => error.code === 'plan_inputs_unchanged'
-    && error.message.startsWith('These inputs have exhausted their plan corrections. Revise the specs or prototype to prepare a new plan.')
-    && error.details.nextAction.action === 'revise-inputs' && error.details.blockers[0] === 'SPEC.md §3 contradicts the frozen contract');
+    && error.message.startsWith('These inputs have exhausted their plan corrections.')
+    && error.details.nextAction.action === 'amend-plan' && error.details.blockers[0] === 'SPEC.md §3 contradicts the frozen contract');
   assert.equal(env.stages.length, turns, 'no planner or reviewer turn ran');
   assert.equal(await readFile(path.join(env.store.jobDir(failed.id), 'state.json'), 'utf8'), saved);
   assert.equal(env.deployments(), 0);
