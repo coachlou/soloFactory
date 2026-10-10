@@ -748,3 +748,35 @@ check passes. Tests use isolated fixture projects, fake workers and deployments;
 provider run or live installation exercised. Preserved Claude's prior changes. All changes
 remain uncommitted; nothing installed, resumed or pushed. Next: Claude can review this
 round's source/tests alongside the earlier PRD work before committing the combined branch.
+
+## Real-provider recovery smoke test (2026-10-10, branch wip/feature-slice-recovery) — PASS (fix uncommitted)
+
+Gate for merge/release of 404d4b9. Both runs on Claude.
+
+- Knob: `SOLOFACTORY_MAX_REPAIRS` in src/server.mjs (uncommitted, default 2). 184/184 tests pass.
+- Servers (gitignored .claude/launch.json): `smoke-natural` :4201, `smoke-recovery` :4202,
+  `smoke-recovery-zero` (:4202 with MAX_REPAIRS=0). Homes under `.solofactory/smoke-*`. Never touch :4173.
+- Brief: `.solofactory/smoke/job-ordered.json` (fixed order so feature 1 owns a proof that needs feature 3).
+
+Natural run 21b70200 — PASS (completed 14:14Z, app live):
+- Ledger entry SKELETON-STORE-ADD/E2E-SEEDED-SUMMARY-DEFERRED pending after feature 1.
+- "Feature 3/3 verified; MH-2, SC-3 pending integration proof".
+- Proof gate ran and passed at integration; key in final review-request.json; entry → passed with candidate.
+
+Recovery run 42852426 — PASS after one fix:
+- Ledger entry SKELETON-STORAGE/SKEL-SEEDED-SCRIPT pending after feature 1 (full-digest key and gate).
+- Fault: seed in scripts/populated-summary.mjs 20 → 21 days. Planted before resume, feature 3's own proof
+  caught it and repaired it; replanted the instant "Feature 3/3 verified" was emitted (budget 0) → final
+  integration failed on proof-<digest>.SKELETON-STORAGE.SKEL-SEEDED-SCRIPT, quality_gate_failed, budget 1/1.
+- Restarted :4202 at default, POST recovery-plan: request.failedProof targets the right key (PASS).
+- BUG: plan rejected 3 times — "Feature SEEDED-SUMMARY-REPAIR depends on unknown slice MONTHLY-SUMMARY"
+  (also SKELETON-STORAGE, MARK-DONE). Claude lists completed features in dependsOn; validateRecoveryPlan
+  (src/feature-recovery.mjs) only accepts ids in the repair plan. Run now failed/unexpected_error.
+  FIX (Lou approved, uncommitted): validateRecoveryPlan drops dependsOn entries in request.completed;
+  test "v2 repair plans may depend on already completed features but not on unknown ones". 185/185.
+- Re-requested plan on fixed code: reviewer approved first try (digest bf1c3c7a…), one feature
+  SEEDED-SUMMARY-REPAIR closing SC-3/MH-2, proof `node scripts/populated-summary.mjs`. Approved via recovery-start.
+- Repair restored the 20-day seed; proof gate passed at 14:32:46Z; entry → passed with candidate; run completed.
+
+Uncommitted: src/server.mjs (knob), src/feature-recovery.mjs + test/feature-recovery.test.mjs (fix).
+Merge/release remains Lou's separate decision.
