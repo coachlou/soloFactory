@@ -256,12 +256,14 @@ function validateCases(item, { registry, sources, ids, claimed }) {
       entry.refs.forEach((ref) => refs.add(ref));
     }
     if (sources) {
-      const own = item.sources.map((ref) => `${ref.path} ${ref.locator}`).join("; ");
-      if (!Array.isArray(entry.sources) || !entry.sources.length) problems.push(`${at} must cite sources [{path, locator}] from ${item.id} (allowed: ${own}).`);
+      // Locators are free text that planners reword between corrections, so a case matches its requirement's
+      // sources by file and keeps its own locator; exact locator matching blocked real plans on wording alone.
+      const own = [...new Set(item.sources.map((ref) => ref.path))];
+      if (!Array.isArray(entry.sources) || !entry.sources.length) problems.push(`${at} must cite sources [{path, locator}] from ${item.id}'s files (allowed: ${own.join(", ")}).`);
       else {
-        const foreign = entry.sources.filter((ref) => !text(ref?.locator, 2) || !item.sources.some((mine) => sourceKey(mine) === sourceKey(ref)));
-        if (foreign.length) problems.push(`${at} cites ${foreign.map((ref) => `${ref?.path} ${ref?.locator}`).join("; ")}, which ${item.id} does not; cite one of its sources or add it to ${item.id}'s sources (allowed: ${own}).`);
-        entry.sources.forEach((ref) => cited.add(sourceKey(ref)));
+        const foreign = entry.sources.filter((ref) => !text(ref?.locator, 2) || !own.includes(ref.path));
+        if (foreign.length) problems.push(`${at} cites ${foreign.map((ref) => `${ref?.path} ${ref?.locator ?? "(no locator)"}`).join("; ")}, which ${item.id} does not; cite a section of one of its files with a locator, or add the file to ${item.id}'s sources (allowed: ${own.join(", ")}).`);
+        entry.sources.forEach((ref) => cited.add(ref?.path));
       }
     }
     const supersedes = entry.supersedes ?? [];
@@ -272,8 +274,8 @@ function validateCases(item, { registry, sources, ids, claimed }) {
   });
   const uncovered = item.refs.filter((ref) => !refs.has(ref));
   if (uncovered.length) problems.push(`${where} cites ${uncovered.join(", ")} but none of its cases does.`);
-  const uncited = sources ? item.sources.filter((ref) => !cited.has(sourceKey(ref))) : [];
-  if (uncited.length) problems.push(`${where} cites ${uncited.map((ref) => `${ref.path} ${ref.locator}`).join("; ")} but none of its cases does.`);
+  const uncited = sources ? [...new Set(item.sources.map((ref) => ref.path))].filter((file) => !cited.has(file)) : [];
+  if (uncited.length) problems.push(`${where} cites ${uncited.join(", ")} but none of its cases does.`);
   // Report every citation problem together so one planner correction can fix them all.
   if (problems.length) throw new Error(problems.join(" "));
   return cases;

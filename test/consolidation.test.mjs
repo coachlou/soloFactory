@@ -13,7 +13,7 @@ import { featureBuildPrompt } from '../src/prompts.mjs';
 // cite exactly the requirement's checks and sources, and are proved one by one.
 const SPEC = 'SPEC.md';
 const checks = [{ id: 'MH-1', text: 'Upload photos' }, { id: 'SC-1', text: 'Oversized uploads are refused' }];
-const opts = { jobId: 'job', contractDigest: 'contract', checks, sources: [SPEC] };
+const opts = { jobId: 'job', contractDigest: 'contract', checks, sources: [SPEC, 'PLAN.md'] };
 const at = locator => ({ path: SPEC, locator });
 const proof = { command: ['node', '--test', 'test/upload.test.mjs'], expect: 'every upload case passes' };
 const plan = acceptance => ({ version: 2, jobId: 'job', contractDigest: 'contract', compatibility: [],
@@ -40,8 +40,12 @@ test('a case may cite no check when its siblings cover the requirement, and ever
   const constraint = { id: 'UP-NODEPS', surface: 'unit', action: 'Read package.json', expect: 'no runtime dependencies', refs: [], sources: [at('§1 Upload')] };
   const [item] = validateFeaturePlan(plan([requirement({ cases: [...cases(), constraint] })]), opts).slices[0].acceptance;
   assert.deepEqual(item.cases.at(-1).refs, []);
-  assert.throws(() => validateFeaturePlan(plan([requirement({ cases: cases().map((entry, i) => i ? { ...entry, refs: ['SC-9'], sources: [at('§9 Elsewhere')] } : entry) })]), opts), (error) => {
-    for (const part of [/UP-API-BIG cites SC-9/, /UP-UI-BIG cites SC-9/, /UP-API-BIG cites SPEC\.md §9 Elsewhere/, /allowed: MH-1, SC-1/, /SPEC\.md §2 Limits/]) assert.match(error.message, part);
+  // Seen on the second: a correction reworded one compound locator and every case citing it stopped matching.
+  // Locators are free text, so a case matches its requirement's sources by file and keeps its own locator.
+  const reworded = cases().map((entry, i) => i === 1 ? { ...entry, sources: [at('§2 Limits (25 MB cap)')] } : entry);
+  assert.equal(validateFeaturePlan(plan([requirement({ cases: reworded })]), opts).slices[0].acceptance[0].cases[1].sources[0].locator, '§2 Limits (25 MB cap)');
+  assert.throws(() => validateFeaturePlan(plan([requirement({ cases: cases().map((entry, i) => i ? { ...entry, refs: ['SC-9'], sources: [{ path: 'OTHER.md', locator: '§9 Elsewhere' }] } : entry) })]), opts), (error) => {
+    for (const part of [/UP-API-BIG cites SC-9/, /UP-UI-BIG cites SC-9/, /UP-API-BIG cites OTHER\.md §9 Elsewhere/, /allowed: MH-1, SC-1/, /allowed: SPEC\.md\)/]) assert.match(error.message, part);
     return true;
   });
 });
@@ -54,9 +58,9 @@ test('a plan without cases normalizes exactly as before, so existing plan digest
 
 test('a case table cannot drop a check or source citation, cite one its requirement lacks, or reuse an id', () => {
   rejects([requirement({ cases: cases().slice(0, 1) })], /cites SC-1 but none of its cases does/);
-  rejects([requirement({ cases: cases().map(entry => ({ ...entry, sources: [at('§1 Upload')] })) })], /cites SPEC\.md §2 Limits but none of its cases does/);
+  rejects([requirement({ sources: [at('§1 Upload'), at('§2 Limits'), { path: 'PLAN.md', locator: '§4 Storage' }] })], /cites PLAN\.md but none of its cases does/);
   rejects([requirement({ refs: ['MH-1'], cases: cases().slice(0, 1).concat({ ...cases()[1], refs: ['SC-1'] }) })], /UP-API-BIG cites SC-1, which UPLOAD-LIMITS does not/);
-  rejects([requirement({ cases: cases().map(entry => ({ ...entry, sources: [at('§9 Elsewhere')] })) })], /cites SPEC\.md §9 Elsewhere, which UPLOAD-LIMITS does not/);
+  rejects([requirement({ cases: cases().map((entry, i) => i ? entry : { ...entry, sources: [{ path: 'OTHER.md', locator: '§9 Elsewhere' }] }) })], /UP-API-OK cites OTHER\.md §9 Elsewhere, which UPLOAD-LIMITS does not/);
   rejects([requirement({ cases: cases().map((entry, i) => i ? entry : { ...entry, surface: 'magic' }) })], /needs a surface/);
   rejects([requirement({ cases: cases().map((entry, i) => i ? entry : { ...entry, id: 'UPLOAD-LIMITS' }) })], /duplicate case id/);
   rejects([requirement({ cases: cases().map(entry => ({ ...entry, supersedes: ['OLD-1'] })) })], /repeated supersedes/);

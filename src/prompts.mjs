@@ -310,7 +310,7 @@ const FEATURE_PLAN_SCHEMA = `{ "version": 2, "jobId": <copied from the request>,
       "proof": { "command": ["npm" | "node" | "npx", "<args>"...], "expect": "<expected result>", "pending"?: "integration" },
       "cases"?: [{ "id": "UPPER-CASE-ID", "surface": "api" | "browser" | "cli" | "unit" | "integration", "action": "<what the test does>",
         "field"?: "<field or element>", "boundary"?: "<limit or edge>", "expect": "<result or failure condition>",
-        "refs": ["<subset of the requirement refs; [] for a constraint case>"], "sources": [<exact copies of the requirement's own sources>] }] }]
+        "refs": ["<subset of the requirement refs; [] for a constraint case>"], "sources": [{ "path": "<one of the requirement's source files>", "locator": "<section>" }] }] }]
   }] }`;
 
 // Shared by new-run and repair planning: consolidation is allowed only as explicit, separately proved cases.

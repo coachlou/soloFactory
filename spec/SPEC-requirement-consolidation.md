@@ -30,7 +30,7 @@ each case keeps what made the original obligations distinct.
 | `id` | Unique across the plan, sharing the namespace of requirement ids |
 | `surface` | `api`, `browser`, `cli`, `unit` or `integration`. API and browser coverage stay separate cases |
 | `action`, `expect` | Required. `field`, `boundary` optional; the failure condition lives in `expect` |
-| `refs`, `sources` | Subsets of the requirement's; **together** the cases cite every ref and source the requirement cites |
+| `refs`, `sources` | `refs` is a subset of the requirement's (may be empty for a constraint case). Each source names one of the requirement's source files with its own locator. **Together** the cases cite every ref and every source file the requirement cites. Locators match by file, not by text: planners reword them, and exact matching blocked two real-provider plans (2026-10-11) |
 | `supersedes` | Ids of reviewed obligations this case replaces. Each id may be claimed once in the plan |
 
 A plan without cases normalizes byte-for-byte as before, so existing plan digests are unchanged.
