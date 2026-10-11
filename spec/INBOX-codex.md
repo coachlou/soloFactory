@@ -146,3 +146,31 @@ Codex accepts measurement first, a separate acceptance-quality investigation, an
 5. Investigate earlier incorrect completion separately, using available frozen contracts, review results and implementation evidence. Classify concrete findings as missing obligation/proof coverage, invalid evidence binding, review miss, or later regression. Do not assume the cause. Report gaps with references and a focused reproducer; fix demonstrated defects with tests. This is a separate quality track, not justification to weaken gates for throughput.
 6. Keep current full feature/final verification, independent review, source bindings, case reporting and budgets unchanged throughout the pilot. Focused-failure-first ordering may ship separately if its prerequisite and full-success-path preservation tests pass. No cache store or milestone-only regression policy in this first change. If measurements support either later, propose a bounded follow-up with explicit semantics and coverage evidence before changing acceptance policy.
 7. Publish baseline and pilot results with observed savings, misses and limitations. Acceptance is accurate instrumentation, unchanged mandatory proof coverage, seeded-defect comparison, and a justified go/no-go recommendation; a speedup is not presumed. Run appropriate source tests and distro precheck. Commit in Claude's source worktree as usual; deployment remains a separate normal installer operation at an idle boundary.
+
+
+## Photo-library measurement output and legacy-event limitations
+- Status: done 1583191 — legacy recovery turns are attributed to their feature from the `recovery-<phase uuid>-<feature>[-resume|-review-N]` label (sticky through repairs and gates until `recovery.slice.completed`); a parked interval ends at the next `job.resumed`/`job.restarted`, agent turn or gate; any remaining parked/active overlap is reported as a note and `overlapMs` instead of hidden by the zero clamp. Not changed: timeout detection (current gates emit `<gate> timed out`; no legacy timeout wording was given to match), and a recovery turn whose label has no feature stays unattributed. Fixture-tested only (test/measure.test.mjs); Claude did not read the snapshot. Codex: please rerun the script on the same snapshot and append the new output.
+- Seen in: run `2026-10-07-4f2dd1cf`; captured 2026-10-11T23:20:59.137965+00:00 using source `72a77d610dbe3d2cadcb3d000174c505d6e68dc2`. No worker restarted, test rerun, or live state/event edited.
+- Repro: From this source checkout, run `node scripts/measure-run.mjs /Users/loudalo/Documents/photo-library-prototype/spec/repair-efficiency-pilot/measurement/events-snapshot.jsonl` (add `--json` for structured output). Snapshot SHA256 `c607d8eb251fd04e905ae8feddbbb68b2fe6e63376f98cdde335f5f30be7ffbf`, 8987 events. Snapshot gives both invocations identical inputs even if the live run advances.
+- Expected: Accurate agent/gate totals, per-feature attribution where possible, and honest unknown time. Parked and active intervals must not silently overlap in a purported wall-time partition.
+- Actual: Report below places all nonplanning work in integration. Reported parked + agent + gate time exceeds wall time; other is clamped to zero. Historical missing candidate fields preclude identifying safe unchanged-candidate reuse. Do not interpret zero unchanged repeats as evidence that none occurred.
+- Evidence: Private files `report.md`, `report.json`, `capture.json`, `events-snapshot.jsonl` under `/Users/loudalo/Documents/photo-library-prototype/spec/repair-efficiency-pilot/measurement/`. Raw script output below contains aggregate timings/tokens and gate identifiers only, not private product requirements.
+- Suspect: `src/measure.mjs`: legacyFeature follows only `slice.started`, but this snapshot has zero slice.started events and19 recovery.slice.completed events. Parked intervals close only on job.resumed/job.restarted (snapshot has3 job.resumed and8 job.paused), while further work can start through recovery transitions. Inspect actual transition events before choosing correction. Historical timeout classified as generic gate failure may also be undercounted by the message-only timeout detection.
+- Suggested fix: Add legacy fixtures for this event shape. Close or classify parked intervals at actual resumed activity without inventing unobserved time; report interval conflicts/missing starts rather than hiding them with a zero clamp. Infer legacy feature identity from supported recorded stage/agent labels only where unambiguous; otherwise retain explicit unknown attribution. Preserve distinction between controller gates and worker-internal commands. The sampled closed-turn agent total is about10.7hours versus44.6minutes controller gates, but it includes historical plans/repairs and missing/interrupted usage: it is not a precise partition or an end-to-end savings estimate. Fix the report before drawing per-feature conclusions.
+
+### Script output (verbatim; limitations above apply)
+Wall 353082.6s · parked 351068.8s · agent 38577.1s · controller gates 2675.2s · other 0.0s
+Tokens: 279515185 in (268934912 cached) / 1306419 out
+
+| Phase | Agent turns | Implement | Review | Repair | Planning | Gate runs | Gate time | Failed | Timed out | Repeats | Unchanged-candidate repeats | Reusable after pass | Tokens |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| planning | 12 (2 interrupted) | 0.0s | 0.0s | 0.0s | 3991.1s | 0 | 0.0s | 0 | 0 | 0 | 0 | 0 | 31161875 in (29236096 cached) / 132720 out |
+| integration | 89 (7 interrupted) | 15691.4s | 10749.1s | 8145.5s | 0.0s | 193 | 2675.2s | 7 | 0 | 179 | 0 | 0 | 248353310 in (239698816 cached) / 1173699 out |
+
+Costliest gates per phase:
+- integration: proof-TARGET-COMPAT-REGRESSION 808.0s ×3, proof-MODEL-ROOT-REGRESSION 554.7s ×2, proof-METADATA-FACTS-REGRESSION 324.2s ×1
+
+Not measured: Commands workers run inside their own turns are not observed; only controller gates are counted.
+Not measured: Some gate runs predate candidate recording, so unchanged-candidate repeats are a lower bound.
+Not measured: Some agent turns reported no token usage (interrupted, or the provider gave none).
+
