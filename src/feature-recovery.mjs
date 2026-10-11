@@ -432,6 +432,8 @@ export async function runFeatureRecovery(factory, id, signal, approval = null, {
       phase.status = 'running'; phase.approvedAt = new Date().toISOString();
       phase.totalRepairLimit = job.attempt + factory.maxRepairs * (phase.plan.slices.length + 1);
       phase.batchEnd = null;
+      // The approved plan replaces a final-review repair that a Pause deferred.
+      delete job.reviewFailure;
     } else if (phase?.status !== 'running') throw new Error('No approved recovery execution to resume.');
     // A plain resume keeps an unfinished batch's end, so an interruption cannot widen it.
     if (features) phase.batchEnd = phase.done.length + features;

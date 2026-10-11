@@ -250,6 +250,39 @@ test("a pause requested during a blocking feature review parks before the repair
   assert.equal(resumed.attempt, 1);
 });
 
+test("a pause requested during a blocking final review parks before the repair turn; resume repairs without re-reviewing first", async () => {
+  // Inbox follow-up: 3dc63ac covered feature reviews; the final whole-app review still launched a repair under a pending Pause.
+  let factory, jobId, blocked = false;
+  const block = async (stage, cwd) => {
+    if (stage !== "review" || blocked) return;
+    blocked = true;
+    await factory.pause(jobId);
+    await patch(path.join(cwd, ".factory/review-result.json"), (report) => {
+      report.verdict = "blocked";
+      report.blockers = ["SC-1 is not demonstrated"];
+      report.checks.find((check) => check.id === "SC-1").status = "missing";
+    });
+  };
+  const run = await plannedRun({ after: block });
+  ({ factory } = run);
+  jobId = run.job.id;
+  const finalReviews = (turns) => turns.filter((message) => message.endsWith(" started review")).length;
+  const parked = await factory.start(jobId);
+  assert.equal(parked.state, "paused", parked.error?.message);
+  assert.equal(parked.failedState, "reviewing");
+  assert.equal(parked.attempt, 0, "no repair budget spent");
+  assert.match(parked.recovery.summary, /review blocked/);
+  assert.equal(count(await started(run.store, jobId), "repair-"), 0, "no repair turn started");
+
+  const resumed = await run.make().resume(jobId);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+  const turns = await started(run.store, jobId);
+  assert.equal(count(turns, "repair-"), 1, "resume repairs the recorded blockers");
+  assert.equal(finalReviews(turns), 2, "the blocking review is not repeated before the repair; the repaired app is reviewed once");
+  assert.equal(resumed.attempt, 1);
+  assert.equal(resumed.reviewFailure, undefined);
+});
+
 test("a gate that hits its time limit parks without a repair turn, and resume reruns it under the configured limit", async () => {
   // Seen live (Codex inbox): an aggregate proof hit the 5-minute cap and a repair turn spent an attempt on no assertion failure.
   const limits = [];

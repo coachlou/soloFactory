@@ -71,9 +71,10 @@ Owner-submitted amendments get none. Worst case adds 3 planner turns (~$3–6 ea
 Covered: Pause pending when a deterministic gate fails → parks before the repair turn (all modes
 route through `verifyWithRepairs`, bfaaacc). Pause pending when a feature review blocks → parks
 before the repair turn; the blockers are kept on the cursor, so resume repairs them without a
-second review turn (3dc63ac; recovery features use the same path). Not covered: the final
-whole-app review's repair, planning and correction turns, and pending pause is still not visible
-in the API. Fixture-tested only; the installed worker has neither fix.
+second review turn (3dc63ac; recovery features use the same path). The final whole-app review
+does the same through `job.reviewFailure` (follow-up commit). Not covered: planning and correction
+turns, and a pending pause is still not visible in the API. Fixture-tested only; the installed
+worker has none of these fixes.
 
 ## Gate timeouts (Codex inbox)
 

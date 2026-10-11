@@ -392,6 +392,15 @@ export class SoloFactory {
   async reviewAndVerify(job, signal) {
     const appDir = this.store.appDir(job.id);
     for (;;) {
+      if (job.reviewFailure) {
+        // Parked by a Pause after the review blocked: repair the recorded blockers, then review the repaired app.
+        await this.assertInputs(job);
+        const { code, message, details } = job.reviewFailure;
+        delete job.reviewFailure;
+        job = await this.repair(job, new FactoryError(code, message, details), signal);
+        job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: false });
+        continue;
+      }
       job = await this.stage(job, "reviewing", "Reviewing against the frozen contract");
       await this.assertInputs(job);
       let request;
@@ -410,6 +419,12 @@ export class SoloFactory {
         await this.requireReview(job);
       } catch (failure) {
         await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "review", message: failure.message });
+        if (this.active?.pauseRequested) {
+          this.active.pauseRequested = false;
+          job.reviewFailure = { code: failure.code, message: failure.message, details: failure.details };
+          await this.store.writeState(job);
+          throw new FactoryError("paused", "Paused before repairing", { before: "reviewing" });
+        }
         job = await this.repair(job, failure, signal);
         job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: false });
         continue;
@@ -889,7 +904,7 @@ export class SoloFactory {
     job.stage = `Paused before ${before}`;
     job.error = null;
     job.recovery = { ...buildRecovery(job, this.store.appDir(job.id)), title: "Paused by the owner", summary: before === "verifying" ? "The tree is committed; its last checks failed. Resume reruns them and repairs from there."
-      : job.featureCursor?.substage === "repairing" ? "The tree is committed; its feature review blocked. Resume repairs the recorded blockers without reviewing again."
+      : job.featureCursor?.substage === "repairing" || job.reviewFailure ? "The tree is committed; its review blocked. Resume repairs the recorded blockers without reviewing again."
       : `The tree is committed and green. Resume continues from ${before}.` };
     await this.store.writeState(job);
     await this.emit(job.id, { type: "job.paused", state: job.state, message: job.stage });
