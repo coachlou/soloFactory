@@ -673,6 +673,14 @@ export class SoloFactory {
     const runnable = slice.acceptance.filter((item) => !item.proof?.pending);
     const reviewChecks = [...owned, ...runnable.map(obligationCheck)];
     for (;;) {
+      // Parked by a Pause after a blocking review: repair the recorded blockers, not another review turn.
+      if (cursor.substage === "repairing") {
+        const { code, message, details } = cursor.reviewFailure;
+        delete cursor.reviewFailure;
+        job = await this.repair(job, new FactoryError(code, message, details), signal, slice);
+        await save("checking");
+        continue;
+      }
       if (cursor.substage === "implementing") {
         // Repair features often target behavior that already partly exists: run their checks before
         // building. A pass goes straight to the scoped review; a failure tells the builder what failed.
@@ -733,6 +741,12 @@ export class SoloFactory {
             cursor.precheck = await this.writePrecheck(job, slice, failure);
             await save("implementing");
             continue;
+          }
+          if (this.active?.pauseRequested) {
+            this.active.pauseRequested = false;
+            cursor.reviewFailure = { code: failure.code, message: failure.message, details: failure.details };
+            await save("repairing");
+            throw new FactoryError("paused", "Paused before repairing", { before: "reviewing" });
           }
           job = await this.repair(job, failure, signal, slice);
           await save("checking");
@@ -874,7 +888,9 @@ export class SoloFactory {
     job.state = "paused";
     job.stage = `Paused before ${before}`;
     job.error = null;
-    job.recovery = { ...buildRecovery(job, this.store.appDir(job.id)), title: "Paused by the owner", summary: before === "verifying" ? "The tree is committed; its last checks failed. Resume reruns them and repairs from there." : `The tree is committed and green. Resume continues from ${before}.` };
+    job.recovery = { ...buildRecovery(job, this.store.appDir(job.id)), title: "Paused by the owner", summary: before === "verifying" ? "The tree is committed; its last checks failed. Resume reruns them and repairs from there."
+      : job.featureCursor?.substage === "repairing" ? "The tree is committed; its feature review blocked. Resume repairs the recorded blockers without reviewing again."
+      : `The tree is committed and green. Resume continues from ${before}.` };
     await this.store.writeState(job);
     await this.emit(job.id, { type: "job.paused", state: job.state, message: job.stage });
     return job;

@@ -220,6 +220,36 @@ test("a pause requested during failing checks parks before the repair turn, and 
   assert.equal(resumed.attempt, 0);
 });
 
+test("a pause requested during a blocking feature review parks before the repair turn; resume repairs without re-reviewing first", async () => {
+  // Inbox follow-up: bfaaacc covered gate failures only; a review blocker still launched a repair turn under a pending Pause.
+  let factory, jobId;
+  const block = async (stage, cwd) => {
+    if (stage !== "feature-review-SLICE-UI-1") return;
+    await factory.pause(jobId);
+    await patch(path.join(cwd, ".factory/review-result.json"), (report) => {
+      report.verdict = "blocked";
+      report.blockers = ["The score form is not wired to storage"];
+      report.checks[0].status = "missing";
+    });
+  };
+  const run = await plannedRun({ after: block });
+  ({ factory } = run);
+  jobId = run.job.id;
+  const parked = await factory.start(jobId);
+  assert.equal(parked.state, "paused", parked.error?.message);
+  assert.equal(parked.attempt, 0, "no repair budget spent");
+  assert.equal(parked.featureCursor.substage, "repairing");
+  assert.match(parked.recovery.summary, /review blocked/);
+  assert.equal(count(await started(run.store, jobId), "repair-"), 0, "no repair turn started");
+
+  const resumed = await run.make().resume(jobId);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+  const turns = await started(run.store, jobId);
+  assert.equal(count(turns, "repair-"), 1, "resume repairs the recorded blockers");
+  assert.equal(count(turns, "feature-review-SLICE-UI-1"), 1, "the blocking review is not repeated");
+  assert.equal(resumed.attempt, 1);
+});
+
 test("a gate that hits its time limit parks without a repair turn, and resume reruns it under the configured limit", async () => {
   // Seen live (Codex inbox): an aggregate proof hit the 5-minute cap and a repair turn spent an attempt on no assertion failure.
   const limits = [];
