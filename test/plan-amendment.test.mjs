@@ -434,3 +434,15 @@ test('a blocked or interrupted replacement of a ready plan continues without a p
   assert.equal(ready.recoveryPhase.corrections, prior.corrections);
   assert.deepEqual(ready.recoveryPhaseHistory.slice(-2).map(phase => phase.id), [prior.id, blocked.recoveryPhase.id]);
 });
+
+test('replacing a ready plan keeps the corrections already spent on its inputs', async t => {
+  const env = await setup(t); env.ctl.block = false;
+  const ready = await submit(env, candidate(env.blocked, 1));
+  assert.equal(ready.recoveryPhase.status, 'ready', ready.error?.message);
+  assert.ok(ready.recoveryPhase.corrections > 0);
+  env.ctl.block = true;
+  const replaced = await submit(env, candidate(env.blocked, 2), ready);
+  assert.equal(replaced.recoveryPhase.corrections, ready.recoveryPhase.corrections);
+  await refused(env, env.factory.planRecovery(replaced.id), 'plan_inputs_unchanged');
+  assert.equal(env.stages.filter(stage => /^recovery-correction-/.test(stage)).length, 1);
+});
