@@ -163,7 +163,7 @@ export async function createSoloFactoryServer(options = {}) {
       // Supervision is a label beside the lifecycle, never a replacement: live while this server owns the run,
       // the last observation once it parks.
       const supervision = live ?? (PARKED.has(stored.state) && stored.error && stored.watch?.observed ? { ...stored.watch.observed, status: "Action needed", monitoring: false } : null);
-      const job = { ...withContinuation(stored, { maxRepairs, busy: position >= 0 || run?.jobId === stored.id }), supervision };
+      const job = { ...withContinuation(stored, { maxRepairs, busy: position >= 0 || run?.jobId === stored.id }), supervision, pendingPause: Boolean(run?.factory.pausePending(stored.id)) };
       if (position < 0) return job;
       return { ...job, queuePosition: position + 1, queuedFor: queue[position].mode, blockedBy: queue[position].mode === "start" ? blockedBy : null };
     });

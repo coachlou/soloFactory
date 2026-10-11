@@ -201,6 +201,17 @@ export class SoloFactory {
     this.active.pauseRequested = true;
   }
 
+  pausePending(jobId) {
+    return this.active?.jobId === jobId && Boolean(this.active.pauseRequested);
+  }
+
+  // A pending Pause parks before the next agent turn. Callers save whatever resume needs first.
+  takePause(before) {
+    if (!this.active?.pauseRequested) return;
+    this.active.pauseRequested = false;
+    throw new FactoryError("paused", `Paused before ${before}`, { before });
+  }
+
   async run(jobId, signal) {
     let job = await this.store.read(jobId);
     try {
@@ -552,8 +563,15 @@ export class SoloFactory {
     }
     for (;;) {
       let blockers;
-      if (plan instanceof Error) blockers = [plan.message];
+      if (job.planBlockers) {
+        // Saved by a Pause after the review blocked. A plan edited while paused is reviewed afresh.
+        if (!(plan instanceof Error) && job.planBlockedDigests?.includes(await planFileDigest(appDir))) blockers = job.planBlockers;
+        delete job.planBlockers;
+      }
+      if (blockers) { /* correct the recorded blockers below */ }
+      else if (plan instanceof Error) blockers = [plan.message];
       else {
+        this.takePause("specifying");
         const planDigest = digest(plan);
         const request = await preparePlanReview(appDir, job, planDigest, { checks, sources });
         job.planReviews += 1;
@@ -576,6 +594,11 @@ export class SoloFactory {
         }
       }
       await this.emit(job.id, { type: "plan.blocked", state: job.state, message: blockers[0] });
+      if (this.active?.pauseRequested) {
+        if (!(plan instanceof Error)) job.planBlockers = blockers;
+        await this.store.writeState(job);
+        this.takePause("specifying");
+      }
       if (plan instanceof Error && job.planSchemaFixes < PLAN_SCHEMA_FIXES) {
         job.planSchemaFixes += 1;
         await this.store.writeState(job);
@@ -904,6 +927,8 @@ export class SoloFactory {
     job.stage = `Paused before ${before}`;
     job.error = null;
     job.recovery = { ...buildRecovery(job, this.store.appDir(job.id)), title: "Paused by the owner", summary: before === "verifying" ? "The tree is committed; its last checks failed. Resume reruns them and repairs from there."
+      : job.planBlockers ? "The plan is saved; its plan review blocked. Resume corrects it without reviewing again."
+      : job.recoveryPhase?.status === "plan_failed" ? "Repair-plan preparation stopped before its next turn. Prepare the repair plan again to continue."
       : job.featureCursor?.substage === "repairing" || job.reviewFailure ? "The tree is committed; its review blocked. Resume repairs the recorded blockers without reviewing again."
       : `The tree is committed and green. Resume continues from ${before}.` };
     await this.store.writeState(job);

@@ -309,6 +309,7 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
       let planBlockers;
       if (plan instanceof Error) planBlockers = [plan.message];
       else {
+        factory.takePause('specifying');
         const planDigest = digest(plan);
         const key = planKey(plan);
         if (!phase.reviewedPlans.includes(key)) phase.reviewedPlans.push(key);
@@ -330,6 +331,8 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
       }
       phase.planBlockers = planBlockers;
       await factory.emit(id, { type: 'plan.blocked', state: job.state, message: planBlockers[0] });
+      // Pausing abandons this preparation (plan_failed); its spent corrections still count on the next one.
+      factory.takePause('specifying');
       // ponytail: per phase, not per input fingerprint; each owner preparation gets its own few schema fixes.
       if (plan instanceof Error && !phase.amendment && (phase.schemaFixes ?? 0) < PLAN_SCHEMA_FIXES) {
         phase.schemaFixes = (phase.schemaFixes ?? 0) + 1;

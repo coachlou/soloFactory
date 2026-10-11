@@ -178,8 +178,9 @@ file never leaves your machine; `GET /api/errors?limit=50` returns the latest en
 - **Resume current run** continues the existing run ID and files from the failed stage.
   **Start over** remains an explicit secondary action that creates a new run. Both go to the
   front of the queue.
-- **Pause** lets the run finish the stage it is in, commit the green tree, and park before
-  the next one; **Resume** picks up there with nothing replayed. **Cancel run** stops now.
+- **Pause** lets the run finish the agent turn it is in, commit the tree, and park before
+  the next one, including a repair or plan correction; **Resume** picks up there with
+  nothing replayed. The job API reports `pendingPause` until it parks. **Cancel run** stops now.
 - A parked slice run offers **Restart from slice** for every completed slice after the
   first: the tree is rewound to the commit before that slice and it is rebuilt from there.
 - A failed, interrupted, cancelled, or paused run holds its project's queue so nothing

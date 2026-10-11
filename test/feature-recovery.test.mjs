@@ -153,6 +153,29 @@ test('a failed repair-plan preparation continues only through one planning retry
   await assert.rejects(env.factory.resume(retried.id), /approve/);
 });
 
+test('a pause requested during a blocking repair-plan review stops before the correction turn', async t => {
+  // Inbox follow-up: recovery planning turns ignored a pending Pause.
+  let pause = true;
+  const env = await setup(t, async args => {
+    if (/^recovery-plan-review-/.test(args.context.stage) && pause) {
+      pause = false;
+      await env.factory.pause(env.failed.id);
+      const file = path.join(args.cwd, '.factory/plan-review-result.json'); const r = JSON.parse(await readFile(file, 'utf8'));
+      r.verdict = 'blocked'; r.blockers = ['SC-1 has no executable proof']; await writeFile(file, JSON.stringify(r));
+    }
+  });
+  const parked = await env.factory.planRecovery(env.failed.id);
+  assert.equal(parked.state, 'paused', parked.error?.message);
+  assert.equal(parked.recoveryPhase.status, 'plan_failed');
+  assert.equal(parked.recoveryPhase.corrections, 0, 'no correction budget spent');
+  assert.equal(env.stages.filter(stage => /^recovery-correction-/.test(stage)).length, 0);
+  assert.match(parked.recovery.summary, /Prepare the repair plan again/);
+  assert.equal(continuationAction(parked).action, 'retry-plan');
+  await assert.rejects(env.factory.resume(parked.id), /repair-plan preparation/i);
+  const ready = await env.factory.planRecovery(parked.id);
+  assert.equal(ready.recoveryPhase.status, 'ready', ready.error?.message);
+});
+
 test('a repair plan still blocked after its corrections offers a corrected-plan review, never a futile retry', async t => {
   let blocks = Infinity; // plan reviews still to block
   const env = await setup(t, async args => {

@@ -72,9 +72,10 @@ Covered: Pause pending when a deterministic gate fails → parks before the repa
 route through `verifyWithRepairs`, bfaaacc). Pause pending when a feature review blocks → parks
 before the repair turn; the blockers are kept on the cursor, so resume repairs them without a
 second review turn (3dc63ac; recovery features use the same path). The final whole-app review
-does the same through `job.reviewFailure` (follow-up commit). Not covered: planning and correction
-turns, and a pending pause is still not visible in the API. Fixture-tested only; the installed
-worker has none of these fixes.
+does the same through `job.reviewFailure` (follow-up commit). Planning now honors Pause before a
+plan review and before a correction (`job.planBlockers`). Pausing during repair-plan preparation
+stops it, and the next step is retry-plan. The job API reports `pendingPause`. Fixture-tested only;
+the installed worker has none of these fixes.
 
 ## Gate timeouts (Codex inbox)
 

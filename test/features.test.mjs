@@ -283,6 +283,36 @@ test("a pause requested during a blocking final review parks before the repair t
   assert.equal(resumed.reviewFailure, undefined);
 });
 
+test("a pause requested during a blocking plan review parks before the correction turn; resume corrects without re-reviewing first", async () => {
+  // Inbox follow-up: planning turns ignored a pending Pause; a correction spent plan budget after the owner paused.
+  let factory, jobId, blocked = false, pendingDuringReview;
+  const block = async (stage, cwd) => {
+    if (stage !== "plan-review-1" || blocked) return;
+    blocked = true;
+    await factory.pause(jobId);
+    pendingDuringReview = factory.pausePending(jobId);
+    await patch(path.join(cwd, ".factory/plan-review-result.json"), (verdict) => { verdict.verdict = "blocked"; verdict.blockers = ["SC-1 has no executable proof"]; });
+  };
+  const run = await plannedRun({ after: block });
+  ({ factory } = run);
+  jobId = run.job.id;
+  const parked = await factory.start(jobId);
+  assert.equal(pendingDuringReview, true, "the API can show a pause that has not taken effect yet");
+  assert.equal(factory.pausePending(jobId), false);
+  assert.equal(parked.state, "paused", parked.error?.message);
+  assert.equal(parked.planCorrections, 0, "no correction budget spent");
+  assert.deepEqual(parked.planBlockers, ["SC-1 has no executable proof"]);
+  assert.match(parked.recovery.summary, /plan review blocked/);
+  assert.equal(count(await started(run.store, jobId), "plan-correction-"), 0, "no correction turn started");
+
+  const resumed = await run.make().resume(jobId);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+  const turns = await started(run.store, jobId);
+  assert.equal(count(turns, "plan-correction-"), 1, "resume corrects the recorded blockers");
+  assert.equal(count(turns, "plan-review-"), 2, "the blocking review is not repeated before the correction");
+  assert.equal(resumed.planBlockers, undefined);
+});
+
 test("a gate that hits its time limit parks without a repair turn, and resume reruns it under the configured limit", async () => {
   // Seen live (Codex inbox): an aggregate proof hit the 5-minute cap and a repair turn spent an attempt on no assertion failure.
   const limits = [];

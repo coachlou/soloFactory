@@ -113,7 +113,7 @@
   </figure>
   <table>
     <tr><th>Control</th><th>When it shows</th><th>What it does</th></tr>
-    <tr><td><b class="btn">Pause</b></td><td>While a stage is running</td><td>Lets the run finish the stage it is in, commits the green tree, and parks before the next one. The button reads <em>Pausing after …</em> until the run parks. Nothing is lost and nothing is replayed on resume.</td></tr>
+    <tr><td><b class="btn">Pause</b></td><td>While a stage is running</td><td>Lets the run finish the stage it is in, commits the green tree, and parks before the next one. The button reads <em>Pausing after …</em> until the run parks, also after a page reload. No new agent turn starts once you press it: a failed check, a blocked review or a blocked plan parks before its repair or correction, and Resume picks that up without re-running the review. Pausing while a repair plan is being prepared stops that preparation; prepare the plan again to continue. Nothing is lost and nothing is replayed on resume.</td></tr>
     <tr><td><b class="btn">Resume</b></td><td>On a paused, failed or interrupted run</td><td>Continues the same run, same files, from the stage it stopped at. Goes to the front of the project's queue.</td></tr>
     <tr><td><b class="btn">Cancel run</b></td><td>While active</td><td>Stops work now. The workspace stays as it was.</td></tr>
     <tr><td><b class="btn">Restart from slice</b></td><td>On a parked slice run, for every completed slice after the first</td><td>Rewinds the tree to the commit before that slice and rebuilds it and everything after, exactly once. Earlier slices keep their commits.</td></tr>
