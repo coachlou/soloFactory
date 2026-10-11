@@ -38,7 +38,8 @@ A plan without cases normalizes byte-for-byte as before, so existing plan digest
 ### Where it applies
 
 - **New-run planning**: `featurePlanPrompt` and the plan audit carry the consolidation rules.
-  The schema check rejects malformed tables.
+  The schema check rejects malformed tables. `featureBuildPrompt` tells the builder each case
+  needs its own node:test named with `[CASE-ID]`.
 - **Repair planning**: `repairPlanPrompt` and its audit carry the same rules, plus the mapping
   check below against the reviewed plan.
 - **Owner-submitted amendments**: the same mapping check, refused before any state write.
@@ -55,7 +56,9 @@ When a reviewed (ready) plan exists, a replacement must account for every obliga
 
 All problems are reported together (first 10 shown). The base is the last **ready** plan; it
 carries through later blocked corrections (`amendment.base`), because a blocked plan was never
-accepted and cannot become the yardstick. Refusal code: `amendment_unmapped` (HTTP 400). In
+accepted and cannot become the yardstick. A fresh planner turn after an input change has no
+base: its request may legitimately add or remove obligations, so only the schema, prompt rules
+and plan review apply there. Today a base therefore exists only for owner-submitted amendments. Refusal code: `amendment_unmapped` (HTTP 400). In
 repair planning a failure becomes a plan blocker for the planner's correction.
 
 The plan reviewer receives the reviewed obligations as `base` in its request and must block a
@@ -90,7 +93,7 @@ only changes what a new plan may contain and how its gates are judged.
 
 ## Tests
 
-`test/consolidation.test.mjs` (8):
+`test/consolidation.test.mjs` (9):
 - a case table normalizes with its own surface, field, boundary and expected result; a plan
   without cases normalizes exactly as before;
 - rejected: a dropped check, a dropped source, a ref or source the requirement lacks, a bad
@@ -101,14 +104,15 @@ only changes what a new plan may contain and how its gates are judged.
 - per-case results: a failure beats a pass, skip is not a pass, `[X-01]` is not `[X-010]`;
 - `verify()` with one passing case of three fails and names the other two; all three pass;
   silence gives the node:test message; uncased gates get no reporter;
-- the real reporter under real node:test: a skipped case fails the gate, all passing pass it.
+- the real reporter under real node:test: a skipped case fails the gate, all passing pass it;
+- the builder prompt states the `[CASE-ID]` convention.
 
 `test/plan-amendment.test.mjs` (+1, existing ready-replacement tests now submit mapped plans):
 an unmapped or weakened replacement is refused with zero turns and byte-identical state; the
 reviewer sees `base`; a blocked correction is still checked against the reviewed plan.
 
-Full suite: 245/246. The failure is the timing test "agent activity extends the idle
-deadline" in `test/process.test.mjs`, untouched here; it passes 3/3 alone.
+Full suite: 247/247. (An earlier run hit one load-sensitive timing flake, "agent activity extends the idle
+deadline" in `test/process.test.mjs`, untouched here; it passes alone.)
 
 ## Appendix: photo-library regression
 
@@ -119,9 +123,12 @@ is assessed). The private plan stays in the photo-library repo and is not copied
   example the consolidation tests are shaped after, not a target: a good consolidation may land
   on any number of requirements, as long as every one of the 578 maps.
 - The existing candidate (`spec/consolidated-repair-plan/plan.json` in that repo) **only
-  batches execution**: same 578 obligations, 37 commands, no `cases`, no `supersedes`. Under
-  this build it would still be accepted, since every obligation is kept, but it gains nothing:
-  its gates are exit-code gates and its strictness rests on an app-written runner.
+  batches execution**: same 578 obligations, 37 commands, no `cases`, no `supersedes`.
+  Checked read-only on 2026-10-10 by running `assertConsolidation(candidate, readyPlan)` on the
+  real files: it **passes** (578/578 kept under their ids, 0 cases), and removing one
+  obligation is refused by name (`TARGET-COMPAT-REGRESSION ... is neither kept nor
+  superseded`). So the mapping check accepts the candidate but it gains nothing: its gates are
+  exit-code gates and its strictness rests on an app-written runner.
 - What a useful candidate needs: requirements with case tables whose case ids appear in test
   names, `supersedes` naming every original obligation id it folds in, and proof commands that
   run node:test without their own reporter. The app-written `verify-proof-group.mjs` runner

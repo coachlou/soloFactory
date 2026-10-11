@@ -6,6 +6,7 @@ import path from 'node:path';
 import { JobStore } from '../src/store.mjs';
 import { SoloFactory } from '../src/factory.mjs';
 import { assertConsolidation, caseResults, validateFeaturePlan } from '../src/wbs.mjs';
+import { featureBuildPrompt } from '../src/prompts.mjs';
 
 // Consolidating overlapping obligations into one requirement with explicit cases, shared by new-run and
 // repair planning. The cases keep every distinct field, action, boundary, failure condition and surface,
@@ -157,4 +158,10 @@ test('[UP-UI-BIG] shows the size error', () => {});
   await writeFile(path.join(env.app, 'test-upload.test.mjs'), body(false));
   assert.equal(await env.verify([item]), null);
   assert.equal(env.job.caseResults['UP-API-BIG'].status, 'passed');
+});
+
+test('the feature builder is told how cases are proved', () => {
+  const prompt = featureBuildPrompt(plan([requirement()]).slices[0], { owned: [], planDigest: 'digest' });
+  assert.match(prompt, /one node:test per case\nwhose name contains \[CASE-ID\]/);
+  assert.match(prompt, /without a --test-reporter flag of its own/);
 });

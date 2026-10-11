@@ -409,7 +409,9 @@ Original requirements this feature closes (prove the full wording):
 ${JSON.stringify(owned, null, 2)}
 
 Write each obligation's proof test first, then the minimum real behavior that passes it. Source-
-string assertions do not prove user behavior. Do not edit .factory contract or plan files. Do not
+string assertions do not prove user behavior. An obligation with cases needs one node:test per case
+whose name contains [CASE-ID], run by its proof command without a --test-reporter flag of its own; the
+controller passes it only when every case's own test passed. Do not edit .factory contract or plan files. Do not
 deploy; the controller reruns install/test/build and every proof command, then a scoped review.
 
 ${DATA_RULE}`;
