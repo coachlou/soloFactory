@@ -165,3 +165,15 @@ test('the feature builder is told how cases are proved', () => {
   assert.match(prompt, /one node:test per case\nwhose name contains \[CASE-ID\]/);
   assert.match(prompt, /without a --test-reporter flag of its own/);
 });
+
+test('the feature builder sees each shared proof command once, and every requirement and case still', () => {
+  const long = { command: ['node', '--test', ...Array.from({ length: 40 }, (_, n) => `test/integration/case-${n}.test.mjs`)], expect: 'every case passes' };
+  const other = { command: ['node', '--test', 'test/other.test.mjs'], expect: 'passes' };
+  const slice = plan([requirement({ proof: long }), requirement({ id: 'R2', proof: long, cases: undefined }), requirement({ id: 'R3', proof: long, cases: undefined }), requirement({ id: 'R4', proof: other, cases: undefined })]).slices[0];
+  const prompt = featureBuildPrompt(slice, { owned: [], planDigest: 'digest' });
+  assert.equal(prompt.split('case-39.test.mjs').length - 1, 1, 'a shared command appears once');
+  assert.equal(prompt.split('test/other.test.mjs').length - 1, 1);
+  assert.equal((prompt.match(/"command": "C1"/g) ?? []).length, 3); assert.equal((prompt.match(/"command": "C2"/g) ?? []).length, 1);
+  for (const id of ['UPLOAD-LIMITS', 'R2', 'R3', 'R4', ...cases().map(entry => entry.id)]) assert.match(prompt, new RegExp(`"${id}"`));
+  assert.equal(slice.acceptance[0].proof.command, long.command, 'the plan itself is unchanged');
+});

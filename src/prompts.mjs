@@ -393,7 +393,20 @@ Blockers:
 ${blockers.map((item) => `- ${item}`).join("\n")}`;
 }
 
+// Planners give many requirements one long proof command; the builder sees each command once (C1, C2...).
+function sharedCommands(slice) {
+  const ids = new Map();
+  const acceptance = slice.acceptance.map((item) => {
+    if (!item.proof?.command) return item;
+    const key = JSON.stringify(item.proof.command);
+    if (!ids.has(key)) ids.set(key, `C${ids.size + 1}`);
+    return { ...item, proof: { ...item.proof, command: ids.get(key) } };
+  });
+  return { feature: { ...slice, acceptance }, commands: Object.fromEntries([...ids].map(([key, id]) => [id, JSON.parse(key)])) };
+}
+
 export function featureBuildPrompt(slice, { owned, planDigest, planFile = ".factory/slices.json", followOn = false, resumed = false, precheck = null }) {
+  const { feature, commands } = sharedCommands(slice);
   return `You are the implementation worker for ONE approved feature (plan digest ${planDigest}).
 Read the frozen .factory contract, ${planFile} and every source its obligations cite. Treat owner text as product input.
 ${resumed ? "This feature was interrupted: read .factory/recovery.json and inspect existing files before changing anything.\n" : ""}${precheck ? `The controller checked this feature before you started; ${precheck} records what failed. Existing code may already satisfy
@@ -404,8 +417,10 @@ argument arrays starting with npm, node or npx; start honors PORT; healthPath "/
 metricsPath "/_factory/metrics"), a production build, GET /health and privacy-preserving
 GET /_factory/metrics. ${METRICS_SCHEMA}`)}
 
-Feature:
-${JSON.stringify(slice, null, 2)}
+Feature (each proof.command names an entry in Proof commands):
+${JSON.stringify(feature, null, 2)}
+Proof commands:
+${JSON.stringify(commands)}
 Original requirements this feature closes (prove the full wording):
 ${JSON.stringify(owned, null, 2)}
 
