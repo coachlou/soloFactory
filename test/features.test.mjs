@@ -150,6 +150,51 @@ test("final integration has its own two-repair budget after every feature is ver
   assert.equal(count(await started(store, job.id), "repair-"), 2, "no feature repairs were spent");
 });
 
+// The skeleton's own proof runs outside npm test, so only a rerun at final integration sees a later feature break it.
+const e2eSkeleton = async (stage, cwd) => {
+  if (stage === "feature-plan") await patch(path.join(cwd, ".factory/slices.json"), (plan) => { plan.slices[0].acceptance[0].proof.command = ["node", "e2e/skeleton.mjs"]; });
+};
+const gateOf = (options) => path.basename(options.logPath).replace(/-\d+\.log$/, "");
+
+test("after a repair the failed gate runs first, behind install only", async () => {
+  const order = [];
+  let failures = 1;
+  const commandRunner = async (options) => {
+    order.push(gateOf(options));
+    if (options.args[0] === "e2e/skeleton.mjs" && failures-- > 0) return { code: 1, output: "skeleton e2e failed" };
+    return { code: 0, output: "passed" };
+  };
+  const { job, factory } = await plannedRun({ after: e2eSkeleton, commandRunner });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  const failed = order.indexOf("proof-SKELETON-1");
+  assert.deepEqual(order.slice(0, failed + 1), ["install", "test", "build", "proof-SKELETON-1"]);
+  assert.deepEqual(order.slice(failed + 1, failed + 5), ["install", "proof-SKELETON-1", "test", "build"]);
+});
+
+test("final integration reruns every verified feature's proofs, so a later feature's regression is repaired", async () => {
+  const order = [];
+  let broken = false;
+  const after = async (stage, cwd) => {
+    await e2eSkeleton(stage, cwd);
+    if (stage === "build-slice-SLICE-UI") broken = true;
+    if (stage.startsWith("repair-")) broken = false;
+  };
+  const commandRunner = async (options) => {
+    order.push(gateOf(options));
+    return options.args[0] === "e2e/skeleton.mjs" && broken ? { code: 1, output: "skeleton e2e failed" } : { code: 0, output: "passed" };
+  };
+  const { store, job, factory } = await plannedRun({ after, commandRunner });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  const events = await store.events(job.id, 1000);
+  const lastFeature = events.findLastIndex((event) => event.type === "slice.completed");
+  const final = events.slice(lastFeature);
+  assert.ok(final.some((event) => event.type === "gate.failed" && event.gate === "proof-SLICE-SKELETON.SKELETON-1"), "final integration caught the regression");
+  assert.equal(final.filter((event) => event.type === "agent.started" && event.message.includes("repair-")).length, 1);
+  assert.equal(count(await started(store, job.id), "repair-"), 1, "no feature repairs were spent");
+});
+
 test("a reviewer that edits the candidate voids its verdict and forces fresh checks and a fresh review", async () => {
   const { store, job, factory } = await plannedRun({ after: async (stage, cwd) => {
     if (stage === "feature-review-SLICE-UI-1") await writeFile(path.join(cwd, "reviewer-edit.js"), "export const x = 1;\n");

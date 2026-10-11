@@ -118,3 +118,11 @@ Suite: 267/267.
   schema-fix budget (f34c4f9) now handles separately. Not a recovery-path result.
 - a943a5da (smoke-cases-4): started on HEAD 236d7e1 with `smoke-watchdog-plan4`. Next steps:
   plan approval, then restart with MAX_REPAIRS=0, resume, plant fault, prepare repair plan, stop at ready.
+
+## Staged verification (ordering only, per the Codex amendment)
+
+- After a repair the failed gate runs first (behind install), then the full set; feature gates unchanged.
+- Final integration reruns every verified feature's build-time proofs once (additive). Repair runs rerun only their own plan's features.
+- Feature reviewer reads gate logs and caseResults instead of rerunning proof commands.
+- Dropped after the amendment: planner guidance moving per-feature regression to final, and the post-review same-candidate skip. No reuse/cache.
+- Suite 269/269. Measurement and shadow-selection pilot (amendment items 1–4) still open.

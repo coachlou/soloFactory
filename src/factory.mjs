@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./process.mjs";
 import { buildPrompt, continuationPrompt, featureBuildPrompt, featurePlanPrompt, featureReviewPrompt, planAuditPrompt, planCorrectionPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
-import { PLAN_SCHEMA_FIXES, assertConsolidation, caseResults, orderSlices, integrationProofs, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
+import { PLAN_SCHEMA_FIXES, assertConsolidation, caseResults, featureProofs, orderSlices, integrationProofs, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
 export { pendingProofFailure };
 import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
@@ -1087,16 +1087,18 @@ export class SoloFactory {
   }
 
   async verifyWithRepairs(job, manifest, signal, { includeInstall, slice = null, proofs = [] }) {
-    // Without a feature this is the integrated app: every proof pending integration runs here.
+    // Without a feature this is the integrated app: every verified feature's proofs rerun once, and
+    // every proof pending integration runs here.
     if (!slice) {
       for (const entry of integrationProofs(job)) { entry.status = "pending"; delete entry.candidate; delete entry.verifiedAt; delete entry.proofCandidate; }
       await this.store.writeState(job);
-      proofs = [...proofs, ...integrationProofs(job).map(entry => ({ id: entry.gate.slice("proof-".length), key: entry.key, proof: entry.obligation.proof, cases: entry.obligation.cases }))];
+      proofs = [...proofs, ...featureProofs(job), ...integrationProofs(job).map(entry => ({ id: entry.gate.slice("proof-".length), key: entry.key, proof: entry.obligation.proof, cases: entry.obligation.cases }))];
     }
     let current = job;
+    let first = null;
     for (;;) {
       current = await this.stage(current, "verifying", "Running deterministic quality gates");
-      const failure = await this.verify(current, manifest, signal, { includeInstall, proofs });
+      const failure = await this.verify(current, manifest, signal, { includeInstall, proofs, first });
       if (!failure) {
         if (!slice && integrationProofs(current).length) {
           const candidate = await sourceBaseline(this.store, { head: false });
@@ -1116,6 +1118,8 @@ export class SoloFactory {
       current = await this.repair(current, failure, signal, slice);
       manifest = await this.readManifest(this.store.appDir(current.id));
       includeInstall = true;
+      // The gate that just failed is the likeliest to fail again, so the next pass learns that first.
+      first = failure.details?.command ?? null;
     }
   }
 
@@ -1148,7 +1152,7 @@ export class SoloFactory {
     await this.store.writeState(job);
   }
 
-  async verify(job, manifest, signal, { includeInstall, proofs = [] }) {
+  async verify(job, manifest, signal, { includeInstall, proofs = [], first = null }) {
     const gates = (includeInstall ? ["install", "test", "build"] : ["test", "build"]).map((gate) => [gate, manifest.commands[gate]]);
     // Each distinct obligation proof is its own gate; one identical to an earlier command already ran.
     const seen = new Map();
@@ -1169,6 +1173,9 @@ export class SoloFactory {
         if (item.cases) (gate[3] ??= []).push(...item.cases.map((entry) => ({ id: entry.id, requirement: item.id })));
       }
     }
+    // Install stays ahead of it: every other gate needs the dependencies.
+    const at = first ? gates.findIndex(([gate, command]) => gate !== "install" && JSON.stringify(command) === JSON.stringify(first)) : -1;
+    if (at > 0) gates.splice(includeInstall ? 1 : 0, 0, ...gates.splice(at, 1));
     const integrated = proofs.some(item => item.key);
     let candidate = null;
     for (const [gate, command, proofKeys = [], cases = []] of gates) {

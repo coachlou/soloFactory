@@ -437,8 +437,10 @@ ${DATA_RULE}`;
 
 export function featureReviewPrompt(slice) {
   return `You are the scoped reviewer for ONE feature. Review it against every check in
-.factory/review-request.json: its obligations and the original requirements it closes. Run its
-proof commands and inspect real behavior. A requirement with cases passes only when every case is
+.factory/review-request.json: its obligations and the original requirements it closes. The
+controller already ran its proof commands, test and build on this exact candidate; their output is in
+.factory/logs/<gate>-<attempt>.log. Do not rerun them. Read the proofs and their logs, and run only
+targeted checks of real behavior the proofs do not exercise. A requirement with cases passes only when every case is
 "passed" in the request's caseResults (the controller's own record of the tests named [CASE-ID]). Later planned features may still be missing and must not
 block this verdict; a broad requirement this feature closes still needs full proof.
 

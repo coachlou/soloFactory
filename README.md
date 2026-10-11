@@ -206,7 +206,12 @@ dependency-ordered feature plan (`.factory/slices.json` version 2) in which each
 acceptance scenario has exactly one closing feature with executable proofs. A fresh reviewer
 must approve that exact plan, bound to its digest, the frozen contract and a token, before any
 code is written. Each feature then passes install/test/build, its own proof commands, a scoped
-review bound to the reviewed source, and a checkpoint commit before the next one starts.
+review bound to the reviewed source, and a checkpoint commit before the next one starts. The
+feature reviewer reads the controller's gate logs and case results instead of rerunning those
+commands. After a repair, the gate that failed runs first (behind install), then the full set.
+Final integration reruns every verified feature's build-time proofs once, so a later feature that
+breaks an earlier one is caught before the final review. A repair run reruns its own features'
+proofs; original features it left alone rely on the manifest test command.
 Plans, features and final integration each get two repairs; Resume never refills them. There is
 no single-build option for new runs; older single and slice runs still resume. Details:
 [SPEC.md §12](SPEC.md).

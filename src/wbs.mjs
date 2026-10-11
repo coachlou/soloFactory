@@ -206,6 +206,18 @@ export function recordPendingProofs(job, planDigest, slice) {
   }
 }
 
+// Build-time proofs of every verified feature, rerun once at final integration so a later feature's
+// regression is caught there instead of by aggregate proofs in every feature.
+// ponytail: a recovery run reruns only its own plan's features; original features it left alone rely
+// on the manifest test gate. Carry their proofs forward if those regressions start slipping through.
+export function featureProofs(job) {
+  const phase = job.recoveryPhase;
+  const [plan, done] = phase?.done?.length ? [phase.plan, phase.done] : [job.approvedPlan?.plan, job.sliceDone ?? []];
+  return (plan?.slices ?? []).filter((slice) => done.includes(slice.id)).flatMap((slice) => (slice.acceptance ?? [])
+    .filter((item) => item?.proof?.command && !item.proof.pending)
+    .map((item) => ({ id: `${slice.id}.${item.id}`, proof: item.proof, cases: item.cases })));
+}
+
 // Commands can serve multiple obligations, including a manifest gate. Preserve every target.
 export function failedIntegrationProofs(job) {
   if (job.error?.code !== "quality_gate_failed") return [];
