@@ -316,8 +316,8 @@ const FEATURE_PLAN_SCHEMA = `{ "version": 2, "jobId": <copied from the request>,
 // Shared by new-run and repair planning: consolidation is allowed only as explicit, separately proved cases.
 export const CONSOLIDATION_RULES = `- Consolidate overlapping obligations into one requirement with a cases table instead of repeating
   near-identical items. Each case keeps one distinct field, action, boundary, failure condition and
-  surface (API and browser coverage stay separate cases). Together the cases cite every check and
-  source the requirement cites. A requirement passes only when every case passes: its proof command
+  surface (API and browser coverage stay separate cases). Together the cases cite every check
+  the requirement cites; each case cites a section of one of its source files. A requirement passes only when every case passes: its proof command
   runs node:test (no --test-reporter flag of its own) and each case has a test whose name contains
   [CASE-ID]. One passing case never proves its neighbors; never fold a case into a weaker assertion.`;
 

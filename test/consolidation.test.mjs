@@ -58,7 +58,7 @@ test('a plan without cases normalizes exactly as before, so existing plan digest
 
 test('a case table cannot drop a check or source citation, cite one its requirement lacks, or reuse an id', () => {
   rejects([requirement({ cases: cases().slice(0, 1) })], /cites SC-1 but none of its cases does/);
-  rejects([requirement({ sources: [at('§1 Upload'), at('§2 Limits'), { path: 'PLAN.md', locator: '§4 Storage' }] })], /cites PLAN\.md but none of its cases does/);
+  assert.doesNotThrow(() => validateFeaturePlan(plan([requirement({ sources: [at('§1 Upload'), at('§2 Limits'), { path: 'PLAN.md', locator: '§4 Storage' }] })]), opts)); // a requirement may cite a file no case cites
   rejects([requirement({ refs: ['MH-1'], cases: cases().slice(0, 1).concat({ ...cases()[1], refs: ['SC-1'] }) })], /UP-API-BIG cites SC-1, which UPLOAD-LIMITS does not/);
   rejects([requirement({ cases: cases().map((entry, i) => i ? entry : { ...entry, sources: [{ path: 'OTHER.md', locator: '§9 Elsewhere' }] }) })], /UP-API-OK cites OTHER\.md §9 Elsewhere, which UPLOAD-LIMITS does not/);
   rejects([requirement({ cases: cases().map((entry, i) => i ? entry : { ...entry, surface: 'magic' }) })], /needs a surface/);

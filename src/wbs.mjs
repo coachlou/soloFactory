@@ -239,7 +239,6 @@ function validateCases(item, { registry, sources, ids, claimed }) {
   const where = `Requirement ${item.id}`;
   if (!Array.isArray(item.cases) || !item.cases.length) throw new Error(`${where} has a malformed cases table; omit it or list at least one case.`);
   const refs = new Set();
-  const cited = new Set();
   const problems = [];
   const cases = item.cases.map((entry) => {
     if (!entry || typeof entry.id !== "string" || !SLICE_ID_RE.test(entry.id) || ids.has(entry.id)) throw new Error(`${where} has a missing or duplicate case id.`);
@@ -263,7 +262,6 @@ function validateCases(item, { registry, sources, ids, claimed }) {
       else {
         const foreign = entry.sources.filter((ref) => !text(ref?.locator, 2) || !own.includes(ref.path));
         if (foreign.length) problems.push(`${at} cites ${foreign.map((ref) => `${ref?.path} ${ref?.locator ?? "(no locator)"}`).join("; ")}, which ${item.id} does not; cite a section of one of its files with a locator, or add the file to ${item.id}'s sources (allowed: ${own.join(", ")}).`);
-        entry.sources.forEach((ref) => cited.add(ref?.path));
       }
     }
     const supersedes = entry.supersedes ?? [];
@@ -274,8 +272,9 @@ function validateCases(item, { registry, sources, ids, claimed }) {
   });
   const uncovered = item.refs.filter((ref) => !refs.has(ref));
   if (uncovered.length) problems.push(`${where} cites ${uncovered.join(", ")} but none of its cases does.`);
-  const uncited = sources ? [...new Set(item.sources.map((ref) => ref.path))].filter((file) => !cited.has(file)) : [];
-  if (uncited.length) problems.push(`${where} cites ${uncited.join(", ")} but none of its cases does.`);
+  // ponytail: no case-side source coverage. Both lists are planner-authored, so the rule only made planners
+  // edit citations; it ate corrections in three real runs (2026-10-11). Source fidelity against a reviewed plan
+  // is assertConsolidation's job.
   // Report every citation problem together so one planner correction can fix them all.
   if (problems.length) throw new Error(problems.join(" "));
   return cases;
