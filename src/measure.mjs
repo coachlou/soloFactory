@@ -15,6 +15,8 @@ export function activity(label = "") {
 
 const at = (event) => new Date(event.at).getTime();
 const labelOf = (event) => event.stage ?? event.message?.match(/ started (\S+)$/)?.[1] ?? "unknown";
+// Legacy recovery turns name their feature after the phase UUID: recovery-<uuid>-<feature>[-resume|-review-N].
+const recoveryFeature = (label) => label.match(/^recovery-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}-(.+?)(?:-resume|-review-\d+)?$/)?.[1] ?? null;
 const argvOf = (event) => event.command ? JSON.stringify(event.command) : JSON.stringify(event.message?.replace(/^[^:]+: /, "") ?? event.gate);
 
 export function measureRun(events) {
@@ -63,10 +65,13 @@ export function measureRun(events) {
     if (event.type === "slice.started") legacyFeature = event.slice;
     if (event.type === "slice.completed" || event.type === "recovery.slice.completed") legacyFeature = null;
     if (PARKED.has(event.type) && parkedAt === null) parkedAt = at(event);
-    if (RESUMED.has(event.type) && parkedAt !== null) { parkedMs += at(event) - parkedAt; parkedAt = null; }
+    // Legacy recovery restarts work without job.resumed: the first new turn or gate ends the parking.
+    const restarted = RESUMED.has(event.type) || event.type === "agent.started" || event.type === "gate.started";
+    if (restarted && parkedAt !== null) { parkedMs += at(event) - parkedAt; parkedAt = null; }
     if (event.type === "agent.started") {
       if (agent) closeAgent(null);
       const label = labelOf(event);
+      if (!("feature" in event) && recoveryFeature(label)) legacyFeature = recoveryFeature(label);
       const kind = activity(label);
       agent = { label, kind, start: at(event), bucket: place(event, kind) };
       bucket(agent.bucket).agent.turns += 1;
@@ -95,12 +100,15 @@ export function measureRun(events) {
   const sum = (pick) => list.reduce((total, b) => total + pick(b), 0);
   const activeMs = sum((b) => b.agent.ms) + sum((b) => b.gates.ms);
   const wallMs = last - first;
+  const totalParkedMs = parkedMs + (parkedAt !== null ? last - parkedAt : 0);
+  const overlapMs = Math.max(0, totalParkedMs + activeMs - wallMs);
   return {
-    wallMs, parkedMs: parkedMs + (parkedAt !== null ? last - parkedAt : 0), activeMs,
+    wallMs, parkedMs: totalParkedMs, activeMs, overlapMs,
     agentMs: sum((b) => b.agent.ms), gateMs: sum((b) => b.gates.ms),
     tokens: list.reduce((total, b) => b.agent.tokens ? addUsage(total, b.agent.tokens) : total, null),
     buckets: list,
     unavailable: [
+      ...(overlapMs ? [`Parked and active intervals overlap by ${(overlapMs / 1000).toFixed(1)}s (a turn or gate ran while the run was parked), so the wall-time split is not a partition.`] : []),
       "Commands workers run inside their own turns are not observed; only controller gates are counted.",
       ...(sum((b) => b.gates.candidateUnknown) ? ["Some gate runs predate candidate recording, so unchanged-candidate repeats are a lower bound."] : []),
       ...(sum((b) => b.agent.turnsWithoutUsage) ? ["Some agent turns reported no token usage (interrupted, or the provider gave none)."] : []),

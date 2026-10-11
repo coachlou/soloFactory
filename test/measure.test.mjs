@@ -56,3 +56,37 @@ test("legacy events without feature, command or candidate fields are attributed 
   assert.equal(m.buckets.find((b) => b.id === "integration").gates.runs, 1);
   assert.ok(m.unavailable.some((note) => /lower bound/.test(note)));
 });
+
+test("legacy recovery runs: features come from recovery labels, and parking ends when work starts again", () => {
+  // Photo-library snapshot shape: no slice.started, recovery.slice.completed per feature, and work
+  // that resumes through recovery transitions with no job.resumed event.
+  const phase = "0f8c2a1e-5b6d-4c3e-9a7f-1b2c3d4e5f60";
+  const events = [
+    ev("job.paused"),
+    ev("agent.started", { message: `codex started recovery-${phase}-F1-PHOTO` }, 50000), ev("agent.completed", { stage: `recovery-${phase}-F1-PHOTO` }, 4000),
+    ev("gate.started", { gate: "test", message: "test: npm test" }), ev("gate.passed", { gate: "test", durationMs: 100 }),
+    ev("agent.started", { message: "codex started repair-1" }), ev("agent.completed", { stage: "repair-1" }, 3000),
+    ev("recovery.slice.completed", { slice: "F1-PHOTO" }),
+    ev("agent.started", { message: `codex started recovery-${phase}-F2-ALBUM-review-1` }), ev("agent.completed", { stage: `recovery-${phase}-F2-ALBUM-review-1` }, 2000),
+    ev("recovery.slice.completed", { slice: "F2-ALBUM" }),
+    ev("gate.started", { gate: "build", message: "build: npm run build" }), ev("gate.passed", { gate: "build", durationMs: 100 }),
+  ];
+  const m = measureRun(events);
+  const f1 = m.buckets.find((b) => b.id === "F1-PHOTO");
+  assert.deepEqual([f1?.agent.byActivity.implement, f1?.agent.byActivity.repair, f1?.gates.runs], [4000, 3000, 1]);
+  assert.equal(m.buckets.find((b) => b.id === "F2-ALBUM")?.agent.byActivity.review, 2000);
+  assert.equal(m.buckets.find((b) => b.id === "integration").gates.runs, 1);
+  assert.equal(m.parkedMs, 50000);
+  assert.ok(m.parkedMs + m.activeMs <= m.wallMs);
+});
+
+test("a turn still running when the run parks is reported as overlap, not hidden by a zero clamp", () => {
+  const events = [
+    ev("agent.started", { stage: "build-slice-A", feature: "A" }),
+    ev("job.paused", {}, 1000), ev("agent.completed", { stage: "build-slice-A", feature: "A" }, 5000),
+    ev("job.resumed", {}, 1000),
+  ];
+  const m = measureRun(events);
+  assert.ok(m.unavailable.some((note) => /overlap/.test(note)));
+  assert.match(formatMeasurement(m), /overlap/);
+});
