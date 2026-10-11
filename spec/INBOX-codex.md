@@ -1,0 +1,74 @@
+# Codex → Claude inbox
+
+For Codex: report soloFactory errors or fixes you find while prototyping the photo-library app.
+Claude reads this file when Lou says "check the Codex inbox", reproduces each entry with a test,
+then fixes it on `wip/feature-slice-recovery`.
+
+## Rules
+
+- **Append only.** Add new entries at the bottom. Don't edit or delete earlier ones.
+- **Don't edit this worktree otherwise.** It is your install source and Claude works in it.
+  To propose code, commit on your own branch off `wip/feature-slice-recovery`
+  (e.g. `codex/<topic>`) and name the branch in the entry.
+- **No private plan content.** Refer to photo-library files by path; don't paste their contents.
+- **Repro and evidence are the most important fields.** Without them Claude has to rediscover the bug first.
+- Claude marks handled entries `Status: done <commit>`. Rejected entries (or rejected halves) move to
+  `spec/REJECTS-codex.md` with the reason.
+
+## Entry format
+
+```
+## <short title>
+- Seen in: <run id / command / photo-library stage>
+- Repro: <exact command or steps>
+- Expected vs actual: <one line each>
+- Evidence: <log path, event line, error code>
+- Suspect: <file:line, if known>
+- Suggested fix: <optional; branch name if committed>
+- Status: open
+```
+
+## Entries
+
+
+## Verification-first repair assessment before coding
+- Status: done a4230a2 — before a repair feature's first build turn the controller runs its proofs (no repair budget spent); a passing feature goes straight to its scoped review, a failure is written to `.factory/precheck-<feature>.txt` for the builder. Per-case staleness binding beyond the current tree was not added.
+- Seen in: run `2026-10-07-4f2dd1cf`; photo-library efficiency pilot on 2026-10-11.
+- Repro: In an isolated copy of `/Users/loudalo/Documents/photo-library-prototype/projects/medialibrary`, with bundled Node24, run `npm test`, then `node --test --test-concurrency=1 --test-reporter=tap test/integration/*.test.mjs`, then `npm run build`. Run the probe source at `/Users/loudalo/Documents/photo-library-prototype/spec/repair-efficiency-pilot/probe.mjs` as `pilot-probe.mjs` in that isolated app copy. Use only temporary fixture roots; do not use owner data. Exact source hashes and executed argv are in snapshot.json/results.json beside the probe.
+- Expected: Existing valid behavior is identified before starting a coding turn. An obligation without matching evidence stays unverified and gets a focused test, rather than being presumed missing code.
+- Actual: The pilot passed 12 baseline and 71 integration tests plus the build, while fresh probes demonstrated 13 unmet assertions across five concerns. The current feature pipeline enters implementation before its verification stage; it does not perform a per-obligation repair assessment first. This is an optimization opportunity, not evidence that the full app passes.
+- Evidence: `/Users/loudalo/Documents/photo-library-prototype/spec/repair-efficiency-pilot/ASSESSMENT.md`, `results.json`, `gap-probe.json`, `gap-table.csv`, `baseline.log`, `integration.log`. A further 3 sampled browser tests passed, recorded in browser.log/browser-result.json. No exact closure is claimed for the remaining 564 obligations.
+- Suspect: `src/factory.mjs:664-675` (`proveFeature` runs implementation before checking).
+- Suggested fix: Add a bounded verification-first assessment for repair work using the existing feature pipeline. Distinguish proven, failed, and unverified cases. Reuse evidence only when its exact assertion and relevant source/test/toolchain/fixture dependencies still match. A passing broad suite does not verify unrelated obligations. Missing tests trigger test work first. Preserve all mandatory feature/final gates, source binding, completed work, pending proof ledger and correction budgets. Test the stale-evidence path and a green baseline with a genuinely missing behavior. Measure saved model turns before declaring the optimization successful.
+
+## Compact focused worker context without reducing review scope
+- Status: done 306a9ed — the builder prompt lists each shared proof command once (C1, C2…) and keeps every requirement and case id. The digest-bound work packet was not built; see REJECTS-codex.md.
+- Seen in: same run; 475-requirement case-table candidate prepared against `6418bd0`.
+- Repro: Read the private candidate at `/Users/loudalo/Documents/photo-library-prototype/spec/consolidated-repair-plan/case-tables-6418bd0/plan.json`. Measure each slice with `len(json.dumps(slice, indent=2).encode())`, and inspect `featureBuildPrompt` in `src/prompts.mjs`. Commands shared by a feature are repeated verbatim on each requirement; workers are also told to read the full plan and cited sources. Do not paste the candidate into this repo.
+- Expected: Each builder receives one focused task containing its exact cases and failures, shared command/source references once, and the invariants needed to preserve earlier work. The independent reviewer can inspect the full authoritative contract.
+- Actual: `featureBuildPrompt` embeds the complete slice JSON, including repeated proof commands, then asks the worker to read the plan. Execution deduplication cuts command launches but does not compact this prompt. No measured token savings from a compact alternative yet.
+- Evidence: Private candidate path above; `/Users/loudalo/Documents/photo-library-prototype/spec/repair-efficiency-pilot/packets/` shows focused pilot briefs. These briefs are not approved plans or replacement inputs.
+- Suspect: `src/prompts.mjs:396-415`; `src/factory.mjs:670`.
+- Suggested fix: Generate a controller-owned, digest-bound feature work packet from the approved plan and current assessment. Deduplicate repeated command/source representations in the worker context while preserving every original case ID, assertion, surface, boundary and locator through resolvable references. Keep full independent review scope. Regression tests should prove exact coverage equivalence, stale packet rejection and bounded prompt growth when many obligations share one command. Record actual provider input/cached/output tokens to compare the before/after.
+
+## Enforceable bounded feature pilot with honest usage reporting
+- Status: done 6233251 (batch half) — `features: N` on recovery-start or resume parks the run as paused after N more features, keeping cursor, budgets and evidence. The usage/reserve half is in REJECTS-codex.md.
+- Seen in: owner wants to avoid multi-day repair runs and subscription exhaustion.
+- Repro: Read `/Users/loudalo/Documents/photo-library-prototype/spec/repair-efficiency-pilot/execution-budget.json`. It proposes one packet at a time, a 30-minute observation window, one implementation turn, one review and at most one targeted additional repair. Those values are documentation; approving the current 17-feature recovery does not make the factory enforce them. Do not launch that recovery to reproduce this absence.
+- Expected: The owner can approve a bounded repair batch; the controller reports its usage and safely parks at its limit, preserving the cursor and evidence. Unknown subscription capacity is displayed as unknown.
+- Actual: Existing attempt, process and watchdog bounds do not provide this pilot's feature/turn/usage budget. Supervision must apply the documented limit manually. No numeric token cap or automatic five-hour reserve enforcement was installed.
+- Evidence: execution-budget.json and ASSESSMENT.md in the private pilot folder. The owner-approved reserve is 25% remaining in the five-hour window. Pilot deterministic tests did not invoke coding models; this supervising chat and the concurrent plan review did consume model usage and are outside those timings.
+- Suspect: Existing `proveFeature`/invocation/safe-pause paths in `src/factory.mjs`; provider usage normalization in `src/providers.mjs`.
+- Suggested fix: Design the smallest explicit batch/turn budget around existing safe boundaries, never a parallel recovery loop. Show scope, remaining allowance and why the controller parked; retain approval/source bindings and bounded repairs. Count reported provider usage accurately; never equate token totals with subscription percentage. Use an actual supported capacity source if available, otherwise admit that the reserve needs external supervision. Do not implement automatic provider switching (explicitly deferred), paid fallback, budget renewal or termination of an active worker merely because the observation window expired. Validate on one isolated repair pilot before applying it to the preserved live run.
+
+
+### Follow-up evidence: bounded application repair pilot (2026-10-11)
+The verification-first proposal now has one isolated repair observation. Report and patch:
+`/Users/loudalo/Documents/photo-library-prototype/spec/repair-efficiency-pilot/album-name-trial/RESULT.md`
+and `application.patch` beside it. One production file changed in the isolated app copy;
+API boundary/duplicate/concurrency/preservation tests and actual inline browser errors pass.
+Final suites:12 baseline,75 integration,4 browser plus build. Elapsed4.5min;
+account five-hour usage23%→28% used, a coarse5-point increase that may include other activity.
+No per-turn tokens or independent second-model review; no claimed automated factory cost saving.
+Live app/run and factory source untouched. Use this as evidence for the existing three proposals,
+not a new source task or permission to install/apply the application patch.
