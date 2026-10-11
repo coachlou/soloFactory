@@ -94,3 +94,8 @@ also parks rather than being repaired; the owner decides.
 ## Smoke status
 
 (updated below as it progresses)
+- 040de7db (smoke-cases-3, pre-91fdd3d code in memory): failed `plan_blocked` at 06:26 after 4
+  corrections. The last correction was spent on a case-source schema error, which the
+  schema-fix budget (f34c4f9) now handles separately. Not a recovery-path result.
+- a943a5da (smoke-cases-4): started on HEAD 236d7e1 with `smoke-watchdog-plan4`. Next steps:
+  plan approval, then restart with MAX_REPAIRS=0, resume, plant fault, prepare repair plan, stop at ready.
