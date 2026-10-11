@@ -590,3 +590,16 @@ test('a pending proof from an earlier recovery phase still gates completion afte
   assert.match(result.error.details?.gate ?? '', /LATE-1$/);
   assert.equal(env.deployments(), 0);
 });
+
+test('a repair-plan request with no matching review is refused and leaves the parked run error intact', async t => {
+  // Live: a run parked on stale integration evidence (review_rejected, no reviewer verdict) got a
+  // prepare-plan request; the refusal went through fail() and replaced the park reason with unexpected_error.
+  const env = await setup(t);
+  await rm(path.join(env.root, '.factory/review-result.json'));
+  const before = await env.store.read(env.failed.id);
+  await assert.rejects(env.factory.planRecovery(env.failed.id), error => error.code === 'recovery_not_applicable' && /matching review/.test(error.message));
+  const after = await env.store.read(env.failed.id);
+  assert.equal(after.state, 'failed');
+  assert.deepEqual(after.error, before.error);
+  assert.equal(after.recoveryPhase, before.recoveryPhase);
+});

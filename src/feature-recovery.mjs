@@ -173,7 +173,8 @@ export async function planFeatureRecovery(factory, id, signal, guidance = '') {
     let findings;
     try { await validateReview(appDir, reviewRequest); }
     catch (error) { findings = error.details; }
-    if (!findings?.failedChecks?.length) throw new Error('Repair planning requires a matching review with unfinished checks.');
+    // A request that does not apply is refused like the parked-run check above: the park reason stays the run's error.
+    if (!findings?.failedChecks?.length) throw Object.assign(new Error('Repair planning requires a matching review with unfinished checks.'), { code: 'recovery_not_applicable', refused: true });
     const frozen = await contractDigest(appDir);
     if (frozen !== (job.reviewContractDigest ?? job.approvedPlan?.contractDigest)) throw new Error('Frozen contract changed; recovery cannot waive or replace it.');
     const scoped = findings.failedChecks.map(check => `${check.id} (${check.status}): ${check.text}${check.reason ? ` — ${check.reason}` : ''}`);
@@ -187,7 +188,7 @@ export async function planFeatureRecovery(factory, id, signal, guidance = '') {
     const sources = await sourceSet(appDir, runInputs(job));
     const request = { id: randomUUID(), jobId: id, contractDigest: frozen, review: reviewRequest, reviewToken: reviewRequest.token, checks, blockers, sources, sourcesDigest: digest(sources), baseline: await sourceBaseline(factory.store), guidance, priorPlan: prior?.plan ?? featurePlan?.plan ?? null, completed: prior?.done ?? featurePlan?.done ?? [] };
     return await draftRepairPlan(factory, job, signal, request, prior);
-  } catch (error) { return factory.fail(id, signal, error); }
+  } catch (error) { if (error.refused) throw error; return factory.fail(id, signal, error); }
 }
 
 // Inputs changed after approval: assess which verified features cited a changed file and replan
