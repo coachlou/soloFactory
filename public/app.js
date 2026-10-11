@@ -646,6 +646,21 @@ function renderRecovery() {
   if (next?.action === "amend-plan" && phase) renderAmendment(features, next, phase, action);
   else if (next?.action === "retry-plan" || next?.action === "revise-inputs") action(next.label, "recovery-plan");
   else if (next?.action === "prepare-plan" || (next?.action !== "none" && PARKED.includes(state.job.state) && !state.job.dismissed && (!phase || ["ready", "running", "built"].includes(phase.status)) && (state.job.reviewRequest || state.job.featureCursor?.reviewRequest || state.job.error?.code === "inputs_changed" || failedProof(state.job)))) action("Prepare repair plan", "recovery-plan");
+  // Owner-added specs join the run's inputs; the next plan, review or Resume sees them.
+  if (next && next.action !== "none") {
+    const label = document.createElement("label"); label.htmlFor = "input-file"; label.textContent = "Add a spec or prototype file";
+    const file = document.createElement("input"); file.type = "file"; file.id = "input-file";
+    file.addEventListener("change", async () => {
+      clearError();
+      for (const chosen of file.files) {
+        const response = await fetch(`/api/jobs/${state.job.id}/inputs?name=${encodeURIComponent(chosen.name)}`, { method: "POST", body: chosen });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) { showError(new Error(body.error || `Upload failed with HTTP ${response.status}.`)); break; }
+      }
+      await poll();
+    });
+    features.append(label, file);
+  }
   const list = (title, rows) => {
     if (!rows.length) return;
     const heading = document.createElement("h3"); heading.textContent = title;

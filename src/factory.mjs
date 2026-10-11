@@ -1366,7 +1366,7 @@ export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
   if (job.error?.details?.loop) return job.error.code === "review_rejected" || pendingProofFailure(job)
     ? next("prepare-plan", "Prepare repair plan", "recovery-plan", "The same failure repeated on unchanged code, so repeating repairs cannot help. Prepare a repair plan and approve it; Resume does not renew the budget.")
     : next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", "The same failure repeated on unchanged code. Change the code or inputs first: Resume reruns the checks, and no repair turn runs while the code is unchanged.");
-  if (initialPlanBlocked(job, maxRepairs)) return next("resume", "Resume plan review", "resume", "Automatic plan corrections are exhausted. Correct .factory/slices.json, then Resume for one independent review; a plan the reviewer already blocked is refused. If the supplied specs themselves are wrong, revise them instead: Resume then reviews against them with a fresh correction budget.");
+  if (initialPlanBlocked(job, maxRepairs)) return next("resume", "Resume plan review", "resume", "Automatic plan corrections are exhausted. Correct .factory/slices.json, then Resume for one independent review; a plan the reviewer already blocked is refused. If the supplied specs themselves are wrong or incomplete, revise them or add a spec file instead: Resume then reviews against them with a fresh correction budget.");
   if (inputsChanged(job)) return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The specs or prototype inputs changed after the plan was approved. Prepare a repair plan against the current inputs.");
   return next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", phase === "running" ? "Resume continues the approved repair plan from its cursor." : "Resume continues this run from its preserved files.");
 }
@@ -1412,7 +1412,7 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
     } else if (initialPlanBlocked(job, maxRepairs)) {
       actions.push(`Read the reviewer's blockers; automatic plan corrections are exhausted (${job.planCorrections} used) and nothing has been built.`);
       actions.push("Correct .factory/slices.json, then Resume plan review: it runs one independent review and does not renew corrections. A plan the reviewer already blocked is refused.");
-      actions.push("Revise the supplied specs only if they themselves are wrong; Resume then reviews the plan against them with a fresh correction budget.");
+      actions.push("Revise the supplied specs, or add a spec file, only if the inputs themselves are wrong or incomplete; Resume then reviews the plan against them with a fresh correction budget.");
     } else if (loop) {
       actions.push(`Read the repeated failure in ${loop.logs?.at(-1) ?? "the named log"}; the last repairs did not change the code.`);
       actions.push("Change the code or inputs, or prepare a repair plan; Resume does not renew the repair budget.");

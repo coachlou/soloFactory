@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createSoloFactoryServer } from "../src/server.mjs";
+import { assertPlanReviewable } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
 import { COVERAGE_KEYS } from "../src/interview.mjs";
 import { digest } from "../src/feature-recovery.mjs";
@@ -636,6 +637,37 @@ test('HTTP: Resume of an exhausted initial plan refuses a plan the reviewer alre
   assert.equal(refused.status, 409);
   assert.equal((await refused.json()).code, 'plan_unchanged');
   assert.equal(await readFile(stateFile, 'utf8'), saved);
+});
+
+test('HTTP: a new spec file added to a parked run becomes one of its inputs', async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'solo-http-new-input-'));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const job = await app.store.create({ brief: { workingName: 'New spec', mustHaves: ['Browse'], acceptanceScenarios: ['Browse works'] }, transcript: [{ role: 'user', content: 'Build' }], provider: 'fixture' });
+  const plan = { version: 2, slices: [] };
+  await mkdir(path.join(app.store.appDir(), '.factory'), { recursive: true });
+  for (const file of ['requirements.json', 'PRD.md', 'PLAN.md', 'ACCEPTANCE.md']) await writeFile(path.join(app.store.appDir(), '.factory', file), file);
+  await writeFile(path.join(app.store.appDir(), '.factory/slices.json'), JSON.stringify(plan));
+  const add = (name, body, id = job.id) => fetch(`${base}/api/jobs/${id}/inputs?name=${encodeURIComponent(name)}`, { method: 'POST', body });
+  // Only a parked run takes a new input: a live planning turn would see its inputs move underneath it.
+  assert.equal((await add('EXTRA.md', 'x')).status, 409);
+  Object.assign(job, { state: 'failed', failedState: 'specifying', planCorrections: 2, planBlockedDigests: [digest(plan)],
+    planBaseline: { inputs: digest(await sourceSet(app.store.appDir(), runInputs(job))) },
+    error: { code: 'plan_blocked', message: 'The feature plan is still blocked after 2 corrections: MH-1 has no obligation', details: {} } });
+  await app.store.writeState(job);
+  await assert.rejects(assertPlanReviewable(app.store, await app.store.read(job.id), 2), error => error.code === 'plan_unchanged');
+  assert.equal((await add('script.sh', 'rm -rf /')).status, 400);
+  assert.equal((await add('EMPTY.md', '')).status, 400);
+  const added = await add('EXTRA.md', '§9 Albums sort by capture date.');
+  assert.equal(added.status, 200);
+  const { path: relative } = await added.json();
+  assert.match(relative, /^\.factory\/uploads\/[a-z0-9]+-EXTRA\.md$/);
+  assert.equal(await readFile(path.join(app.store.appDir(), relative), 'utf8'), '§9 Albums sort by capture date.');
+  const saved = await app.store.read(job.id);
+  assert.ok(runInputs(saved).includes(relative), 'the run records the file as an attachment, so every digest and review sees it');
+  await assertPlanReviewable(app.store, saved, 2);
 });
 
 test("HTTP: an image uploaded for another brief while a run builds does not stop that run", async (t) => {

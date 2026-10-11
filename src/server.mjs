@@ -462,6 +462,33 @@ export async function createSoloFactoryServer(options = {}) {
         await enqueue(projectId, id, "recovery-review", { front: true, submission: { phaseId: body.phaseId, plan: body.plan } });
         return json(response, 202, { accepted: true, jobId: id });
       }
+      // A spec the owner adds after intake joins the run the way intake attachments do: a file in .factory/uploads
+      // named in the transcript. Every input digest, plan request and review then includes it.
+      const inputMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/inputs$/);
+      if (request.method === "POST" && inputMatch) {
+        const [ , id] = inputMatch;
+        const projectId = jobProject.get(id) ?? active.id;
+        const jobStore = storeOfJob(id);
+        const busy = () => runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start");
+        const parked = (job) => !busy() && continuationAction(job, { maxRepairs }).action !== "none";
+        if (!parked(await jobStore.read(id))) return json(response, 409, { error: "Inputs can be added only to an idle, unresolved parked run. Pause an active run first." });
+        const name = String(url.searchParams.get("name") ?? "").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^[-.]+/, "");
+        if (!INPUT_EXTENSIONS.test(name)) return json(response, 400, { error: "Specs and prototypes can be md, txt, json, html, yaml, csv, pdf or image files." });
+        let bytes;
+        try { bytes = await readBytes(request, MAX_UPLOAD_BYTES); }
+        catch (error) { return json(response, 413, { error: `The file exceeds ${MAX_UPLOAD_BYTES} bytes.` }); }
+        if (!bytes.length) return json(response, 400, { error: "The file is empty." });
+        // Re-read after the body: a run may have started while it streamed.
+        const job = await jobStore.read(id);
+        if (!parked(job)) return json(response, 409, { error: "The run acquired a writer; retry after it parks." });
+        const relative = path.posix.join(".factory", "uploads", `${Date.now().toString(36)}-${name}`);
+        await mkdir(path.join(jobStore.appDir(id), ".factory", "uploads"), { recursive: true });
+        await writeFile(path.join(jobStore.appDir(id), relative), bytes);
+        job.transcript = [...(job.transcript ?? []), { role: "user", content: `Attached file: ${relative}` }];
+        await jobStore.writeState(job);
+        await jobStore.appendEvent(id, { type: "inputs.added", state: job.state, message: `Owner added ${relative}` });
+        return json(response, 200, { path: relative, bytes: bytes.length });
+      }
       const packetMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/recovery-plan-packet$/);
       if (request.method === "GET" && packetMatch) {
         const jobStore = storeOfJob(packetMatch[1]);
@@ -618,6 +645,7 @@ function requireProvider(id, fixtureMode) {
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp)$/i;
 const MAX_UPLOAD_BYTES = 20_000_000;
+const INPUT_EXTENSIONS = /\.(md|markdown|txt|json|html?|ya?ml|csv|pdf|png|jpe?g|gif|webp)$/i;
 
 async function readBytes(request, limit) {
   const chunks = [];
