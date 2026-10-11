@@ -75,7 +75,7 @@ not a new source task or permission to install/apply the application patch.
 
 
 ## Pending safe Pause is bypassed when a verification failure starts an AI repair
-- Status: done bfaaacc — a pending Pause now parks before a gate-failure repair turn (state paused, before `verifying`), with no attempt recorded and no budget spent; resume reruns the checks. Not covered: a repair started by a *review* failure still runs (parking there would make resume repeat the review turn), and pendingPause is still not exposed by the API.
+- Status: done bfaaacc — a pending Pause now parks before a gate-failure repair turn (state paused, before `verifying`), with no attempt recorded and no budget spent; resume reruns the checks. Follow-up 3dc63ac: a feature review that blocks under a pending Pause also parks before its repair; the blockers stay on the cursor and resume repairs them without re-reviewing. Still not covered: the final whole-app review's repair, planning/correction turns, and an API-visible pendingPause. Confirmed by fixture tests only; the installed worker (5dc444b) has neither fix.
 - Seen in: run2026-10-07-4f2dd1cf, recovery89b51859 TARGET-COMPAT, installed5dc444b, 2026-10-11.
 - Repro: POST http://127.0.0.1:4173/api/jobs/2026-10-07-4f2dd1cf/pause while implementation active; response202 pausing:true at05:05UTC. Let implementation finish and proof-TARGET-COMPAT-REGRESSION fail. At05:26:34UTC a new repair-17 AI worker starts despite pending Pause.
 - Expected vs actual: Expected pending Pause parks before any new subscription-backed agent turn at a safe boundary, including repair. Actual stage repairing bypasses pause; quota fell from24% remaining at request to6% at05:29UTC.
