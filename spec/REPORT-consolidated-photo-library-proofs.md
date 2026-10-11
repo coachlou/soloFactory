@@ -1,6 +1,8 @@
 # Consolidated photo-library proofs: readiness report
 
-Date: 2026-10-10. Answers spec/HANDOFF-consolidated-photo-library-proofs.md.
+Date: 2026-10-10. Answers the photo-library handoff, now folded into
+spec/SPEC-requirement-consolidation.md. That spec supersedes §3 below: case tables replace
+the proposed `proof.tests`.
 Nothing was submitted to live run 2026-10-07-4f2dd1cf. Nothing was installed. The ready plan
 (phase 42d97519) is still unapproved. The candidate is not a reviewed plan.
 

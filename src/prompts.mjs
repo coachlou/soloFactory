@@ -307,8 +307,19 @@ const FEATURE_PLAN_SCHEMA = `{ "version": 2, "jobId": <copied from the request>,
     "closes": ["<original MH-n/SC-n ids this feature finally proves; [] only for a named prerequisite>"],
     "acceptance": [{ "id": "UPPER-CASE-ID", "behavior": "<concrete expected behavior>", "refs": ["<original ids it supports or proves>"],
       "sources": [{ "path": "<one of plan-request.json sources>", "locator": "<section, heading, line or element>" }],
-      "proof": { "command": ["npm" | "node" | "npx", "<args>"...], "expect": "<expected result>", "pending"?: "integration" } }]
+      "proof": { "command": ["npm" | "node" | "npx", "<args>"...], "expect": "<expected result>", "pending"?: "integration" },
+      "cases"?: [{ "id": "UPPER-CASE-ID", "surface": "api" | "browser" | "cli" | "unit" | "integration", "action": "<what the test does>",
+        "field"?: "<field or element>", "boundary"?: "<limit or edge>", "expect": "<result or failure condition>",
+        "refs": ["<subset of the requirement refs>"], "sources": [<subset of the requirement sources>] }] }]
   }] }`;
+
+// Shared by new-run and repair planning: consolidation is allowed only as explicit, separately proved cases.
+export const CONSOLIDATION_RULES = `- Consolidate overlapping obligations into one requirement with a cases table instead of repeating
+  near-identical items. Each case keeps one distinct field, action, boundary, failure condition and
+  surface (API and browser coverage stay separate cases). Together the cases cite every check and
+  source the requirement cites. A requirement passes only when every case passes: its proof command
+  runs node:test (no --test-reporter flag of its own) and each case has a test whose name contains
+  [CASE-ID]. One passing case never proves its neighbors; never fold a case into a weaker assertion.`;
 
 export function featurePlanPrompt({ followOn = false } = {}) {
   return `You are the feature planner for a small software factory. Read .factory/plan-request.json,
@@ -338,6 +349,7 @@ Rules the controller enforces:
 - Proof commands are argument arrays starting with npm, node or npx — never shell strings. Name
   the test file and expected result; the file may not exist yet, it must exist and pass when the
   feature is verified. Include negative and failure cases the contract implies.
+${CONSOLIDATION_RULES}
 - Mark a proof "pending": "integration" only when it cannot run until later features exist (e.g.
   a populated end-to-end state). It runs before the final review, and the checks it proves stay
   unverified until it passes. Every feature still needs at least one proof that runs when it is built.
@@ -367,7 +379,8 @@ Block when any original check is not fully proved by its closing feature, any de
 a source states is missing or cites the wrong source or locator, a feature is a
 horizontal layer or too large to verify alone, prerequisites are out of order, a proof is not an
 executable test of real behavior, a proof marked "pending": "integration" could run when its feature
-is built, negative/failure cases are missing, or a required model, native
+is built, negative/failure cases are missing, consolidated cases drop or blur a distinct field, action,
+boundary, failure condition or API/browser surface, or a required model, native
 package, runtime or tool is unverified. Approve only a plan you would build as written.`;
 }
 
@@ -405,7 +418,8 @@ ${DATA_RULE}`;
 export function featureReviewPrompt(slice) {
   return `You are the scoped reviewer for ONE feature. Review it against every check in
 .factory/review-request.json: its obligations and the original requirements it closes. Run its
-proof commands and inspect real behavior. Later planned features may still be missing and must not
+proof commands and inspect real behavior. A requirement with cases passes only when every case is
+"passed" in the request's caseResults (the controller's own record of the tests named [CASE-ID]). Later planned features may still be missing and must not
 block this verdict; a broad requirement this feature closes still needs full proof.
 
 Do not change application source; if you do, the controller discards your verdict and rechecks.

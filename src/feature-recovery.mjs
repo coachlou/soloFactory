@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile, writeFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { contractDigest, originalChecks, preparePlanReview, runInputs, sourceSet, validatePlanReview, validateReview } from './review.mjs';
-import { failedIntegrationProofs, pendingProofFailure, validateFeaturePlan, validateSlicePlan } from './wbs.mjs';
+import { CONSOLIDATION_RULES } from './prompts.mjs';
+import { assertConsolidation, failedIntegrationProofs, pendingProofFailure, validateFeaturePlan, validateSlicePlan } from './wbs.mjs';
 
 export const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 // v2 repair features close checks; v1 recovery slices (older ready phases) listed them as checks.
@@ -54,6 +55,12 @@ export function validateRecoveryPlan(raw, request) {
   return normalized;
 }
 
+// The reviewed plan an owner replacement must map. It stays the base through later blocked corrections.
+export function consolidationBase(job, phase) {
+  if (phase.status === 'ready') return phase.plan;
+  return phase.amendment?.base ? (job.recoveryPhaseHistory ?? []).find(item => item.id === phase.amendment.base)?.plan ?? null : null;
+}
+
 export async function archiveReview(factory, job, label) {
   for (const file of ['review-request.json', 'review-result.json', 'REVIEW.md']) {
     const body = await readFile(path.join(factory.store.appDir(), '.factory', file)).catch(() => null);
@@ -61,23 +68,26 @@ export async function archiveReview(factory, job, label) {
   }
 }
 
-const PLAN_SCHEMA = `{version:2,jobId,requestId,contractDigest (copied from the request),compatibility:[{subject,status:"verified",evidence}],slices:[{id (uppercase letters/digits/hyphens),title,objective,demo,dependsOn:[earlier feature ids],closes:[unfinished check ids this feature fully closes],acceptance:[{id,behavior (one concrete observable behavior),refs:[check ids],sources:[{path (one of request.sources),locator (section, heading, line or element)}],proof:{command:["npm"|"node"|"npx",...args],expect,pending?:"integration"}}]}]}`;
+const PLAN_SCHEMA = `{version:2,jobId,requestId,contractDigest (copied from the request),compatibility:[{subject,status:"verified",evidence}],slices:[{id (uppercase letters/digits/hyphens),title,objective,demo,dependsOn:[earlier feature ids],closes:[unfinished check ids this feature fully closes],acceptance:[{id,behavior (one concrete observable behavior),refs:[check ids],sources:[{path (one of request.sources),locator (section, heading, line or element)}],proof:{command:["npm"|"node"|"npx",...args],expect,pending?:"integration"},cases?:[{id (unique across the plan),surface:"api"|"browser"|"cli"|"unit"|"integration",action,field?,boundary?,expect (result or failure condition),refs:[subset of the requirement refs],sources:[subset of the requirement sources],supersedes?:[ids of a reviewed plan\'s obligations this case replaces]}]}]}]}`;
 
 function repairPlanPrompt(planFile, request) {
   return `Prepare a repair plan ONLY. Do not implement, reset, narrow scope, install, or deploy. Preserve all source, user data, the frozen contract and previous evidence. Read .factory/REVIEW.md, the existing app and tests, and EVERY file in request.sources (frozen contract plus attached specs, mockups and prototype handoffs). Investigate model/tool compatibility read-only if needed.
 Write ONLY ${planFile} as JSON: ${PLAN_SCHEMA}.
-Every unfinished check has exactly one closing feature. A broad MH/SC summary is not enough: carry each detailed obligation the sources state for that gap (fields, states, limits, error cases, layout, copy) as its own acceptance item citing the source path and locator. Each proof is an executable test of real behavior. Preserve already passing behavior and completed features; no new walking skeleton. Use small dependency-ordered features. The plan is reviewed against the sources before execution.
+Every unfinished check has exactly one closing feature. A broad MH/SC summary is not enough: carry each detailed obligation the sources state for that gap (fields, states, limits, error cases, layout, copy) as its own acceptance item citing the source path and locator. Each proof is an executable test of real behavior.
+${CONSOLIDATION_RULES}
+Preserve already passing behavior and completed features; no new walking skeleton. Use small dependency-ordered features. The plan is reviewed against the sources before execution.
 Request:
 ${JSON.stringify(request, null, 2)}`;
 }
 
-function repairPlanAuditPrompt(planFile, priorBlockers = null) {
+function repairPlanAuditPrompt(planFile, priorBlockers = null, consolidated = false) {
   const amended = priorBlockers && !priorBlockers.length ? '\nThis plan is an owner-submitted replacement for a plan that had passed review. Judge it independently on its merits; the earlier approval does not carry over.'
     : priorBlockers ? `\nThis plan is an owner-submitted correction after automatic corrections ran out. Its previous review blocked it for:\n${priorBlockers.map(item => `- ${item}`).join('\n')}\nAssess each of those blockers explicitly, then judge the whole plan on its merits.` : '';
-  return `You are the independent repair-plan reviewer. No repair has started.${amended} Read .factory/plan-review-request.json (the unfinished checks, review findings and the authoritative sources), .factory/REVIEW.md, EVERY source file it lists, the existing app and tests, and ${planFile}.
+  const mapped = consolidated ? '\nplan-review-request.json "base" lists every obligation of the reviewed plan this replaces; each is kept under its id or superseded by exactly one case (supersedes). Block when a kept requirement or superseding case asserts less than its base obligation: a lost field, action, boundary, failure condition or API/browser surface, a weaker expected result, or a case whose wording no longer matches the behavior it replaces.' : '';
+  return `You are the independent repair-plan reviewer. No repair has started.${amended}${mapped} Read .factory/plan-review-request.json (the unfinished checks, review findings and the authoritative sources), .factory/REVIEW.md, EVERY source file it lists, the existing app and tests, and ${planFile}.
 Do NOT modify ${planFile} or any file except .factory/plan-review-result.json. Editing the plan voids your verdict. Write:
 { "version": 1, "jobId", "token", "contractDigest", "planDigest" copied exactly from plan-review-request.json, "verdict": "approve" | "blocked", "blockers": ["<concrete problem>"] }
-Block when any detailed obligation a source states for an unfinished check is missing from the plan, an obligation cites the wrong source or locator, a finding is not addressed, a proof is not an executable test of real behavior, negative/failure cases are missing, a feature is too large to verify alone, or a required model, package or tool is unverified. Approve only a plan you would execute as written.`;
+Block when any detailed obligation a source states for an unfinished check is missing from the plan, an obligation cites the wrong source or locator, a finding is not addressed, a proof is not an executable test of real behavior, negative/failure cases are missing, consolidated cases drop or blur a distinct field, action, boundary, failure condition or API/browser surface, a feature is too large to verify alone, or a required model, package or tool is unverified. Approve only a plan you would execute as written.`;
 }
 
 function repairCorrectionPrompt(planFile, blockers) {
@@ -275,7 +285,7 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
       if (prior) { job.recoveryPhaseHistory ??= []; job.recoveryPhaseHistory.push(prior); }
       const corrections = spentCorrections(job, request.sourcesDigest);
       job.recoveryPhase = { id: phaseId, status: 'planning', request, sourceReportDigest: amendment ? prior.sourceReportDigest : sourceReport && digest(sourceReport), planFile, done: [], index: 0, stats: {}, reviews: 0, corrections, reviewedPlans: [],
-        ...(amendment && { amendment: { priorPhase: prior.id, priorBlockers: prior.planBlockers ?? [], submittedAt: new Date().toISOString() } }) };
+        ...(amendment && { amendment: { priorPhase: prior.id, priorBlockers: prior.planBlockers ?? [], submittedAt: new Date().toISOString(), ...((prior.status === 'ready' || prior.amendment?.base) && { base: prior.status === 'ready' ? prior.id : prior.amendment.base }) } }) };
     }
     const phase = job.recoveryPhase;
     job.error = null; job.failedState = null; job.recovery = null;
@@ -283,9 +293,13 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
     const guard = async () => {
       if (await contractDigest(appDir) !== frozen || await sourceBaseline(factory.store) !== request.baseline || digest(await sourceSet(appDir, runInputs(job))) !== request.sourcesDigest) throw new Error('A planning turn changed the preserved source, specs or frozen contract; execution is blocked.');
     };
+    const base = consolidationBase(job, phase);
     const readPlan = async () => {
-      try { return validateRecoveryPlan(JSON.parse(await readFile(path.join(appDir, planFile), 'utf8')), request); }
-      catch (error) { return error; }
+      try {
+        const plan = validateRecoveryPlan(JSON.parse(await readFile(path.join(appDir, planFile), 'utf8')), request);
+        if (base) assertConsolidation(plan, base);
+        return plan;
+      } catch (error) { return error; }
     };
     if (!amendment) await factory.invoke(job, `recovery-plan-${request.id}`, repairPlanPrompt(planFile, request), signal);
     await guard();
@@ -298,10 +312,10 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
         const planDigest = digest(plan);
         const key = planKey(plan);
         if (!phase.reviewedPlans.includes(key)) phase.reviewedPlans.push(key);
-        const review = await preparePlanReview(appDir, job, planDigest, { kind: 'repair', requestId: request.id, planFile, checks, findings: blockers, sources, ...(phase.amendment && { amendment: true, priorBlockers: phase.amendment.priorBlockers }) });
+        const review = await preparePlanReview(appDir, job, planDigest, { kind: 'repair', requestId: request.id, planFile, checks, findings: blockers, sources, ...(phase.amendment && { amendment: true, priorBlockers: phase.amendment.priorBlockers }), ...(base && { base: base.slices.flatMap(slice => slice.acceptance.map(item => ({ feature: slice.id, ...item }))) }) });
         phase.reviews += 1;
         await factory.store.writeState(job);
-        await factory.invoke(job, `recovery-plan-review-${phaseId}-${phase.reviews}`, repairPlanAuditPrompt(planFile, phase.amendment?.priorBlockers), signal);
+        await factory.invoke(job, `recovery-plan-review-${phaseId}-${phase.reviews}`, repairPlanAuditPrompt(planFile, phase.amendment?.priorBlockers, Boolean(base)), signal);
         await guard();
         const after = await readPlan();
         if (after instanceof Error || digest(after) !== planDigest) throw new Error('The repair plan reviewer changed the plan, so its verdict cannot approve it.');

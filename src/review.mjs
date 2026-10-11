@@ -39,11 +39,12 @@ export function originalChecks(brief) {
 }
 
 // Scoped reviews pass their own checks and the candidate source identity the verdict must name.
-export async function prepareReview(appDir, job, { checks = originalChecks(job.brief), candidate } = {}) {
+export async function prepareReview(appDir, job, { checks = originalChecks(job.brief), candidate, caseResults } = {}) {
   const request = {
     version: 1, jobId: job.id, token: randomUUID(), contractDigest: await contractDigest(appDir), checks,
     sources: await sourceSet(appDir, runInputs(job)),
     ...(candidate ? { candidate } : {}),
+    ...(caseResults ? { caseResults } : {}),
   };
   if (!request.checks.length) throw new Error("Review requires at least one intake requirement or acceptance scenario.");
   await rm(path.join(appDir, ".factory", "review-result.json"), { force: true });

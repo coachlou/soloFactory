@@ -26,9 +26,14 @@ async function setup(t, { malformed = false, ready = false } = {}) {
   const job = await store.create({ brief: { workingName: 'Amendment fixture', mustHaves: ['Live saved searches', 'Edit people'], acceptanceScenarios: ['A new item enters its smart album'] }, transcript: [{ role: 'user', content: 'Recover the missing behavior' }, { role: 'user', content: 'Attached file: .factory/uploads/SPEC.md' }], provider: 'fixture', sdlc: 'single' });
   const fixture = createFixtureProvider(); let recovering = false; let deployments = 0;
   const stages = []; const requests = [];
-  const ctl = { block: !ready, modify: false, fail: false };
+  const ctl = { block: !ready, modify: false, fail: false, cases: [] };
   const opts = { store, maxRepairs: 1,
-    commandRunner: async () => ({ code: 0, output: 'fixture tests pass' }),
+    // Stands in for node:test under the factory's case reporter: every listed case passes.
+    commandRunner: async ({ env = {} }) => {
+      const destination = env.NODE_OPTIONS?.match(/--test-reporter-destination="([^"]+)"/)?.[1];
+      if (destination) await writeFile(destination, ctl.cases.map(id => JSON.stringify({ type: 'test:pass', name: `[${id}] passes` })).join('\n'));
+      return { code: 0, output: 'fixture tests pass' };
+    },
     deployer: async () => { deployments++; return { status: 'live', url: 'http://127.0.0.1:9991' }; },
     provider: { id: 'fixture', async run(args) {
       stages.push(args.context.stage);
@@ -72,6 +77,15 @@ const candidate = (job, n = 1) => {
   return { version: 2, jobId: r.jobId, requestId: r.id, contractDigest: r.contractDigest, compatibility: [],
     slices: r.checks.map((c, i) => ({ id: `AMEND-${i + 1}`, title: `${c.text} v${n}`, objective: `Recover ${c.id}`, closes: [c.id], demo: 'Run the executable fixture behavior checks.', dependsOn: i ? [`AMEND-${i}`] : [],
       acceptance: [{ id: `AMEND-${i + 1}-1`, behavior: `Executes server.test.mjs to verify ${c.text} (${n})`, refs: [c.id], sources: [{ path: r.sources[0].path, locator: `${c.id} §3` }], proof: { command: ['npm', 'test'], expect: 'server.test.mjs passes' } }] })) };
+};
+// A replacement for a reviewed plan: each obligation it held is consolidated into a superseding case.
+const replacement = (job, n = 1) => {
+  const plan = structuredClone(job.recoveryPhase.plan);
+  for (const slice of plan.slices) {
+    slice.title += ` v${n}`;
+    slice.acceptance = slice.acceptance.map(item => ({ ...item, id: `${item.id}-R${n}`, cases: [{ id: `${item.id}-K${n}`, surface: 'api', action: `Exercise ${item.id}`, expect: item.proof.expect, refs: item.refs, sources: item.sources, supersedes: [item.id] }] }));
+  }
+  return plan;
 };
 const submit = (env, plan, job = env.blocked) => env.factory.amendRecovery(job.id, { phaseId: job.recoveryPhase.id, plan });
 const reverse = value => Array.isArray(value) ? value.map(reverse) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).reverse().map(k => [k, reverse(value[k])])) : value;
@@ -373,7 +387,7 @@ test('a ready plan accepts an owner replacement for one review; the prior approv
   const priorFile = await readFile(path.join(env.root, prior.planFile), 'utf8');
   const priorCandidate = await readFile(path.join(jobDir, `recovery-${prior.id}-approved-candidate.json`), 'utf8');
   const turns = env.stages.length; env.ctl.block = false;
-  const replaced = await submit(env, candidate(env.blocked));
+  const replaced = await submit(env, replacement(env.blocked));
   const ran = env.stages.slice(turns);
   assert.equal(replaced.recoveryPhase.status, 'ready', replaced.error?.message);
   assert.deepEqual(ran, [`recovery-plan-review-${replaced.recoveryPhase.id}-1`], 'one reviewer, no planner or correction');
@@ -392,6 +406,7 @@ test('a ready plan accepts an owner replacement for one review; the prior approv
   assert.equal(await env.state(), raw);
   assert.equal(continuationAction(replaced).action, 'approve-plan');
   assert.equal(env.deployments(), 0);
+  env.ctl.cases = replaced.recoveryPhase.plan.slices.flatMap(slice => slice.acceptance.flatMap(item => item.cases.map(entry => entry.id)));
   const done = await env.factory.startRecovery(replaced.id, replaced.recoveryPhase.planDigest);
   assert.equal(done.state, 'completed', done.error?.message);
   assert.equal(done.recoveryPhaseHistory.at(-1).id, prior.id, 'history survives execution');
@@ -402,23 +417,23 @@ test('a ready plan refuses duplicate, stale and invalid replacements without cha
   const readyPlan = JSON.parse(await readFile(path.join(env.root, env.blocked.recoveryPhase.planFile), 'utf8'));
   await refused(env, submit(env, readyPlan), 'amendment_duplicate', 409);
   await refused(env, submit(env, reverse(readyPlan)), 'amendment_duplicate', 409);
-  await refused(env, env.factory.amendRecovery(env.blocked.id, { phaseId: 'old-phase', plan: candidate(env.blocked) }), 'amendment_stale', 409);
+  await refused(env, env.factory.amendRecovery(env.blocked.id, { phaseId: 'old-phase', plan: replacement(env.blocked) }), 'amendment_stale', 409);
   await refused(env, submit(env, { version: 2, slices: 'nope' }), 'amendment_invalid', 400);
   await writeFile(path.join(env.root, '.factory/uploads/SPEC.md'), 'changed spec');
-  await refused(env, submit(env, candidate(env.blocked)), 'amendment_inputs_changed', 409);
+  await refused(env, submit(env, replacement(env.blocked)), 'amendment_inputs_changed', 409);
   await writeFile(path.join(env.root, '.factory/uploads/SPEC.md'), '§3 Group by capture day.\n');
   env.factory.active = { jobId: 'other' };
-  await refused(env, submit(env, candidate(env.blocked)), 'factory_busy');
+  await refused(env, submit(env, replacement(env.blocked)), 'factory_busy');
   env.factory.active = null;
   const { assertPlanAmendable } = await import('../src/factory.mjs');
-  await assert.rejects(assertPlanAmendable(env.store, env.blocked, { phaseId: env.blocked.recoveryPhase.id, plan: candidate(env.blocked) }, { maxRepairs: 1, busy: true }), error => error.code === 'amendment_not_allowed');
+  await assert.rejects(assertPlanAmendable(env.store, env.blocked, { phaseId: env.blocked.recoveryPhase.id, plan: replacement(env.blocked) }, { maxRepairs: 1, busy: true }), error => error.code === 'amendment_not_allowed');
   assert.equal(continuationAction(await env.store.read(env.blocked.id)).action, 'approve-plan', 'the ready plan is still approvable');
 });
 
 test('a blocked or interrupted replacement of a ready plan continues without a planner turn or budget renewal', async t => {
   const env = await setup(t, { ready: true });
   const prior = env.blocked.recoveryPhase; const turns = env.stages.length;
-  const blocked = await submit(env, candidate(env.blocked, 1));
+  const blocked = await submit(env, replacement(env.blocked, 1));
   assert.deepEqual(env.stages.slice(turns), [`recovery-plan-review-${blocked.recoveryPhase.id}-1`]);
   assert.equal(blocked.error.code, 'plan_blocked'); assert.equal(blocked.recoveryPhase.corrections, prior.corrections);
   assert.equal(continuationAction(blocked).action, 'amend-plan');
@@ -426,7 +441,7 @@ test('a blocked or interrupted replacement of a ready plan continues without a p
   await refused(env, env.factory.planRecovery(blocked.id), 'plan_inputs_unchanged');
   // An interrupted review of the next candidate resumes as that review only.
   env.ctl.block = false; env.ctl.fail = true;
-  const parked = await submit(env, candidate(env.blocked, 2), blocked);
+  const parked = await submit(env, replacement(env.blocked, 2), blocked);
   assert.equal(continuationAction(parked).action, 'retry-plan');
   const ready = await env.factory.planRecovery(parked.id);
   assert.equal(ready.recoveryPhase.status, 'ready', ready.error?.message);
@@ -445,4 +460,25 @@ test('replacing a ready plan keeps the corrections already spent on its inputs',
   assert.equal(replaced.recoveryPhase.corrections, ready.recoveryPhase.corrections);
   await refused(env, env.factory.planRecovery(replaced.id), 'plan_inputs_unchanged');
   assert.equal(env.stages.filter(stage => /^recovery-correction-/.test(stage)).length, 1);
+});
+
+test('a replacement of a reviewed plan must map every obligation it held; through blocked corrections too', async t => {
+  const env = await setup(t, { ready: true });
+  const reviewed = env.blocked.recoveryPhase.plan.slices.flatMap(slice => slice.acceptance.map(item => item.id));
+  // Unmapped: fresh ids with no supersedes lose every reviewed obligation.
+  await refused(env, submit(env, candidate(env.blocked, 1)), 'amendment_unmapped', 400);
+  // Weakened: a merge that moves a case off its reviewed source citation.
+  const weakened = replacement(env.blocked);
+  const item = weakened.slices[0].acceptance[0];
+  item.sources = item.cases[0].sources = [{ path: item.sources[0].path, locator: 'somewhere else' }];
+  await refused(env, submit(env, weakened), 'amendment_unmapped', 400);
+  // A mapped replacement is reviewed with the reviewed obligations beside it; when blocked, the next
+  // correction is still checked against the reviewed plan, not the blocked one.
+  const blocked = await submit(env, replacement(env.blocked, 1));
+  assert.equal(blocked.error.code, 'plan_blocked');
+  assert.deepEqual(env.requests.at(-1).base.map(entry => entry.id), reviewed);
+  await refused(env, submit(env, candidate(env.blocked, 2), blocked), 'amendment_unmapped', 400);
+  // Supersedes the blocked plan's ids, not the reviewed ones.
+  const fromBlocked = replacement({ recoveryPhase: { plan: replacement(env.blocked, 1) } }, 3);
+  await refused(env, submit(env, fromBlocked, blocked), 'amendment_unmapped', 400);
 });

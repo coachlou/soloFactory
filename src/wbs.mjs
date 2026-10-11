@@ -227,6 +227,97 @@ export function pendingChecks(slice, { plan = null, outstanding = [] } = {}) {
 }
 
 const text = (value, min) => typeof value === "string" && value.trim().length >= min;
+const normalSource = (ref) => ({ path: ref.path, locator: ref.locator.trim() });
+const sourceKey = (ref) => `${ref.path}\u0000${ref.locator.trim()}`;
+
+export const CASE_SURFACES = ["api", "browser", "cli", "unit", "integration"];
+
+// A requirement that consolidates overlapping obligations keeps each one as an explicit case: its own
+// surface, action, field/boundary and expected result (failure condition included). Together the cases
+// cite exactly the requirement's checks and sources, so consolidation cannot drop a citation.
+function validateCases(item, { registry, sources, ids, claimed }) {
+  const where = `Requirement ${item.id}`;
+  if (!Array.isArray(item.cases) || !item.cases.length) throw new Error(`${where} has a malformed cases table; omit it or list at least one case.`);
+  const refs = new Set();
+  const cited = new Set();
+  const cases = item.cases.map((entry) => {
+    if (!entry || typeof entry.id !== "string" || !SLICE_ID_RE.test(entry.id) || ids.has(entry.id)) throw new Error(`${where} has a missing or duplicate case id.`);
+    ids.add(entry.id);
+    const at = `Case ${entry.id}`;
+    if (!CASE_SURFACES.includes(entry.surface)) throw new Error(`${at} needs a surface (one of ${CASE_SURFACES.join(", ")}).`);
+    if (!text(entry.action, 3) || !text(entry.expect, 3)) throw new Error(`${at} needs the action it performs and its expected result.`);
+    for (const field of ["field", "boundary"]) if (entry[field] !== undefined && !text(entry[field], 1)) throw new Error(`${at} has an empty ${field}.`);
+    if (!Array.isArray(entry.refs) || !entry.refs.length || entry.refs.some((ref) => !item.refs.includes(ref))) throw new Error(`${at} must cite checks from its requirement's refs.`);
+    entry.refs.forEach((ref) => refs.add(ref));
+    if (sources) {
+      if (!Array.isArray(entry.sources) || !entry.sources.length || entry.sources.some((ref) => !text(ref?.locator, 2) || !item.sources.some((own) => sourceKey(own) === sourceKey(ref)))) {
+        throw new Error(`${at} must cite sources [{path, locator}] listed on its requirement.`);
+      }
+      entry.sources.forEach((ref) => cited.add(sourceKey(ref)));
+    }
+    const supersedes = entry.supersedes ?? [];
+    if (!Array.isArray(supersedes) || supersedes.some((id) => typeof id !== "string" || !SLICE_ID_RE.test(id) || claimed.has(id))) throw new Error(`${at} has a malformed or repeated supersedes id.`);
+    supersedes.forEach((id) => claimed.add(id));
+    return { id: entry.id, surface: entry.surface, action: entry.action.trim(), ...(entry.field ? { field: entry.field.trim() } : {}), ...(entry.boundary ? { boundary: entry.boundary.trim() } : {}),
+      expect: entry.expect.trim(), refs: [...entry.refs], ...(sources ? { sources: entry.sources.map(normalSource) } : {}), ...(entry.supersedes ? { supersedes: [...supersedes] } : {}) };
+  });
+  const uncovered = item.refs.filter((ref) => !refs.has(ref));
+  if (uncovered.length) throw new Error(`${where} cites ${uncovered.join(", ")} but none of its cases does.`);
+  const uncited = sources ? item.sources.filter((ref) => !cited.has(sourceKey(ref))) : [];
+  if (uncited.length) throw new Error(`${where} cites ${uncited.map((ref) => `${ref.path} ${ref.locator}`).join("; ")} but none of its cases does.`);
+  return cases;
+}
+
+// A replacement for a reviewed plan must account for every obligation that plan held: kept under its id, or
+// superseded by exactly one case, each without losing a check, a source citation or its integration timing.
+export function assertConsolidation(plan, base) {
+  const kept = new Map();
+  const claims = new Map();
+  for (const slice of plan.slices) for (const item of slice.acceptance) {
+    kept.set(item.id, item);
+    for (const entry of item.cases ?? []) for (const id of entry.supersedes ?? []) claims.set(id, { item, entry });
+  }
+  const problems = [];
+  const baseIds = new Set();
+  for (const slice of base.slices) for (const old of slice.acceptance) {
+    baseIds.add(old.id);
+    const item = kept.get(old.id);
+    const claim = claims.get(old.id);
+    if (item && claim) { problems.push(`${old.id} is kept and also superseded by case ${claim.entry.id}`); continue; }
+    if (!item && !claim) { problems.push(`${old.id} (${slice.id}) is neither kept nor superseded by a case`); continue; }
+    const target = item ?? claim.entry;
+    const owner = item ?? claim.item;
+    const at = item ? `kept ${old.id}` : `case ${claim.entry.id}`;
+    const lostRefs = old.refs.filter((ref) => !target.refs.includes(ref));
+    if (lostRefs.length) problems.push(`${at} drops ${old.id}'s checks ${lostRefs.join(", ")}`);
+    const lostSources = (old.sources ?? []).filter((ref) => !(target.sources ?? []).some((own) => sourceKey(own) === sourceKey(ref)));
+    if (lostSources.length) problems.push(`${at} drops ${old.id}'s source ${lostSources.map((ref) => `${ref.path} ${ref.locator}`).join("; ")}`);
+    if ((old.proof.pending ?? null) !== (owner.proof.pending ?? null)) problems.push(`${at} changes when ${old.id} is proved (${old.proof.pending ?? "at build"} → ${owner.proof.pending ?? "at build"})`);
+  }
+  for (const [id, { entry }] of claims) if (!baseIds.has(id)) problems.push(`case ${entry.id} supersedes ${id}, which the reviewed plan does not contain`);
+  if (problems.length) throw new Error(`The consolidation does not preserve the reviewed plan (${problems.length} problem${problems.length > 1 ? "s" : ""}): ${problems.slice(0, 10).join("; ")}${problems.length > 10 ? "; …" : ""}.`);
+}
+
+// Per-case proof evidence from the factory's node:test reporter: a case passes only when a test naming
+// [CASE-ID] passed and none naming it failed, was skipped or was todo. One passing case proves only itself.
+export function caseResults(cases, events) {
+  const seen = new Map(cases.map((entry) => [entry.id, { pass: 0, fail: 0, skip: 0 }]));
+  for (const line of events.split("\n")) {
+    let event;
+    try { event = JSON.parse(line); } catch { continue; }
+    for (const [, id] of String(event.name ?? "").matchAll(/\[([A-Z][A-Z0-9-]*)\]/g)) {
+      const tally = seen.get(id);
+      if (!tally) continue;
+      if (event.type === "test:fail") tally.fail += 1;
+      else if (event.skip || event.todo) tally.skip += 1;
+      else if (event.type === "test:pass") tally.pass += 1;
+    }
+  }
+  return Object.fromEntries(cases.map((entry) => {
+    const tally = seen.get(entry.id);
+    return [entry.id, { requirement: entry.requirement, status: tally.fail ? "failed" : tally.skip ? "skipped" : tally.pass ? "passed" : "missing" }];
+  }));
+}
 
 // sources (paths), when given, makes every obligation cite the authoritative input it implements.
 export function validateFeaturePlan(raw, { jobId, contractDigest, checks, sources = null }) {
@@ -251,6 +342,7 @@ export function validateFeaturePlan(raw, { jobId, contractDigest, checks, source
   const owner = new Map();
   const behaviors = new Map();
   const obligationIds = new Set();
+  const claimed = new Set();
   const slices = raw.slices.map((slice, index) => {
     const where = `Feature ${slice.id}`;
     if (!text(slice.title, 3) || !text(slice.objective, 3)) throw new Error(`${where} needs a title and an observable objective.`);
@@ -284,8 +376,9 @@ export function validateFeaturePlan(raw, { jobId, contractDigest, checks, source
       if (sources && (!Array.isArray(item.sources) || !item.sources.length || item.sources.some((ref) => !sources.includes(ref?.path) || !text(ref.locator, 2)))) {
         throw new Error(`Obligation ${item.id} needs sources [{path, locator}] citing the authoritative input it implements (one of ${sources.join(", ")}).`);
       }
+      const cases = item.cases === undefined ? null : validateCases(item, { registry, sources, ids: obligationIds, claimed });
       return { id: item.id, behavior: item.behavior.trim(), refs: [...item.refs], proof: { command: [...command], expect: item.proof.expect.trim(), ...(item.proof.pending ? { pending: "integration" } : {}) },
-        ...(sources ? { sources: item.sources.map((ref) => ({ path: ref.path, locator: ref.locator.trim() })) } : {}) };
+        ...(sources ? { sources: item.sources.map(normalSource) } : {}), ...(cases ? { cases } : {}) };
     });
     for (const id of slice.closes) {
       if (!acceptance.some((item) => item.refs.includes(id))) throw new Error(`${where} closes ${id} but no obligation in it proves ${id}.`);

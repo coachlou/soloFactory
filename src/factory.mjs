@@ -3,20 +3,21 @@ import { existsSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { appendFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./process.mjs";
 import { buildPrompt, continuationPrompt, featureBuildPrompt, featurePlanPrompt, featureReviewPrompt, planAuditPrompt, planCorrectionPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
-import { orderSlices, integrationProofs, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
+import { assertConsolidation, caseResults, orderSlices, integrationProofs, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
 export { pendingProofFailure };
 import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
 import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, watchConfig, workerAlive } from "./watchdog.mjs";
-import { amendRepairPlan, archiveReview, assertPlanningCurrent, digest, exhaustedPreparations, planFeatureRecovery, planKey, resumeAmendedReview, reviewedPlanKeys, runFeatureRecovery, sourceBaseline, validateRecoveryApproval, validateRecoveryPlan } from "./feature-recovery.mjs";
+import { amendRepairPlan, archiveReview, consolidationBase, assertPlanningCurrent, digest, exhaustedPreparations, planFeatureRecovery, planKey, resumeAmendedReview, reviewedPlanKeys, runFeatureRecovery, sourceBaseline, validateRecoveryApproval, validateRecoveryPlan } from "./feature-recovery.mjs";
 
 // Which harness produced a run, so runs.jsonl can compare harness changes. Read once at load.
 const harnessRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+const CASE_REPORTER = fileURLToPath(new URL("./case-reporter.mjs", import.meta.url));
 const HARNESS = {
   version: JSON.parse(await readFile(path.join(harnessRoot, "package.json"), "utf8")).version,
   commit: (() => {
@@ -392,7 +393,8 @@ export class SoloFactory {
       await this.assertInputs(job);
       let request;
       const pending = integrationProofs(job).map((entry) => ({ id: entry.key, text: obligationCheck(entry.obligation).text }));
-      try { request = await prepareReview(appDir, job, { checks: [...originalChecks(job.brief), ...pending] }); }
+      const caseIds = integrationProofs(job).flatMap((entry) => (entry.obligation.cases ?? []).map((item) => item.id));
+      try { request = await prepareReview(appDir, job, { checks: [...originalChecks(job.brief), ...pending], caseResults: caseIds.length ? Object.fromEntries(caseIds.map((id) => [id, job.caseResults?.[id] ?? { status: "missing" }])) : undefined }); }
       catch (error) { throw new FactoryError("review_rejected", `Cannot review the frozen contract: ${error.message}`); }
       if (job.reviewContractDigest && request.contractDigest !== job.reviewContractDigest) {
         throw new FactoryError("review_rejected", "Frozen contract changed after the first review; scope cannot be narrowed during repair.");
@@ -680,7 +682,8 @@ export class SoloFactory {
         await assertCurrent();
         if (cursor.reviews >= this.maxRepairs + 2) throw new FactoryError("review_unstable", `Feature ${slice.id} did not reach a stable reviewed candidate after ${cursor.reviews} reviews.`);
         cursor.reviews += 1;
-        const request = await prepareReview(appDir, job, { checks: reviewChecks, candidate: cursor.candidate });
+        const caseIds = runnable.flatMap((item) => (item.cases ?? []).map((entry) => entry.id));
+        const request = await prepareReview(appDir, job, { checks: reviewChecks, candidate: cursor.candidate, caseResults: caseIds.length ? Object.fromEntries(caseIds.map((id) => [id, job.caseResults?.[id] ?? { status: "missing" }])) : undefined });
         // Kept off job.reviewRequest, which always names the final whole-app review.
         cursor.reviewRequest = request;
         await this.store.writeState(job);
@@ -983,7 +986,7 @@ export class SoloFactory {
     if (!slice) {
       for (const entry of integrationProofs(job)) { entry.status = "pending"; delete entry.candidate; delete entry.verifiedAt; delete entry.proofCandidate; }
       await this.store.writeState(job);
-      proofs = [...proofs, ...integrationProofs(job).map(entry => ({ id: entry.gate.slice("proof-".length), key: entry.key, proof: entry.obligation.proof }))];
+      proofs = [...proofs, ...integrationProofs(job).map(entry => ({ id: entry.gate.slice("proof-".length), key: entry.key, proof: entry.obligation.proof, cases: entry.obligation.cases }))];
     }
     let current = job;
     for (;;) {
@@ -1051,11 +1054,12 @@ export class SoloFactory {
       for (const gate of seen.get(key)) {
         gate[2] ??= [];
         if (item.key && !gate[2].includes(item.key)) gate[2].push(item.key);
+        if (item.cases) (gate[3] ??= []).push(...item.cases.map((entry) => ({ id: entry.id, requirement: item.id })));
       }
     }
     const integrated = proofs.some(item => item.key);
     let candidate = null;
-    for (const [gate, command, proofKeys = []] of gates) {
+    for (const [gate, command, proofKeys = [], cases = []] of gates) {
       // Install may create a lockfile before tests run. Bind evidence to the source tested,
       // including install itself only when it is also an integration proof.
       if (integrated && candidate === null && (gate !== "install" || proofKeys.length)) {
@@ -1067,6 +1071,11 @@ export class SoloFactory {
       await this.store.writeState(job);
       await this.emit(job.id, { type: "gate.started", state: job.state, gate, message: `${gate}: ${command.join(" ")}` });
       const timeoutMs = gate === "install" ? 10 * 60_000 : 5 * 60_000;
+      // ponytail: node:test only; a proof that sets its own --test-reporter fails loudly on the mismatch.
+      const events = cases.length ? path.join(this.store.jobDir(job.id), `cases-${gate}-${job.attempt ?? 0}.jsonl`) : null;
+      if (events) await rm(events, { force: true });
+      // An inherited NODE_TEST_CONTEXT makes node --test skip its files and report nothing, so cased gates drop it.
+      const env = events ? { NODE_OPTIONS: [process.env.NODE_OPTIONS, `--test-reporter="${CASE_REPORTER}" --test-reporter-destination="${events}" --test-reporter=spec --test-reporter-destination=stdout`].filter(Boolean).join(" "), NODE_TEST_CONTEXT: undefined } : {};
       let spawned;
       let result;
       try {
@@ -1075,6 +1084,7 @@ export class SoloFactory {
           args: command.slice(1),
           cwd: this.store.appDir(job.id),
           logPath: path.join(this.store.appDir(job.id), ".factory", "logs", `${gate}-${job.attempt}.log`),
+          env,
           timeoutMs,
           signal,
           // A command inside its own deadline is waiting, not stalled; the progress window never stops it.
@@ -1084,13 +1094,24 @@ export class SoloFactory {
         await this.releaseWorker(job, spawned);
       }
       const durationMs = Date.now() - started;
-      if (result.code !== 0) {
+      let caseFailure = null;
+      if (events) {
+        const results = caseResults(cases, await readFile(events, "utf8").catch(() => ""));
+        job.caseResults = { ...job.caseResults, ...Object.fromEntries(Object.entries(results).map(([id, value]) => [id, { ...value, gate, at: new Date().toISOString() }])) };
+        await this.store.writeState(job);
+        const failed = Object.entries(results).filter(([, value]) => value.status !== "passed");
+        if (failed.length === cases.length && failed.every(([, value]) => value.status === "missing")) caseFailure = `${gate} recorded no test events for its cases; cased proofs must run under node:test without their own --test-reporter.`;
+        else if (failed.length) caseFailure = `${gate} cases did not pass: ${failed.map(([id, value]) => `${id} ${value.status}`).join(", ")}.`;
+        result = { ...result, caseResults: results };
+      }
+      if (result.code !== 0 || caseFailure) {
         await this.emit(job.id, { type: "gate.failed", state: job.state, gate, durationMs, message: `${gate} failed` });
-        return new FactoryError("quality_gate_failed", `${gate} failed with exit ${result.code}.`, {
+        return new FactoryError("quality_gate_failed", result.code !== 0 ? `${gate} failed with exit ${result.code}.${caseFailure ? ` ${caseFailure}` : ""}` : caseFailure, {
           gate,
           command,
           durationMs,
           proofKeys,
+          ...(result.caseResults ? { cases: result.caseResults } : {}),
           output: result.output,
         });
       }
@@ -1341,6 +1362,12 @@ export async function assertPlanAmendable(store, job, { phaseId, plan } = {}, { 
   let valid;
   try { valid = validateRecoveryPlan(plan, prior.request); }
   catch (error) { throw refuse("amendment_invalid", `The corrected plan is not valid for this request: ${error.message}`, 400); }
+  // Replacing a reviewed plan must map every obligation it held; a blocked plan's obligations were never accepted.
+  const base = consolidationBase(job, prior);
+  if (base) {
+    try { assertConsolidation(valid, base); }
+    catch (error) { throw refuse("amendment_unmapped", error.message, 400); }
+  }
   try { await assertPlanningCurrent(store, job, prior, "The corrected plan"); }
   catch (error) { throw refuse("amendment_inputs_changed", `${error.message} Prepare a new plan against the current inputs instead.`, 409); }
   if ((await reviewedPlanKeys(store.appDir(), job, prior.request.sourcesDigest)).has(planKey(valid))) throw refuse("amendment_duplicate", "This plan, ignoring formatting and its request id, was already reviewed for these inputs. Submit a corrected plan that differs in content.", 409);
@@ -1558,7 +1585,8 @@ const pendingNote = (ids) => ids.length ? `; ${ids.join(", ")} pending integrati
 
 // One acceptance obligation as a review check: behavior, cited source and proof the reviewer must confirm.
 function obligationCheck(item) {
-  return { id: item.id, text: `${item.behavior}${item.sources ? ` (source: ${item.sources.map((ref) => `${ref.path} ${ref.locator}`).join("; ")})` : ""}${item.proof ? ` (proof: ${item.proof.command.join(" ")} → ${item.proof.expect})` : ""}` };
+  const cases = item.cases ? ` (cases, each proved separately by a test named [CASE-ID]: ${item.cases.map((entry) => `${entry.id} ${entry.surface}: ${entry.action}${entry.field ? ` [field ${entry.field}]` : ""}${entry.boundary ? ` [boundary ${entry.boundary}]` : ""} → ${entry.expect}`).join("; ")})` : "";
+  return { id: item.id, text: `${item.behavior}${item.sources ? ` (source: ${item.sources.map((ref) => `${ref.path} ${ref.locator}`).join("; ")})` : ""}${item.proof ? ` (proof: ${item.proof.command.join(" ")} → ${item.proof.expect})` : ""}${cases}` };
 }
 
 function stageKind(label = "unknown") {
