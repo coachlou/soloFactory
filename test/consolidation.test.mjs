@@ -50,6 +50,13 @@ test('a case may cite no check when its siblings cover the requirement, and ever
   });
 });
 
+test('a case expects a short exact result like "28", but not an empty one', () => {
+  // Seen on the fourth real-provider plan: expect "28" (days in February) spent a correction round.
+  const short = cases().map((entry, i) => i ? entry : { ...entry, action: 'GET', expect: '28' });
+  assert.equal(validateFeaturePlan(plan([requirement({ cases: short })]), opts).slices[0].acceptance[0].cases[0].expect, '28');
+  rejects([requirement({ cases: cases().map((entry, i) => i ? entry : { ...entry, expect: ' ' }) })], /UP-API-OK needs the action/);
+});
+
 test('a plan without cases normalizes exactly as before, so existing plan digests do not change', () => {
   const { cases: _, ...plain } = requirement();
   const [item] = validateFeaturePlan(plan([plain]), opts).slices[0].acceptance;

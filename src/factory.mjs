@@ -505,7 +505,7 @@ export class SoloFactory {
     const checks = originalChecks(job.brief);
     // Detailed obligations come from every authoritative input, not only the MH/SC summaries.
     const sources = await sourceSet(appDir, runInputs(job));
-    await writeFile(path.join(factoryDir, "plan-request.json"), `${JSON.stringify({ version: 1, jobId: job.id, contractDigest: contract, checks, sources }, null, 2)}\n`);
+    await writeFile(path.join(factoryDir, "plan-request.json"), `${JSON.stringify({ version: 1, jobId: job.id, contractDigest: contract, checks, sources, toolchain: { node: process.version } }, null, 2)}\n`);
     job = await this.stage(job, "specifying", "Planning features against the frozen contract");
     // Persisted, so a mutation left behind by a parked planning turn still blocks after resume.
     job.planBaseline ??= { source: await sourceBaseline(this.store, { head: false }), contract };

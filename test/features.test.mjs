@@ -320,7 +320,7 @@ for (const corrected of [false, true]) test(`a feature plan omitting detailed su
   const sourceRequests = [];
   const { store, job, factory } = await plannedRun({ uploads: { "SPEC.md": "§3 EXIF offsets: group by calendar day in the capture offset.\n" }, after: async (stage, cwd) => {
     const planFile = path.join(cwd, ".factory/slices.json");
-    if (stage === "feature-plan") sourceRequests.push((await json(path.join(cwd, ".factory/plan-request.json"))).sources);
+    if (stage === "feature-plan") sourceRequests.push(await json(path.join(cwd, ".factory/plan-request.json")));
     if (corrected && stage.startsWith("plan-correction-")) await patch(planFile, (plan) => {
       plan.slices[1].acceptance.push({ id: "EXIF-1", behavior: "Calendar-day grouping honors EXIF offsets", refs: plan.slices[1].closes.slice(0, 1), sources: [{ path: ".factory/uploads/SPEC.md", locator: "§3 EXIF offsets" }], proof: { command: ["npm", "test"], expect: "exif offsets test passes" } });
     });
@@ -329,7 +329,9 @@ for (const corrected of [false, true]) test(`a feature plan omitting detailed su
     if (!cited) await patch(path.join(cwd, ".factory/plan-review-result.json"), (verdict) => { verdict.verdict = "blocked"; verdict.blockers = ["SPEC.md §3 EXIF offsets has no obligation"]; });
   } });
   const result = await factory.start(job.id);
-  assert.ok(sourceRequests[0].some((ref) => ref.path === ".factory/uploads/SPEC.md"), "the planner sees supplied specs");
+  assert.ok(sourceRequests[0].sources.some((ref) => ref.path === ".factory/uploads/SPEC.md"), "the planner sees supplied specs");
+  // The controller's own Node runs every gate; a planner that cannot run it read-only once spent a correction marking it blocked.
+  assert.equal(sourceRequests[0].toolchain.node, process.version);
   if (corrected) {
     assert.equal(result.state, "completed", result.error?.message);
     assert.ok(result.approvedPlan.plan.slices[1].acceptance.some((item) => item.id === "EXIF-1"));

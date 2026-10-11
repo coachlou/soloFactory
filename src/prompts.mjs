@@ -330,6 +330,8 @@ Write ONLY .factory/slices.json. Do not write application code, tests, package f
 file; the controller blocks execution if anything outside the plan changes. Investigate model,
 native-package, runtime or tool compatibility read-only when a feature depends on it, and record
 the result under compatibility. A tool you cannot confirm is "blocked" — never invent a pass.
+The controller's Node (plan-request.json toolchain) and its npm run every gate, so they need no
+compatibility entry unless a feature needs a different version.
 
 Schema:
 ${FEATURE_PLAN_SCHEMA}

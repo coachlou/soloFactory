@@ -245,7 +245,7 @@ function validateCases(item, { registry, sources, ids, claimed }) {
     ids.add(entry.id);
     const at = `Case ${entry.id}`;
     if (!CASE_SURFACES.includes(entry.surface)) throw new Error(`${at} needs a surface (one of ${CASE_SURFACES.join(", ")}).`);
-    if (!text(entry.action, 3) || !text(entry.expect, 3)) throw new Error(`${at} needs the action it performs and its expected result.`);
+    if (!text(entry.action, 1) || !text(entry.expect, 1)) throw new Error(`${at} needs the action it performs and its expected result.`);
     for (const field of ["field", "boundary"]) if (entry[field] !== undefined && !text(entry[field], 1)) throw new Error(`${at} has an empty ${field}.`);
     // A case may cite no check (a constraint case); the cases together must still cover every ref below.
     if (!Array.isArray(entry.refs)) problems.push(`${at} needs a refs array (it may be empty).`);
