@@ -21,7 +21,7 @@ Working file for the current stretch. Read this first after a `/clear`.
 
 ## Plan (agreed 2026-10-11)
 1. **[done, committed] Superseded cases at integration.** Fixture test in test/features.test.mjs ("a later feature's case supersedes an earlier stage obligation…") reproduced the `missing` failure; fix: `supersedes` in `FEATURE_PLAN_SCHEMA`, `featureProofs` skips obligations retired by a built feature's case, `validateFeaturePlan` rejects superseding a same-or-later feature's obligation (unknown ids left to assertConsolidation). Suite 276/276.
-2. Spec prompt (src/prompts.mjs specificationPrompt): a delivery-order constraint becomes planning `dependsOn`, never an acceptance item asserting a feature's absence or repo state.
-3. Feature reviewer prompt (featureReviewPrompt): for case-covered checks judge only that each test asserts what its case says; judge uncased checks directly.
+2. **[done, committed]** Spec prompt: delivery order → `dependsOn`; never acceptance items asserting absence or repository state (both modes, follow-on too).
+3. **[done, committed]** Feature reviewer prompt: cased checks judged by their tests only; uncased directly; earlier features not reread/rerun. Suite 278/278.
 4. After smoke run a943a5da ends: restart :4205 on HEAD, run one smoke, `node scripts/measure-run.mjs <run>`; compare planning turns (target ≤4) and review vs implement time. Only then decide on "contract cards" (per-feature interface/ownership cards so reviewers judge one feature in isolation).
 - Open, not requested: Codex amendment items 3–4 (shadow-mode gate selection); Codex asked in spec/INBOX-codex.md to run measure-run on the photo-library run.

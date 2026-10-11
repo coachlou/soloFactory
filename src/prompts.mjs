@@ -101,7 +101,13 @@ Rewrite exactly these three substantive files and no application code yet:
 - .factory/PLAN.md: simplest suitable Node/npm architecture, proven packages, file-level
   implementation plan, deployment behavior, and risks. Avoid enterprise components.
 - .factory/ACCEPTANCE.md: numbered, observable end-to-end scenarios plus negative and
-  failure cases. Each must be testable.`}${sliceContract}
+  failure cases. Each must be testable.`}
+ACCEPTANCE.md describes the finished product. A brief's delivery order, "defer X until Y" or
+"ship A before B" is a planning constraint: it becomes dependsOn between features, never an
+acceptance item. Never write a scenario that asserts a feature's absence or that something does
+not yet exist (a route still answering 404, a script still failing) — the finished product fails
+it. Never write a scenario about repository state (clean tree, git status, commit history); the
+factory commits the tree itself.${sliceContract}
 The future app must expose GET /health and privacy-preserving GET /_factory/metrics. Metrics
 include uptime, request/error/active counts, aggregate latency, and normalized route counts;
 never request bodies, headers, IPs, identifiers, or query strings. ${METRICS_SCHEMA}
@@ -482,7 +488,11 @@ export function featureReviewPrompt(slice) {
 controller already ran its proof commands, test and build on this exact candidate; their output is in
 .factory/logs/<gate>-<attempt>.log. Do not rerun them. Read the proofs and their logs, and run only
 targeted checks of real behavior the proofs do not exercise. A requirement with cases passes only when every case is
-"passed" in the request's caseResults (the controller's own record of the tests named [CASE-ID]). Later planned features may still be missing and must not
+"passed" in the request's caseResults (the controller's own record of the tests named [CASE-ID]). For a
+check covered by cases, judge only that each case's test asserts what its case says it asserts — open the
+test, not the whole app. Judge uncased checks directly against real behavior. Earlier features are
+already reviewed: do not reread, rerun or explore their code or tests unless this feature's check
+depends on it. Later planned features may still be missing and must not
 block this verdict; a broad requirement this feature closes still needs full proof.
 
 Do not change application source; if you do, the controller discards your verdict and rechecks.

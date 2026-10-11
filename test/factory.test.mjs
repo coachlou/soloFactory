@@ -7,7 +7,7 @@ import http from "node:http";
 import { JobStore } from "../src/store.mjs";
 import { buildRecoveryPacket, FactoryError, SoloFactory, validateMetrics } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
-import { ALL_BLOCKERS, CONTROLLER_FACTS, PLAN_CHECKLIST, buildPrompt, continuationPrompt, featurePlanPrompt, planAuditPrompt, planCorrectionPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "../src/prompts.mjs";
+import { ALL_BLOCKERS, CONTROLLER_FACTS, PLAN_CHECKLIST, buildPrompt, continuationPrompt, featurePlanPrompt, featureReviewPrompt, planAuditPrompt, planCorrectionPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "../src/prompts.mjs";
 
 const brief = {
   workingName: "Pocket Pulse",
@@ -738,4 +738,20 @@ test("planner, plan reviewer and corrector share one checklist and the controlle
   }
   assert.ok(planAuditPrompt().includes(ALL_BLOCKERS));
   assert.match(CONTROLLER_FACTS, /Never assert on git status/);
+});
+
+test("the specification turns delivery order into dependencies, never into acceptance gates", () => {
+  // A smoke brief that fixed delivery order became ACCEPTANCE gates asserting a route was still 404 and
+  // the tree was clean: one planning round, three repairs and a failed feature on nothing the product needs.
+  for (const prompt of [specificationPrompt(), specificationPrompt(true), specificationPrompt(false, { followOn: true })]) {
+    assert.match(prompt, /delivery order[^.]*dependsOn/);
+    assert.match(prompt, /never[^.]*(absence|not yet exist)/i);
+    assert.match(prompt, /never[^.]*repository state/i);
+  }
+});
+
+test("the feature reviewer judges cased checks by their tests, not by re-exploring the repo", () => {
+  const prompt = featureReviewPrompt({ id: "F2", acceptance: [] });
+  assert.match(prompt, /case[^.]*test[^.]*asserts what (the|its) case says/i);
+  assert.match(prompt, /earlier features?[^.]*(not|never)[^.]*(reread|re-read|rerun|re-run|explore)/i);
 });
