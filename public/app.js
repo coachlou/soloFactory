@@ -584,7 +584,7 @@ const failedProof = (job) => job.error?.code === "quality_gate_failed" && pendin
 const MAX_AMENDED_PLAN_BYTES = 4_000_000;
 
 // Exhausted plan corrections: explain, offer the help packet, and take a corrected plan from a file.
-// A ready plan offers the same upload as an alternative to approval (no packet: nothing is blocked).
+// A ready plan offers the same packet and upload as an alternative to approval, for writing a replacement.
 // The selection lives in state so polling re-renders and server errors never erase it.
 function renderAmendment(features, next, phase, action) {
   const blocked = next.action === "amend-plan";
@@ -621,7 +621,8 @@ function renderAmendment(features, next, phase, action) {
   });
   show();
   details.append(summary, label, file, status, submit);
-  features.append(note, ...(blocked ? [packet] : []), details);
+  if (!blocked) packet.textContent = "Download plan packet for a replacement";
+  features.append(note, packet, details);
   const alternative = blocked && next.alternatives?.[0];
   if (alternative) { const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = alternative.reason; features.append(hint); action(alternative.label, "recovery-plan"); }
 }

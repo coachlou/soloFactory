@@ -495,7 +495,8 @@ export async function createSoloFactoryServer(options = {}) {
         const jobStore = storeOfJob(packetMatch[1]);
         const job = await jobStore.read(packetMatch[1]);
         const next = continuationAction(job, { maxRepairs });
-        if (next.action !== "amend-plan") return json(response, 409, { error: next.reason, nextAction: next });
+        // Blocked plans need a correction; a ready plan offers a replacement as its alternative.
+        if (next.action !== "amend-plan" && !next.alternatives?.some((item) => item.action === "amend-plan")) return json(response, 409, { error: next.reason, nextAction: next });
         response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "content-disposition": `attachment; filename="plan-help-${job.id}.json"` });
         return response.end(JSON.stringify(await amendmentPacket(jobStore, job), null, 2));
       }

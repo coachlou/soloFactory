@@ -403,23 +403,30 @@ export const resumeAmendedReview = (factory, id, signal) => factory.store.read(i
 
 // Everything an owner or their coding agent needs to correct the blocked plan, as one download.
 export async function amendmentPacket(store, job) {
-  const phase = job.recoveryPhase; const appDir = store.appDir();
+  const phase = job.recoveryPhase; const appDir = store.appDir(); const ready = phase.status === 'ready';
   const { priorPlan, review, ...request } = phase.request;
   const packet = {
     kind: 'solofactory-plan-correction-packet', version: 1, runId: job.id, phaseId: phase.id, requestId: phase.request.id, workspace: appDir,
     instructions: [
-      'Automatic plan corrections are exhausted and no repairs have started. The independent reviewer still blocks this plan.',
-      'Correct the plan so that every blocker below is resolved. Do not narrow, waive or drop a requirement. Change the requirements only if the inputs themselves are wrong.',
+      ...(ready ? [
+        'This plan passed independent review and is ready for approval; no repairs have started. Use this packet only to write a plan you prefer to it.',
+        'A submitted replacement retires the ready plan for good: it cannot be approved or resubmitted afterwards. Do not narrow, waive or drop a requirement.',
+      ] : [
+        'Automatic plan corrections are exhausted and no repairs have started. The independent reviewer still blocks this plan.',
+        'Correct the plan so that every blocker below is resolved. Do not narrow, waive or drop a requirement. Change the requirements only if the inputs themselves are wrong.',
+      ]),
       'Read each file in request.sources (paths are relative to the workspace) before editing. Keep jobId, requestId and contractDigest exactly as given.',
       `Save the corrected plan as a new JSON file and submit it with "Submit corrected plan for review" in the dashboard, or POST {"phaseId": "${phase.id}", "plan": <the corrected plan>} to /api/jobs/${job.id}/recovery-review.`,
       'A submitted plan gets exactly one independent review, no new automatic corrections, and still needs your approval before any repair runs.',
     ],
-    blockers: phase.planBlockers ?? [], correctionsUsed: phase.corrections ?? 0, repairsStarted: false,
+    blockers: ready ? [] : phase.planBlockers ?? [], ...(ready && { planDigest: phase.planDigest }), correctionsUsed: phase.corrections ?? 0, repairsStarted: false,
     submit: { method: 'POST', endpoint: `/api/jobs/${job.id}/recovery-review`, body: { phaseId: phase.id, plan: '<corrected plan JSON>' } },
     request, planSchema: PLAN_SCHEMA,
   };
   // Containment: only the phase's own plan artifact under the workspace is ever read.
-  if (/^\.factory\/recovery-plan-[0-9a-f-]+\.json$/.test(phase.planFile ?? '')) {
+  // A ready plan is the reviewed plan itself; a blocked one is read from its artifact.
+  if (ready && phase.plan) packet.currentPlan = phase.plan;
+  else if (/^\.factory\/recovery-plan-[0-9a-f-]+\.json$/.test(phase.planFile ?? '')) {
     try {
       const file = await realpath(path.join(appDir, phase.planFile));
       if (path.relative(await realpath(appDir), file).startsWith('..')) throw new Error('outside the workspace');

@@ -377,7 +377,14 @@ test('HTTP: packet download, a 540KB bounded submission, refusals that change no
   assert.ok(Buffer.byteLength(JSON.stringify(ready.recoveryPhase.plan)) >= 540_000, 'nothing was truncated');
   await unchanged2(post, ready, big);
   assert.equal(ready.nextAction.action, 'approve-plan');
-  assert.equal((await fetch(`${base}/api/jobs/${job.id}/recovery-plan-packet`)).status, 409);
+  // A ready plan offers the same help for writing a replacement: the reviewed plan, its digest, and no blockers.
+  const readyDownload = await fetch(`${base}/api/jobs/${job.id}/recovery-plan-packet`);
+  assert.equal(readyDownload.status, 200);
+  const readyPacket = await readyDownload.json();
+  assert.equal(readyPacket.phaseId, ready.recoveryPhase.id); assert.deepEqual(readyPacket.blockers, []);
+  assert.equal(readyPacket.planDigest, ready.recoveryPhase.planDigest);
+  assert.equal(readyPacket.currentPlan.slices.length, ready.recoveryPhase.plan.slices.length);
+  assert.match(readyPacket.instructions.join(' '), /ready/); assert.doesNotMatch(readyPacket.instructions.join(' '), /still blocks/);
   assert.equal((await post('recovery-start', { planDigest: 'wrong' })).status, 409);
   // A ready plan takes a replacement over HTTP; once submitted, the ready plan's digest no longer starts repairs.
   assert.deepEqual(ready.nextAction.alternatives.map(item => item.action), ['amend-plan']);
