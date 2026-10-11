@@ -191,6 +191,12 @@ file never leaves your machine; `GET /api/errors?limit=50` returns the latest en
 - App telemetry is local aggregate data only: uptime, request/error counts, latency, and
   normalized routes. Bodies, headers, IP addresses, identifiers, and query strings are
 forbidden by the output contract.
+- Run cost: `GET /api/jobs/<id>/telemetry` includes `measurement`, derived from the run's event
+  log. It breaks down planning, each feature and integration into agent time (implement, review,
+  repair, planning), tokens, and controller gate runs. Gate runs show failures, timeouts, same-argv
+  repeats, and repeats on an unchanged source candidate. For any saved run, use
+  `node scripts/measure-run.mjs <run dir> [--json]`. Commands a worker runs inside its own turn are
+  not observed, and older events without candidates give lower bounds; the report says so.
 
 For iPhone outputs, installing Xcode is not enough if `xcodebuild` still points to the
 standalone Command Line Tools. Select the full installation with

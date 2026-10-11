@@ -12,6 +12,7 @@ import { PLAN_SCHEMA_FIXES, assertConsolidation, caseResults, featureProofs, ord
 export { pendingProofFailure };
 import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
+import { measureRun } from "./measure.mjs";
 import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, watchConfig, workerAlive } from "./watchdog.mjs";
 import { amendRepairPlan, archiveReview, assertBatch, consolidationBase, assertPlanningCurrent, digest, exhaustedPreparations, planFeatureRecovery, planKey, resumeAmendedReview, reviewedPlanKeys, runFeatureRecovery, sourceBaseline, validateRecoveryApproval, validateRecoveryPlan } from "./feature-recovery.mjs";
 
@@ -988,7 +989,7 @@ export class SoloFactory {
   async invoke(job, label, prompt, signal, { resumeSessionId = null } = {}) {
     const appDir = this.store.appDir(job.id);
     const logPath = path.join(appDir, ".factory", "logs", `${label}.log`);
-    await this.emit(job.id, { type: "agent.started", state: job.state, message: `${this.provider.id} started ${label}` });
+    await this.emit(job.id, { type: "agent.started", state: job.state, stage: label, feature: featureOf(job), message: `${this.provider.id} started ${label}` });
     const monitor = this.monitorOf(job);
     let spawned;
     let result;
@@ -1021,7 +1022,7 @@ export class SoloFactory {
       job.agentSessions[label] = result.sessionId;
       await this.store.writeState(job);
     }
-    await this.emit(job.id, { type: "agent.completed", state: job.state, stage: label, usage: result.usage ?? null, message: `${label} worker completed` });
+    await this.emit(job.id, { type: "agent.completed", state: job.state, stage: label, feature: featureOf(job), usage: result.usage ?? null, message: `${label} worker completed` });
     return result;
   }
 
@@ -1181,14 +1182,15 @@ export class SoloFactory {
     for (const [gate, command, proofKeys = [], cases = []] of gates) {
       // Install may create a lockfile before tests run. Bind evidence to the source tested,
       // including install itself only when it is also an integration proof.
-      if (integrated && candidate === null && (gate !== "install" || proofKeys.length)) {
+      if (candidate === null && (gate !== "install" || proofKeys.length)) {
         candidate = await sourceBaseline(this.store, { head: false });
-        for (const entry of integrationProofs(job)) entry.proofCandidate = candidate;
+        if (integrated) for (const entry of integrationProofs(job)) entry.proofCandidate = candidate;
       }
+      const feature = featureOf(job);
       const started = Date.now();
       job.activeCommand = { gate, command, startedAt: new Date().toISOString() };
       await this.store.writeState(job);
-      await this.emit(job.id, { type: "gate.started", state: job.state, gate, message: `${gate}: ${command.join(" ")}` });
+      await this.emit(job.id, { type: "gate.started", state: job.state, gate, command, feature, candidate, message: `${gate}: ${command.join(" ")}` });
       const gateMs = this.watch.gateMs ?? 5 * 60_000;
       const timeoutMs = gate === "install" ? Math.max(10 * 60_000, gateMs) : gateMs;
       // ponytail: node:test only; a proof that sets its own --test-reporter fails loudly on the mismatch.
@@ -1226,13 +1228,13 @@ export class SoloFactory {
       }
       if (result.timedOut) {
         // A killed command proved nothing about the app, so it is not handed to a repair turn.
-        await this.emit(job.id, { type: "gate.failed", state: job.state, gate, durationMs, message: `${gate} timed out` });
+        await this.emit(job.id, { type: "gate.failed", state: job.state, gate, feature, durationMs, message: `${gate} timed out` });
         return new FactoryError("gate_timeout", `${gate} did not finish within its ${timeoutMs / 60_000}-minute limit, so no repair turn ran: a timeout is not a failed check. If the checks are only slow, restart SoloFactory with SOLOFACTORY_GATE_MINUTES set higher (at most 60), then Resume. If they hang, the app needs fixing.`, {
           gate, command, durationMs, proofKeys, timeoutMs, timeoutReason: result.timeoutReason, output: result.output,
         });
       }
       if (result.code !== 0 || caseFailure) {
-        await this.emit(job.id, { type: "gate.failed", state: job.state, gate, durationMs, message: `${gate} failed` });
+        await this.emit(job.id, { type: "gate.failed", state: job.state, gate, feature, durationMs, cases: caseCounts(result.caseResults), message: `${gate} failed` });
         return new FactoryError("quality_gate_failed", result.code !== 0 ? `${gate} failed with exit ${result.code}.${caseFailure ? ` ${caseFailure}` : ""}` : caseFailure, {
           gate,
           command,
@@ -1242,7 +1244,7 @@ export class SoloFactory {
           output: result.output,
         });
       }
-      await this.emit(job.id, { type: "gate.passed", state: job.state, gate, durationMs, message: `${gate} passed` });
+      await this.emit(job.id, { type: "gate.passed", state: job.state, gate, feature, durationMs, cases: caseCounts(result.caseResults), message: `${gate} passed` });
     }
     job.activeCommand = null;
     await this.store.writeState(job);
@@ -1350,6 +1352,7 @@ export class SoloFactory {
       stageCount: job.stageHistory.length,
       tokens: usageTotals(allEvents),
     };
+    const measurement = measureRun(allEvents);
     let app = null;
     if (probeApp && job.deployment?.url && job.deployment.status === "live") {
       try {
@@ -1372,6 +1375,7 @@ export class SoloFactory {
       job: { id: job.id, state: job.state, stage: job.stage, attempt: job.attempt, sdlc: job.sdlc ?? "single" },
       sliceStats: job.sliceStats ?? {},
       summary,
+      measurement,
       stageDurations,
       events,
       app,
@@ -1715,6 +1719,10 @@ function obligationCheck(item) {
   const cases = item.cases ? ` (cases, each proved separately by a test named [CASE-ID]: ${item.cases.map((entry) => `${entry.id} ${entry.surface}: ${entry.action}${entry.field ? ` [field ${entry.field}]` : ""}${entry.boundary ? ` [boundary ${entry.boundary}]` : ""} → ${entry.expect}`).join("; ")})` : "";
   return { id: item.id, text: `${item.behavior}${item.sources ? ` (source: ${item.sources.map((ref) => `${ref.path} ${ref.locator}`).join("; ")})` : ""}${item.proof ? ` (proof: ${item.proof.command.join(" ")} → ${item.proof.expect})` : ""}${cases}` };
 }
+
+// The feature a turn or gate serves, for per-feature measurement; null while planning or integrating.
+const featureOf = (job) => job.recoveryPhase?.cursor?.id ?? job.featureCursor?.id ?? null;
+const caseCounts = (results) => results ? Object.values(results).reduce((counts, { status }) => ({ ...counts, [status]: (counts[status] ?? 0) + 1 }), {}) : undefined;
 
 function stageKind(label = "unknown") {
   if (/^(build-slice|slice-resume)-/.test(label)) return "slice";

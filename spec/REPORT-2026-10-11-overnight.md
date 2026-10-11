@@ -126,3 +126,8 @@ Suite: 267/267.
 - Feature reviewer reads gate logs and caseResults instead of rerunning proof commands.
 - Dropped after the amendment: planner guidance moving per-feature regression to final, and the post-review same-candidate skip. No reuse/cache.
 - Suite 269/269. Measurement and shadow-selection pilot (amendment items 1–4) still open.
+
+## Measurement (amendment items 1–2)
+
+- `src/measure.mjs` derives per-phase agent time, tokens and gate cost from the event log; exposed as telemetry `measurement` and `scripts/measure-run.mjs`.
+- Smoke run a943a5da: agent 5202s vs controller gates 15.7s. On this app, gate optimization has nothing to save; agent turns (review ≈ implement per feature) dominate.

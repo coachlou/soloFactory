@@ -195,6 +195,21 @@ test("final integration reruns every verified feature's proofs, so a later featu
   assert.equal(count(await started(store, job.id), "repair-"), 1, "no feature repairs were spent");
 });
 
+test("telemetry measures each feature's turns and gates, bound to the candidate each gate checked", async () => {
+  const { store, job, factory } = await plannedRun();
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  const { measurement } = await factory.telemetry(job.id, { probeApp: false });
+  assert.deepEqual(measurement.buckets.map((b) => b.id).sort(), ["SLICE-SKELETON", "SLICE-UI", "integration", "planning"]);
+  for (const id of ["SLICE-SKELETON", "SLICE-UI"]) {
+    const b = measurement.buckets.find((item) => item.id === id);
+    assert.ok(b.gates.runs >= 3 && b.agent.byActivity.implement >= 0 && b.agent.byActivity.review >= 0, id);
+  }
+  const gates = (await store.events(job.id, Infinity)).filter((event) => event.type === "gate.started" && event.gate !== "install");
+  assert.ok(gates.every((event) => /^[0-9a-f]{64}$/.test(event.candidate) && Array.isArray(event.command)));
+  assert.equal(measurement.buckets.reduce((n, b) => n + b.gates.candidateUnknown, 0), 0);
+});
+
 test("a reviewer that edits the candidate voids its verdict and forces fresh checks and a fresh review", async () => {
   const { store, job, factory } = await plannedRun({ after: async (stage, cwd) => {
     if (stage === "feature-review-SLICE-UI-1") await writeFile(path.join(cwd, "reviewer-edit.js"), "export const x = 1;\n");
