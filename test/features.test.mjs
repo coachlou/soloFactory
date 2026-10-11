@@ -342,6 +342,33 @@ for (const corrected of [false, true]) test(`a feature plan omitting detailed su
   }
 });
 
+test("Resume after exhausted plan corrections refuses an unchanged plan and reviews an edited one once", async () => {
+  const exif = { id: "EXIF-1", behavior: "Calendar-day grouping honors EXIF offsets", sources: [{ path: ".factory/uploads/SPEC.md", locator: "§3 EXIF offsets" }], proof: { command: ["npm", "test"], expect: "exif offsets test passes" } };
+  const { store, job, make } = await plannedRun({ uploads: { "SPEC.md": "§3 EXIF offsets: group by calendar day in the capture offset.\n" }, after: async (stage, cwd) => {
+    if (!stage.startsWith("plan-review-")) return;
+    const cited = (await json(path.join(cwd, ".factory/slices.json"))).slices.some((slice) => slice.acceptance.some((item) => item.id === "EXIF-1"));
+    if (!cited) await patch(path.join(cwd, ".factory/plan-review-result.json"), (verdict) => { verdict.verdict = "blocked"; verdict.blockers = ["SPEC.md §3 EXIF offsets has no obligation"]; });
+  } });
+  const blocked = await make().start(job.id);
+  assert.equal(blocked.error.code, "plan_blocked");
+  const reviews = count(await started(store, job.id), "plan-review-");
+  const planFile = path.join(store.appDir(job.id), ".factory/slices.json");
+  const stateFile = path.join(store.jobDir(job.id), "state.json");
+  const saved = await readFile(stateFile, "utf8");
+  // Formatting alone is not a corrected plan.
+  await writeFile(planFile, JSON.stringify(await json(planFile)));
+  await assert.rejects(make().resume(job.id), (error) => error.code === "plan_unchanged");
+  assert.equal(count(await started(store, job.id), "plan-review-"), reviews, "an unchanged plan costs no review");
+  assert.equal(await readFile(stateFile, "utf8"), saved, "a refused Resume leaves the saved run unchanged");
+  assert.equal(continuationAction(await store.read(job.id), { maxRepairs: 2 }).action, "resume");
+
+  await patch(planFile, (plan) => { plan.slices[1].acceptance.push({ ...exif, refs: plan.slices[1].closes.slice(0, 1) }); });
+  const result = await make().resume(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(count(await started(store, job.id), "plan-review-"), reviews + 1, "an edited plan gets exactly one review");
+  assert.equal(count(await started(store, job.id), "plan-correction-"), 2, "Resume does not renew plan corrections");
+});
+
 test("inputs changed after every feature verified reopen only the features that cited them", async () => {
   const { job, make } = await plannedRun({ uploads: { "SPEC.md": "v1" }, after: async (stage, cwd) => {
     if (stage === "feature-plan") await patch(path.join(cwd, ".factory/slices.json"), (plan) => { plan.slices[1].acceptance[0].sources.push({ path: ".factory/uploads/SPEC.md", locator: "§1" }); });

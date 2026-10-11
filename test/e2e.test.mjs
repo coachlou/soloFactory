@@ -614,6 +614,30 @@ test('HTTP: a repair plan blocked after its corrections offers a corrected-plan 
   assert.match(await readFile(new URL('../public/app.js', import.meta.url), 'utf8'), /next\?\.action === "amend-plan"/);
 });
 
+test('HTTP: Resume of an exhausted initial plan refuses a plan the reviewer already blocked before queueing', async t => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'solo-http-plan-unchanged-'));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const job = await app.store.create({ brief: { workingName: 'Plan unchanged', mustHaves: ['Browse'], acceptanceScenarios: ['Browse works'] }, transcript: [{ role: 'user', content: 'Build' }], provider: 'fixture' });
+  assert.equal(job.planVersion, 2);
+  const plan = { version: 2, slices: [] };
+  await mkdir(path.join(app.store.appDir(), '.factory'), { recursive: true });
+  await writeFile(path.join(app.store.appDir(), '.factory/slices.json'), JSON.stringify(plan, null, 2));
+  Object.assign(job, { state: 'failed', failedState: 'specifying', planCorrections: 2, planBlockedDigests: [digest(plan)],
+    error: { code: 'plan_blocked', message: 'The feature plan is still blocked after 2 corrections: MH-1 has no obligation', details: {} } });
+  await app.store.writeState(job);
+  const stateFile = path.join(app.store.jobDir(job.id), 'state.json');
+  const { job: shown } = await getJson(`${base}/api/jobs/${job.id}`);
+  assert.equal(shown.nextAction.label, 'Resume plan review');
+  const saved = await readFile(stateFile, 'utf8');
+  const refused = await fetch(`${base}/api/jobs/${job.id}/resume`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(refused.status, 409);
+  assert.equal((await refused.json()).code, 'plan_unchanged');
+  assert.equal(await readFile(stateFile, 'utf8'), saved);
+});
+
 test("HTTP: an image uploaded for another brief while a run builds does not stop that run", async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-http-uploads-"));
   const app = await createSoloFactoryServer({ home, fixtureMode: true });

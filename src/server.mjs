@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { JobStore } from "./store.mjs";
 import { withReviewDiagnostics } from "./review.mjs";
 import { amendmentPacket, validateRecoveryApproval } from "./feature-recovery.mjs";
-import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, assertPlanInputsRevised, buildRecovery, buildRecoveryPacket, continuationAction, SoloFactory, withContinuation } from "./factory.mjs";
+import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, assertPlanInputsRevised, assertPlanReviewable, buildRecovery, buildRecoveryPacket, continuationAction, SoloFactory, withContinuation } from "./factory.mjs";
 import { watchConfig } from "./watchdog.mjs";
 import {
   INTERVIEW_RESPONSE_SCHEMA,
@@ -478,6 +478,7 @@ export async function createSoloFactoryServer(options = {}) {
         const job = await ensureRecovery(await jobStore.read(resumeMatch[1]), jobStore);
         const next = continuationAction(job, { maxRepairs, busy: queue.some((entry) => entry.jobId === job.id) || runs.get(projectId)?.jobId === job.id });
         if (next.action !== "resume") return json(response, 409, { error: next.endpoint ? `${next.reason} Next: ${next.label} (POST ${next.endpoint}).` : next.reason, nextAction: next });
+        try { await assertPlanReviewable(jobStore, job, maxRepairs); } catch (error) { return json(response, 409, { error: error.message, code: error.code, nextAction: next }); }
         // Front of the queue: resolving a parked run is what unblocks everything behind it.
         await enqueue(projectId, job.id, "resume", { front: true });
         return json(response, 202, { job, resumed: true, queued: queue.some((entry) => entry.jobId === job.id) });

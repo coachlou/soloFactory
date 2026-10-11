@@ -72,6 +72,8 @@ export class SoloFactory {
     const job = await this.continuable(jobId);
     const next = continuationAction(job, { maxRepairs: this.maxRepairs });
     if (next.action !== "resume") throw new FactoryError(["prepare-plan", "revise-inputs", "amend-plan"].includes(next.action) ? "repair_plan_required" : "recovery_approval_required", `${next.reason} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next });
+    // Exhausted corrections: Resume buys one review only for a plan the reviewer has not already blocked.
+    await assertPlanReviewable(this.store, job, this.maxRepairs);
     return this.activate(jobId, (signal) => this.runResume(jobId, signal));
   }
 
@@ -540,6 +542,9 @@ export class SoloFactory {
         } catch (error) {
           if (!error.details?.blockers) throw new FactoryError("plan_verdict_invalid", error.message);
           blockers = error.details.blockers.length ? error.details.blockers : [error.message];
+          // Durable, so neither a restart nor switching back to an earlier rejected plan buys another review.
+          job.planBlockedDigests = [...new Set([...(job.planBlockedDigests ?? []), await planFileDigest(appDir)])];
+          await this.store.writeState(job);
         }
       }
       await this.emit(job.id, { type: "plan.blocked", state: job.state, message: blockers[0] });
@@ -1267,6 +1272,23 @@ export function inputsChanged(job) {
 
 // A repair plan still blocked after its corrections: retrying the same inputs cannot pass review.
 // The message match recognizes runs saved before the plan_blocked code.
+// Formatting-insensitive plan identity; null when unparseable (a malformed plan already costs no review).
+async function planFileDigest(appDir) {
+  try { return digest(JSON.parse(await readFile(path.join(appDir, ".factory/slices.json"), "utf8"))); } catch { return null; }
+}
+
+// The initial feature plan (not a recovery phase) is still blocked after its automatic corrections.
+function initialPlanBlocked(job, maxRepairs) {
+  return job.planVersion === 2 && !job.approvedPlan && !job.recoveryPhase && job.error?.code === "plan_blocked" && (job.planCorrections ?? 0) >= maxRepairs;
+}
+
+// Shared by the controller and the HTTP route so a refusal reaches the owner before anything is queued.
+export async function assertPlanReviewable(store, job, maxRepairs) {
+  if (initialPlanBlocked(job, maxRepairs) && job.planBlockedDigests?.includes(await planFileDigest(store.appDir(job.id)))) {
+    throw new FactoryError("plan_unchanged", "Automatic plan corrections are exhausted and .factory/slices.json is a plan the reviewer already blocked. Correct the plan, then Resume for one independent review.");
+  }
+}
+
 export function planBlockedOut(job) {
   return job.recoveryPhase?.status === "plan_failed" && (job.error?.code === "plan_blocked" || /plan is still blocked after \d+ corrections/.test(job.error?.message ?? ""));
 }
@@ -1333,6 +1355,7 @@ export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
   if (job.error?.details?.loop) return job.error.code === "review_rejected" || pendingProofFailure(job)
     ? next("prepare-plan", "Prepare repair plan", "recovery-plan", "The same failure repeated on unchanged code, so repeating repairs cannot help. Prepare a repair plan and approve it; Resume does not renew the budget.")
     : next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", "The same failure repeated on unchanged code. Change the code or inputs first: Resume reruns the checks, and no repair turn runs while the code is unchanged.");
+  if (initialPlanBlocked(job, maxRepairs)) return next("resume", "Resume plan review", "resume", "Automatic plan corrections are exhausted. Correct .factory/slices.json, then Resume for one independent review; a plan the reviewer already blocked is refused. Change the requirements only if the inputs themselves are wrong.");
   if (inputsChanged(job)) return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The specs or prototype inputs changed after the plan was approved. Prepare a repair plan against the current inputs.");
   return next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", phase === "running" ? "Resume continues the approved repair plan from its cursor." : "Resume continues this run from its preserved files.");
 }
@@ -1375,6 +1398,9 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
       actions.push(`Download the plan help packet: the blocked plan, the request, the reviewer's blockers and the source references. Fix the plan yourself or hand the packet to your coding agent.`);
       actions.push("Submit corrected plan for review: it gets one independent review and, if it passes, waits for your approval before any repair runs.");
       actions.push("Revise inputs and prepare a new plan only if the specs or prototype themselves are wrong or ambiguous.");
+    } else if (initialPlanBlocked(job, maxRepairs)) {
+      actions.push(`Read the reviewer's blockers; automatic plan corrections are exhausted (${job.planCorrections} used) and nothing has been built.`);
+      actions.push("Correct .factory/slices.json, then Resume plan review: it runs one independent review and does not renew corrections. A plan the reviewer already blocked is refused.");
     } else if (loop) {
       actions.push(`Read the repeated failure in ${loop.logs?.at(-1) ?? "the named log"}; the last repairs did not change the code.`);
       actions.push("Change the code or inputs, or prepare a repair plan; Resume does not renew the repair budget.");
