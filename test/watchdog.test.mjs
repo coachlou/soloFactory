@@ -207,6 +207,27 @@ if (args[1] === "resume") {
   assert.ok(events.some((event) => event.type === "watchdog.decision" && event.decision === "continuation_refused"));
 });
 
+test("controller: a silent Claude turn outlives the idle limit, because its CLI prints only at the end", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-watch-claude-"));
+  const bin = path.join(root, "bin");
+  await mkdir(bin);
+  await writeFile(path.join(bin, "claude"), `#!/usr/bin/env node
+process.stdin.resume(); process.stdin.on("end", () => {});
+setTimeout(() => { console.log(JSON.stringify({ result: "built quietly" })); process.exit(0); }, 1500);
+`);
+  await chmod(path.join(bin, "claude"), 0o755);
+  const saved = Object.fromEntries(["PATH", "SOLOFACTORY_AGENT_IDLE_MINUTES", "SOLOFACTORY_AGENT_HARD_MINUTES"].map((key) => [key, process.env[key]]));
+  t.after(() => { for (const [key, value] of Object.entries(saved)) value === undefined ? delete process.env[key] : (process.env[key] = value); });
+  // Idle limit 0.6s, silence 1.5s: a Codex turn this quiet would be stopped.
+  Object.assign(process.env, { PATH: `${bin}:${saved.PATH}`, SOLOFACTORY_AGENT_IDLE_MINUTES: "0.01", SOLOFACTORY_AGENT_HARD_MINUTES: "0.5" });
+  const { store, job } = await newJob("solo-watch-claude-job-");
+  const factory = new SoloFactory({ store, provider: createProvider("claude"), watch: config });
+  const result = await factory.invoke(job, "build", "build", undefined);
+  assert.equal(result.message, "built quietly");
+  const events = await store.events(job.id, 500);
+  assert.ok(!events.some((event) => event.type === "watchdog.decision"), "silence alone triggers no watchdog decision");
+});
+
 test("restart: a live worker parks the run; Resume appears only after it exits", async () => {
   const { store, job } = await newJob("solo-watch-restart-");
   const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
