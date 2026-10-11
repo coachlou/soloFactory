@@ -737,6 +737,10 @@ test("planner, plan reviewer and corrector share one checklist and the controlle
     assert.ok(prompt.includes(CONTROLLER_FACTS));
   }
   assert.ok(planAuditPrompt().includes(ALL_BLOCKERS));
+  // Smoke 90b8b32e: reviews kept finding the untested lower end of a range, one surface at a time.
+  assert.match(PLAN_CHECKLIST, /BOTH ends/);
+  assert.match(PLAN_CHECKLIST, /every input or route that validates it/);
+  assert.match(PLAN_CHECKLIST, /step its action never performs/);
   assert.match(CONTROLLER_FACTS, /Never assert on git status/);
 });
 

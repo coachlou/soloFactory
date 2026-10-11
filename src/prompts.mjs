@@ -352,7 +352,9 @@ export const PLAN_CHECKLIST = `A plan is blocked when:
 - a proof is not an executable test of real behavior, or depends on repo state, network, wall-clock
   time or the order other tests run in;
 - a claim about escaping, validation, limits or errors is tested without the input that would
-  expose a failure (escaping needs markup in the input; a limit needs the boundary and one past it);
+  expose a failure (escaping needs markup in the input; a validated range needs BOTH ends, each limit
+  accepted and one past it rejected, on every input or route that validates it);
+- a case's expectation depends on a step its action never performs;
 - a requirement's refs are not all cited by its cases, or negative/failure cases are missing;
 - consolidated cases drop or blur a distinct field, action, boundary, failure condition or
   API/browser surface;

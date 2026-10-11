@@ -51,3 +51,10 @@ A full read of spec/, PROGRESS.md, SPEC.md, README.md and .aai/ found 26 open it
 - **Deferred by design:** per-stage Codex model routing (M; needs a cost check on a live run); per-proof gate timeouts (only once one global limit proves too blunt); per-case staleness binding; Jev backlog items 3–6; grandchild process tracking.
 - **Codex-owned:** shadow-mode test selection (amendment items 3–4); false-completion investigation (item 5); measure-run on the photo-library run.
 - **Browser check of the amendment file input:** a source-level check only; run it on a ready plan once the smoke reaches one.
+
+## Smoke run 90b8b32e — failed in planning 20:26Z
+- `plan_blocked` after 2 corrections; no feature built, no gates run. nextAction = resume ("Resume plan review"); not resumed (Lou's call).
+- measure-run: planning 8 turns / 2074s (baseline 10 / 2451s, which then passed). Target ≤4 missed.
+- Turn sequence: spec 324s, feature-plan 520s, schema-fix 59s, then review→correction ×2 and a third review (196s, 205s, 231s, 188s, 350s).
+- Blockers per round: 1 (schema) → 6 → 6 → 3, each round's set mostly *new*, not leftovers. The reviewer surfaces boundary-coverage gaps incrementally (lower bound of name length, month/day 00 on one surface) despite ALL_BLOCKERS. One of the final 3 is a real defect (F1-HM-SELF action never calls /health); two are "mirror the boundary set from another case" asks.
+- Next fix candidate: make the planner/corrector apply the boundary rule uniformly (every validated range gets both ends accepted and rejected, on every surface that validates it), so the reviewer has nothing new to find; or let review rounds after the first judge only the previous blockers plus regressions.
