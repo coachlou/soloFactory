@@ -1355,7 +1355,7 @@ export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
   if (job.error?.details?.loop) return job.error.code === "review_rejected" || pendingProofFailure(job)
     ? next("prepare-plan", "Prepare repair plan", "recovery-plan", "The same failure repeated on unchanged code, so repeating repairs cannot help. Prepare a repair plan and approve it; Resume does not renew the budget.")
     : next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", "The same failure repeated on unchanged code. Change the code or inputs first: Resume reruns the checks, and no repair turn runs while the code is unchanged.");
-  if (initialPlanBlocked(job, maxRepairs)) return next("resume", "Resume plan review", "resume", "Automatic plan corrections are exhausted. Correct .factory/slices.json, then Resume for one independent review; a plan the reviewer already blocked is refused. Change the requirements only if the inputs themselves are wrong.");
+  if (initialPlanBlocked(job, maxRepairs)) return next("resume", "Resume plan review", "resume", "Automatic plan corrections are exhausted. Correct .factory/slices.json, then Resume for one independent review; a plan the reviewer already blocked is refused.");
   if (inputsChanged(job)) return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The specs or prototype inputs changed after the plan was approved. Prepare a repair plan against the current inputs.");
   return next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", phase === "running" ? "Resume continues the approved repair plan from its cursor." : "Resume continues this run from its preserved files.");
 }

@@ -534,7 +534,7 @@ function renderJob() {
   $("#cancel-button").textContent = job.state === "queued" ? "Remove from queue" : "Cancel run";
   $("#pause-button").classList.toggle("hidden", !["specifying", "building", "repairing", "reviewing"].includes(job.state));
   if (!state.pausing) $("#pause-button").textContent = "Pause";
-  $("#resume-button").textContent = job.state === "paused" ? "Resume" : "Resume current run";
+  $("#resume-button").textContent = job.nextAction?.action === "resume" ? job.nextAction.label : job.state === "paused" ? "Resume" : "Resume current run";
   $("#dismiss-button").classList.toggle("hidden", !terminalFailure || Boolean(job.dismissed));
   // nextAction is derived by the server's continuation policy; a saved banner's canResume can be stale.
   $("#resume-button").classList.toggle("hidden", job.nextAction?.action !== "resume" || !terminalFailure);
