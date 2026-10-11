@@ -72,3 +72,13 @@ account five-hour usage23%→28% used, a coarse5-point increase that may include
 No per-turn tokens or independent second-model review; no claimed automated factory cost saving.
 Live app/run and factory source untouched. Use this as evidence for the existing three proposals,
 not a new source task or permission to install/apply the application patch.
+
+
+## Pending safe Pause is bypassed when a verification failure starts an AI repair
+- Status: done bfaaacc — a pending Pause now parks before a gate-failure repair turn (state paused, before `verifying`), with no attempt recorded and no budget spent; resume reruns the checks. Not covered: a repair started by a *review* failure still runs (parking there would make resume repeat the review turn), and pendingPause is still not exposed by the API.
+- Seen in: run2026-10-07-4f2dd1cf, recovery89b51859 TARGET-COMPAT, installed5dc444b, 2026-10-11.
+- Repro: POST http://127.0.0.1:4173/api/jobs/2026-10-07-4f2dd1cf/pause while implementation active; response202 pausing:true at05:05UTC. Let implementation finish and proof-TARGET-COMPAT-REGRESSION fail. At05:26:34UTC a new repair-17 AI worker starts despite pending Pause.
+- Expected vs actual: Expected pending Pause parks before any new subscription-backed agent turn at a safe boundary, including repair. Actual stage repairing bypasses pause; quota fell from24% remaining at request to6% at05:29UTC.
+- Evidence: private app .factory/last-failure-17.txt and .factory/logs/repair-17.log under /Users/loudalo/Documents/photo-library-prototype/projects/medialibrary; dashboard API health repair-17 PID90729 start05:26:34.192Z. Preserved operator pause request and observations in host .aai/HANDOFF.md.
+- Suspect: src/factory.mjs:37 PAUSE_POINTS excludes repairing; :885 stage guard; :1055 repair stage. Same installed logic in dev source at observation.
+- Suggested fix: test pendingPause+failedGate causes parked resumable cursor before repair agent invocation, without budget increment/renewal or losing failure. Honor pause at every new model-turn boundary, including resumed repair. Do not stop an active turn for this fix. Consider persisted observable pendingPause; current API hides it. Test pause requested during deterministic checks as well. No live state/events edits.
