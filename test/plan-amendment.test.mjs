@@ -17,7 +17,7 @@ const BLOCKERS = ['SPEC.md §3 obligations are missing from the plan'];
 const planner = stage => /^recovery-plan-(?!review)/.test(stage);
 const reviewer = stage => /^recovery-plan-review-/.test(stage);
 
-async function setup(t, { malformed = false } = {}) {
+async function setup(t, { malformed = false, ready = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'solo-plan-amendment-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const store = new JobStore(root); await store.init();
@@ -26,7 +26,7 @@ async function setup(t, { malformed = false } = {}) {
   const job = await store.create({ brief: { workingName: 'Amendment fixture', mustHaves: ['Live saved searches', 'Edit people'], acceptanceScenarios: ['A new item enters its smart album'] }, transcript: [{ role: 'user', content: 'Recover the missing behavior' }, { role: 'user', content: 'Attached file: .factory/uploads/SPEC.md' }], provider: 'fixture', sdlc: 'single' });
   const fixture = createFixtureProvider(); let recovering = false; let deployments = 0;
   const stages = []; const requests = [];
-  const ctl = { block: true, modify: false, fail: false };
+  const ctl = { block: !ready, modify: false, fail: false };
   const opts = { store, maxRepairs: 1,
     commandRunner: async () => ({ code: 0, output: 'fixture tests pass' }),
     deployer: async () => { deployments++; return { status: 'live', url: 'http://127.0.0.1:9991' }; },
@@ -55,9 +55,13 @@ async function setup(t, { malformed = false } = {}) {
   };
   const factory = new SoloFactory(opts);
   const failed = await factory.start(job.id); assert.equal(failed.state, 'failed');
+  // `ready`: the reviewer approves, so `blocked` is an idle ready plan awaiting approval instead.
   const blocked = await factory.planRecovery(failed.id);
-  assert.equal(blocked.recoveryPhase.status, 'plan_failed'); assert.equal(blocked.error.code, 'plan_blocked');
-  assert.equal(blocked.recoveryPhase.blocked, true);
+  if (ready) { assert.equal(blocked.recoveryPhase.status, 'ready', blocked.error?.message); ctl.block = true; }
+  else {
+    assert.equal(blocked.recoveryPhase.status, 'plan_failed'); assert.equal(blocked.error.code, 'plan_blocked');
+    assert.equal(blocked.recoveryPhase.blocked, true);
+  }
   const state = () => readFile(path.join(store.jobDir(job.id), 'state.json'), 'utf8');
   return { root, store, factory, opts, ctl, blocked, stages, requests, state, deployments: () => deployments };
 }
@@ -337,13 +341,96 @@ test('HTTP: packet download, a 540KB bounded submission, refusals that change no
   assert.equal(ready.nextAction.action, 'approve-plan');
   assert.equal((await fetch(`${base}/api/jobs/${job.id}/recovery-plan-packet`)).status, 409);
   assert.equal((await post('recovery-start', { planDigest: 'wrong' })).status, 409);
+  // A ready plan takes a replacement over HTTP; once submitted, the ready plan's digest no longer starts repairs.
+  assert.deepEqual(ready.nextAction.alternatives.map(item => item.action), ['amend-plan']);
+  block = true; const before = stages.length;
+  const replacing = await post('recovery-review', { phaseId: ready.recoveryPhase.id, plan: candidate({ ...ready, recoveryPhase: { ...ready.recoveryPhase, request: packet.request } }, 2) });
+  assert.equal(replacing.status, 202, await replacing.clone().text());
+  const replaced = await settle();
+  assert.deepEqual(stages.slice(before), [`recovery-plan-review-${replaced.recoveryPhase.id}-1`]);
+  assert.equal(replaced.nextAction.action, 'amend-plan'); assert.equal(replaced.recoveryPhaseHistory.at(-1).planDigest, ready.recoveryPhase.planDigest);
+  assert.equal((await post('recovery-start', { planDigest: ready.recoveryPhase.planDigest })).status, 409);
   // The dashboard drives the same allowed action with a file input and a retained selection.
   const dashboard = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.match(dashboard, /next\?\.action === "amend-plan"/); assert.match(dashboard, /recovery-plan-packet/);
   assert.match(dashboard, /type = "file"/); assert.match(dashboard, /recovery-review/); assert.match(dashboard, /state\.amendment/);
 });
 
-// A second submission against a phase that already moved on is stale, not a second review.
+// Resubmitting the plan that just passed review is a duplicate, not a second review.
 async function unchanged2(post, ready, plan) {
   const response = await post('recovery-review', { phaseId: ready.recoveryPhase.id, plan }); assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, 'amendment_duplicate');
 }
+
+// An idle ready plan: the owner may replace it with a corrected plan (for example consolidated proofs).
+// The ready plan and its approval evidence stay in history but can no longer be approved.
+test('a ready plan accepts an owner replacement for one review; the prior approval digest stops working', async t => {
+  const env = await setup(t, { ready: true });
+  const prior = env.blocked.recoveryPhase; const jobDir = env.store.jobDir(env.blocked.id);
+  const next = continuationAction(env.blocked);
+  assert.equal(next.action, 'approve-plan', 'approval stays the primary action');
+  assert.deepEqual(next.alternatives.map(item => [item.action, item.label, item.endpoint]), [['amend-plan', 'Submit corrected plan for review', `/api/jobs/${env.blocked.id}/recovery-review`]]);
+  const priorFile = await readFile(path.join(env.root, prior.planFile), 'utf8');
+  const priorCandidate = await readFile(path.join(jobDir, `recovery-${prior.id}-approved-candidate.json`), 'utf8');
+  const turns = env.stages.length; env.ctl.block = false;
+  const replaced = await submit(env, candidate(env.blocked));
+  const ran = env.stages.slice(turns);
+  assert.equal(replaced.recoveryPhase.status, 'ready', replaced.error?.message);
+  assert.deepEqual(ran, [`recovery-plan-review-${replaced.recoveryPhase.id}-1`], 'one reviewer, no planner or correction');
+  assert.notEqual(replaced.recoveryPhase.planDigest, prior.planDigest);
+  assert.equal(replaced.recoveryPhase.corrections, prior.corrections);
+  assert.deepEqual(env.requests.at(-1).priorBlockers, []);
+  // The prior plan, its review binding and its artifacts are preserved as evidence.
+  const archived = replaced.recoveryPhaseHistory.at(-1);
+  assert.deepEqual([archived.id, archived.status, archived.planDigest, archived.planReview], [prior.id, 'ready', prior.planDigest, prior.planReview]);
+  assert.equal(await readFile(path.join(env.root, prior.planFile), 'utf8'), priorFile);
+  assert.equal(await readFile(path.join(jobDir, `recovery-${prior.id}-approved-candidate.json`), 'utf8'), priorCandidate);
+  assert.equal(await readFile(path.join(jobDir, `recovery-${replaced.recoveryPhase.id}-prior-plan.json`), 'utf8'), priorFile);
+  // The old digest is refused without touching the saved run; the new plan still needs its own approval.
+  const raw = await env.state();
+  await assert.rejects(env.factory.startRecovery(replaced.id, prior.planDigest), /does not match/);
+  assert.equal(await env.state(), raw);
+  assert.equal(continuationAction(replaced).action, 'approve-plan');
+  assert.equal(env.deployments(), 0);
+  const done = await env.factory.startRecovery(replaced.id, replaced.recoveryPhase.planDigest);
+  assert.equal(done.state, 'completed', done.error?.message);
+  assert.equal(done.recoveryPhaseHistory.at(-1).id, prior.id, 'history survives execution');
+});
+
+test('a ready plan refuses duplicate, stale and invalid replacements without changing saved state', async t => {
+  const env = await setup(t, { ready: true });
+  const readyPlan = JSON.parse(await readFile(path.join(env.root, env.blocked.recoveryPhase.planFile), 'utf8'));
+  await refused(env, submit(env, readyPlan), 'amendment_duplicate', 409);
+  await refused(env, submit(env, reverse(readyPlan)), 'amendment_duplicate', 409);
+  await refused(env, env.factory.amendRecovery(env.blocked.id, { phaseId: 'old-phase', plan: candidate(env.blocked) }), 'amendment_stale', 409);
+  await refused(env, submit(env, { version: 2, slices: 'nope' }), 'amendment_invalid', 400);
+  await writeFile(path.join(env.root, '.factory/uploads/SPEC.md'), 'changed spec');
+  await refused(env, submit(env, candidate(env.blocked)), 'amendment_inputs_changed', 409);
+  await writeFile(path.join(env.root, '.factory/uploads/SPEC.md'), '§3 Group by capture day.\n');
+  env.factory.active = { jobId: 'other' };
+  await refused(env, submit(env, candidate(env.blocked)), 'factory_busy');
+  env.factory.active = null;
+  const { assertPlanAmendable } = await import('../src/factory.mjs');
+  await assert.rejects(assertPlanAmendable(env.store, env.blocked, { phaseId: env.blocked.recoveryPhase.id, plan: candidate(env.blocked) }, { maxRepairs: 1, busy: true }), error => error.code === 'amendment_not_allowed');
+  assert.equal(continuationAction(await env.store.read(env.blocked.id)).action, 'approve-plan', 'the ready plan is still approvable');
+});
+
+test('a blocked or interrupted replacement of a ready plan continues without a planner turn or budget renewal', async t => {
+  const env = await setup(t, { ready: true });
+  const prior = env.blocked.recoveryPhase; const turns = env.stages.length;
+  const blocked = await submit(env, candidate(env.blocked, 1));
+  assert.deepEqual(env.stages.slice(turns), [`recovery-plan-review-${blocked.recoveryPhase.id}-1`]);
+  assert.equal(blocked.error.code, 'plan_blocked'); assert.equal(blocked.recoveryPhase.corrections, prior.corrections);
+  assert.equal(continuationAction(blocked).action, 'amend-plan');
+  await assert.rejects(validateRecoveryApproval(env.factory, blocked, prior.planDigest), /match/);
+  await refused(env, env.factory.planRecovery(blocked.id), 'plan_inputs_unchanged');
+  // An interrupted review of the next candidate resumes as that review only.
+  env.ctl.block = false; env.ctl.fail = true;
+  const parked = await submit(env, candidate(env.blocked, 2), blocked);
+  assert.equal(continuationAction(parked).action, 'retry-plan');
+  const ready = await env.factory.planRecovery(parked.id);
+  assert.equal(ready.recoveryPhase.status, 'ready', ready.error?.message);
+  assert.equal(env.stages.slice(turns).filter(stage => !reviewer(stage)).length, 0, 'no planner or correction turn ran');
+  assert.equal(ready.recoveryPhase.corrections, prior.corrections);
+  assert.deepEqual(ready.recoveryPhaseHistory.slice(-2).map(phase => phase.id), [prior.id, blocked.recoveryPhase.id]);
+});

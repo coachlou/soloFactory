@@ -1333,7 +1333,7 @@ export const MAX_AMENDED_PLAN_BYTES = 4_000_000;
 export async function assertPlanAmendable(store, job, { phaseId, plan } = {}, { maxRepairs = 2, busy = false } = {}) {
   const refuse = (code, message, status) => new FactoryError(code, message, { status });
   const next = continuationAction(job, { maxRepairs, busy });
-  if (next.action !== "amend-plan") throw refuse("amendment_not_allowed", `A corrected plan cannot be reviewed now. ${next.reason}`, 409);
+  if (![next, ...(next.alternatives ?? [])].some((item) => item.action === "amend-plan")) throw refuse("amendment_not_allowed", `A corrected plan cannot be reviewed now. ${next.reason}`, 409);
   const prior = job.recoveryPhase;
   if (phaseId !== prior.id) throw refuse("amendment_stale", "The plan was prepared for a different recovery phase than the one now waiting. Download the current help packet and correct that plan.", 409);
   if (!plan || typeof plan !== "object" || Array.isArray(plan) || plan.version !== 2) throw refuse("amendment_invalid", "The corrected plan must be a version 2 repair plan (a JSON object).", 400);
@@ -1361,7 +1361,8 @@ export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
     alternatives: [next("revise-inputs", "Revise inputs and prepare a new plan", "recovery-plan", "Use this only if the specs or prototype inputs themselves are wrong or ambiguous; it prepares a new plan with a fresh correction budget.")] };
   if (job.recoveryPhase?.amendment && (phase === "planning" || phase === "plan_failed")) return next("retry-plan", "Resume plan review", "recovery-plan", "The review of the submitted corrected plan stopped before it finished. Resume plan review: it only reviews that plan again; it does not start the planner or renew plan corrections.");
   if (phase === "planning" || phase === "plan_failed") return next("retry-plan", "Retry repair-plan preparation", "recovery-plan", `${phase === "planning" ? "Repair-plan preparation stopped before it finished" : "Repair-plan preparation failed"}, so no plan is approved. Retry repair-plan preparation; Resume cannot continue an unapproved plan.`);
-  if (phase === "ready") return next("approve-plan", "Approve and continue repairs", "recovery-start", "Review and approve the recovery plan before execution; Resume does not start an unapproved plan.");
+  if (phase === "ready") return { ...next("approve-plan", "Approve and continue repairs", "recovery-start", "Review and approve the recovery plan before execution; Resume does not start an unapproved plan."),
+    alternatives: [next("amend-plan", "Submit corrected plan for review", "recovery-review", "Replaces the ready plan with your corrected plan. The ready plan stays in history as evidence but can no longer be approved. The replacement gets one independent review, no automatic corrections, and still needs your approval.")] };
   if (repairsExhausted(job, maxRepairs)) return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The repair budget is exhausted. Prepare a repair plan and approve it; Resume does not renew the budget or rerun the same review.");
   if (job.error?.details?.loop) return job.error.code === "review_rejected" || pendingProofFailure(job)
     ? next("prepare-plan", "Prepare repair plan", "recovery-plan", "The same failure repeated on unchanged code, so repeating repairs cannot help. Prepare a repair plan and approve it; Resume does not renew the budget.")

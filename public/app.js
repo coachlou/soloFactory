@@ -582,11 +582,13 @@ const failedProof = (job) => job.error?.code === "quality_gate_failed" && pendin
 const MAX_AMENDED_PLAN_BYTES = 4_000_000;
 
 // Exhausted plan corrections: explain, offer the help packet, and take a corrected plan from a file.
+// A ready plan offers the same upload as an alternative to approval (no packet: nothing is blocked).
 // The selection lives in state so polling re-renders and server errors never erase it.
 function renderAmendment(features, next, phase, action) {
+  const blocked = next.action === "amend-plan";
   const pending = state.amendment?.jobId === state.job.id && state.amendment.phaseId === phase.id ? state.amendment : null;
   if (!pending) state.amendment = null;
-  const note = document.createElement("p"); note.textContent = `${next.reason} ${phase.corrections ?? 0} automatic correction${phase.corrections === 1 ? "" : "s"} used; no repairs have started.`;
+  const note = document.createElement("p"); note.textContent = blocked ? `${next.reason} ${phase.corrections ?? 0} automatic correction${phase.corrections === 1 ? "" : "s"} used; no repairs have started.` : next.alternatives.find((item) => item.action === "amend-plan").reason;
   const packet = document.createElement("a"); packet.href = `/api/jobs/${state.job.id}/recovery-plan-packet`; packet.download = ""; packet.className = "button"; packet.textContent = "Download plan help packet";
   const details = document.createElement("details"); details.open = Boolean(pending); details.addEventListener("toggle", () => { state.amendmentOpen = details.open; });
   if (state.amendmentOpen) details.open = true;
@@ -617,8 +619,8 @@ function renderAmendment(features, next, phase, action) {
   });
   show();
   details.append(summary, label, file, status, submit);
-  features.append(note, packet, details);
-  const alternative = next.alternatives?.[0];
+  features.append(note, ...(blocked ? [packet] : []), details);
+  const alternative = blocked && next.alternatives?.[0];
   if (alternative) { const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = alternative.reason; features.append(hint); action(alternative.label, "recovery-plan"); }
 }
 
@@ -646,6 +648,7 @@ function renderRecovery() {
   if (next?.action === "amend-plan" && phase) renderAmendment(features, next, phase, action);
   else if (next?.action === "retry-plan" || next?.action === "revise-inputs") action(next.label, "recovery-plan");
   else if (next?.action === "prepare-plan" || (next?.action !== "none" && PARKED.includes(state.job.state) && !state.job.dismissed && (!phase || ["ready", "running", "built"].includes(phase.status)) && (state.job.reviewRequest || state.job.featureCursor?.reviewRequest || state.job.error?.code === "inputs_changed" || failedProof(state.job)))) action("Prepare repair plan", "recovery-plan");
+  if (next?.action === "approve-plan" && phase && next.alternatives?.some((item) => item.action === "amend-plan")) renderAmendment(features, next, phase, action);
   // Owner-added specs join the run's inputs; the next plan, review or Resume sees them.
   if (next && next.action !== "none") {
     const label = document.createElement("label"); label.htmlFor = "input-file"; label.textContent = "Add a spec or prototype file";
