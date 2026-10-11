@@ -35,6 +35,17 @@ test('a requirement keeps its case table: each case has its own surface, action,
   assert.equal(item.cases[1].expect, '413 and nothing is stored');
 });
 
+test('a case may cite no check when its siblings cover the requirement, and every case problem is named at once', () => {
+  // Seen on the first real-provider plan: a package constraint case with refs [] spent a whole correction round.
+  const constraint = { id: 'UP-NODEPS', surface: 'unit', action: 'Read package.json', expect: 'no runtime dependencies', refs: [], sources: [at('§1 Upload')] };
+  const [item] = validateFeaturePlan(plan([requirement({ cases: [...cases(), constraint] })]), opts).slices[0].acceptance;
+  assert.deepEqual(item.cases.at(-1).refs, []);
+  assert.throws(() => validateFeaturePlan(plan([requirement({ cases: cases().map((entry, i) => i ? { ...entry, refs: ['SC-9'], sources: [at('§9 Elsewhere')] } : entry) })]), opts), (error) => {
+    for (const part of [/UP-API-BIG cites SC-9/, /UP-UI-BIG cites SC-9/, /UP-API-BIG cites SPEC\.md §9 Elsewhere/, /allowed: MH-1, SC-1/, /SPEC\.md §2 Limits/]) assert.match(error.message, part);
+    return true;
+  });
+});
+
 test('a plan without cases normalizes exactly as before, so existing plan digests do not change', () => {
   const { cases: _, ...plain } = requirement();
   const [item] = validateFeaturePlan(plan([plain]), opts).slices[0].acceptance;
@@ -44,8 +55,8 @@ test('a plan without cases normalizes exactly as before, so existing plan digest
 test('a case table cannot drop a check or source citation, cite one its requirement lacks, or reuse an id', () => {
   rejects([requirement({ cases: cases().slice(0, 1) })], /cites SC-1 but none of its cases does/);
   rejects([requirement({ cases: cases().map(entry => ({ ...entry, sources: [at('§1 Upload')] })) })], /cites SPEC\.md §2 Limits but none of its cases does/);
-  rejects([requirement({ refs: ['MH-1'], cases: cases().slice(0, 1).concat({ ...cases()[1], refs: ['SC-1'] }) })], /must cite checks from its requirement's refs/);
-  rejects([requirement({ cases: cases().map(entry => ({ ...entry, sources: [at('§9 Elsewhere')] })) })], /must cite sources/);
+  rejects([requirement({ refs: ['MH-1'], cases: cases().slice(0, 1).concat({ ...cases()[1], refs: ['SC-1'] }) })], /UP-API-BIG cites SC-1, which UPLOAD-LIMITS does not/);
+  rejects([requirement({ cases: cases().map(entry => ({ ...entry, sources: [at('§9 Elsewhere')] })) })], /cites SPEC\.md §9 Elsewhere, which UPLOAD-LIMITS does not/);
   rejects([requirement({ cases: cases().map((entry, i) => i ? entry : { ...entry, surface: 'magic' }) })], /needs a surface/);
   rejects([requirement({ cases: cases().map((entry, i) => i ? entry : { ...entry, id: 'UPLOAD-LIMITS' }) })], /duplicate case id/);
   rejects([requirement({ cases: cases().map(entry => ({ ...entry, supersedes: ['OLD-1'] })) })], /repeated supersedes/);

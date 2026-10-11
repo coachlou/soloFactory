@@ -240,6 +240,7 @@ function validateCases(item, { registry, sources, ids, claimed }) {
   if (!Array.isArray(item.cases) || !item.cases.length) throw new Error(`${where} has a malformed cases table; omit it or list at least one case.`);
   const refs = new Set();
   const cited = new Set();
+  const problems = [];
   const cases = item.cases.map((entry) => {
     if (!entry || typeof entry.id !== "string" || !SLICE_ID_RE.test(entry.id) || ids.has(entry.id)) throw new Error(`${where} has a missing or duplicate case id.`);
     ids.add(entry.id);
@@ -247,13 +248,21 @@ function validateCases(item, { registry, sources, ids, claimed }) {
     if (!CASE_SURFACES.includes(entry.surface)) throw new Error(`${at} needs a surface (one of ${CASE_SURFACES.join(", ")}).`);
     if (!text(entry.action, 3) || !text(entry.expect, 3)) throw new Error(`${at} needs the action it performs and its expected result.`);
     for (const field of ["field", "boundary"]) if (entry[field] !== undefined && !text(entry[field], 1)) throw new Error(`${at} has an empty ${field}.`);
-    if (!Array.isArray(entry.refs) || !entry.refs.length || entry.refs.some((ref) => !item.refs.includes(ref))) throw new Error(`${at} must cite checks from its requirement's refs.`);
-    entry.refs.forEach((ref) => refs.add(ref));
+    // A case may cite no check (a constraint case); the cases together must still cover every ref below.
+    if (!Array.isArray(entry.refs)) problems.push(`${at} needs a refs array (it may be empty).`);
+    else {
+      const foreign = entry.refs.filter((ref) => !item.refs.includes(ref));
+      if (foreign.length) problems.push(`${at} cites ${foreign.join(", ")}, which ${item.id} does not (allowed: ${item.refs.join(", ") || "none"}).`);
+      entry.refs.forEach((ref) => refs.add(ref));
+    }
     if (sources) {
-      if (!Array.isArray(entry.sources) || !entry.sources.length || entry.sources.some((ref) => !text(ref?.locator, 2) || !item.sources.some((own) => sourceKey(own) === sourceKey(ref)))) {
-        throw new Error(`${at} must cite sources [{path, locator}] listed on its requirement.`);
+      const own = item.sources.map((ref) => `${ref.path} ${ref.locator}`).join("; ");
+      if (!Array.isArray(entry.sources) || !entry.sources.length) problems.push(`${at} must cite sources [{path, locator}] from ${item.id} (allowed: ${own}).`);
+      else {
+        const foreign = entry.sources.filter((ref) => !text(ref?.locator, 2) || !item.sources.some((mine) => sourceKey(mine) === sourceKey(ref)));
+        if (foreign.length) problems.push(`${at} cites ${foreign.map((ref) => `${ref?.path} ${ref?.locator}`).join("; ")}, which ${item.id} does not; cite one of its sources or add it to ${item.id}'s sources (allowed: ${own}).`);
+        entry.sources.forEach((ref) => cited.add(sourceKey(ref)));
       }
-      entry.sources.forEach((ref) => cited.add(sourceKey(ref)));
     }
     const supersedes = entry.supersedes ?? [];
     if (!Array.isArray(supersedes) || supersedes.some((id) => typeof id !== "string" || !SLICE_ID_RE.test(id) || claimed.has(id))) throw new Error(`${at} has a malformed or repeated supersedes id.`);
@@ -262,9 +271,11 @@ function validateCases(item, { registry, sources, ids, claimed }) {
       expect: entry.expect.trim(), refs: [...entry.refs], ...(sources ? { sources: entry.sources.map(normalSource) } : {}), ...(entry.supersedes ? { supersedes: [...supersedes] } : {}) };
   });
   const uncovered = item.refs.filter((ref) => !refs.has(ref));
-  if (uncovered.length) throw new Error(`${where} cites ${uncovered.join(", ")} but none of its cases does.`);
+  if (uncovered.length) problems.push(`${where} cites ${uncovered.join(", ")} but none of its cases does.`);
   const uncited = sources ? item.sources.filter((ref) => !cited.has(sourceKey(ref))) : [];
-  if (uncited.length) throw new Error(`${where} cites ${uncited.map((ref) => `${ref.path} ${ref.locator}`).join("; ")} but none of its cases does.`);
+  if (uncited.length) problems.push(`${where} cites ${uncited.map((ref) => `${ref.path} ${ref.locator}`).join("; ")} but none of its cases does.`);
+  // Report every citation problem together so one planner correction can fix them all.
+  if (problems.length) throw new Error(problems.join(" "));
   return cases;
 }
 
