@@ -140,6 +140,7 @@
     <tr><td><code>SOLOFACTORY_AGENT_BACKOFF_SECONDS</code></td><td>Wait before the one automatic Codex resume. Default 15.</td></tr>
     <tr><td><code>SOLOFACTORY_PROGRESS_MINUTES</code></td><td>Show "Progress needs checking" when a busy worker lands no gate, commit or approved plan for this long. A warning only; nothing is stopped. Default 20, 0–240, 0 turns it off.</td></tr>
     <tr><td><code>SOLOFACTORY_LOOP_THRESHOLD</code></td><td>Stop repairing after this many identical failures on unchanged code. Default 3, 2–10.</td></tr>
+    <tr><td><code>SOLOFACTORY_GATE_MINUTES</code></td><td>Hard limit for each test or proof gate; install always gets at least 10. A gate that runs out parks the run without a repair turn. Default 5, 1–60.</td></tr>
     <tr><td><code>SOLOFACTORY_DEMO=1</code></td><td>Run with the deterministic fixture provider instead of a real agent.</td></tr>
     <tr><td><code>SOLOFACTORY_ISSUES_URL</code></td><td>Where feedback reports are filed.</td></tr>
   </table>

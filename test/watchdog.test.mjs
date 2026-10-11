@@ -22,9 +22,10 @@ async function newJob(prefix) {
 }
 
 test("settings are validated with documented defaults and ranges", () => {
-  assert.deepEqual(watchConfig({}), { progressMs: 20 * 60_000, loopThreshold: 3, tickMs: 15_000 });
+  assert.deepEqual(watchConfig({}), { progressMs: 20 * 60_000, loopThreshold: 3, gateMs: 5 * 60_000, tickMs: 15_000 });
   assert.equal(watchConfig({ SOLOFACTORY_PROGRESS_MINUTES: "0" }).progressMs, 0);
-  for (const env of [{ SOLOFACTORY_PROGRESS_MINUTES: "241" }, { SOLOFACTORY_PROGRESS_MINUTES: "-1" }, { SOLOFACTORY_LOOP_THRESHOLD: "1" }, { SOLOFACTORY_LOOP_THRESHOLD: "abc" }]) {
+  assert.equal(watchConfig({ SOLOFACTORY_GATE_MINUTES: "20" }).gateMs, 20 * 60_000);
+  for (const env of [{ SOLOFACTORY_PROGRESS_MINUTES: "241" }, { SOLOFACTORY_PROGRESS_MINUTES: "-1" }, { SOLOFACTORY_LOOP_THRESHOLD: "1" }, { SOLOFACTORY_LOOP_THRESHOLD: "abc" }, { SOLOFACTORY_GATE_MINUTES: "0" }, { SOLOFACTORY_GATE_MINUTES: "61" }]) {
     assert.throws(() => watchConfig(env), /must be a whole number/);
   }
 });

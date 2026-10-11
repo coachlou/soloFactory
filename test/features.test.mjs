@@ -8,6 +8,7 @@ import { JobStore } from "../src/store.mjs";
 import { SoloFactory, continuationAction } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
 import { digest } from "../src/feature-recovery.mjs";
+import { watchConfig } from "../src/watchdog.mjs";
 
 const brief = { workingName: "Pocket Pulse", acceptanceScenarios: ["A user records a score."] };
 const transcript = [{ role: "user", content: "A daily tracker with clear acceptance behavior." }];
@@ -217,6 +218,32 @@ test("a pause requested during failing checks parks before the repair turn, and 
   assert.equal(resumed.state, "completed", resumed.error?.message);
   assert.equal(count(await started(run.store, jobId), "repair-"), 0);
   assert.equal(resumed.attempt, 0);
+});
+
+test("a gate that hits its time limit parks without a repair turn, and resume reruns it under the configured limit", async () => {
+  // Seen live (Codex inbox): an aggregate proof hit the 5-minute cap and a repair turn spent an attempt on no assertion failure.
+  const limits = [];
+  let timedOut = false;
+  const commandRunner = async ({ timeoutMs, logPath }) => {
+    if (path.basename(logPath).startsWith("install-")) return { code: 0, output: "installed" };
+    limits.push(timeoutMs);
+    if (!timedOut) { timedOut = true; return { code: null, timedOut: true, timeoutReason: "hard", output: "▶ suite\nInterrupted while running" }; }
+    return { code: 0, output: "passed" };
+  };
+  const run = await plannedRun({ commandRunner });
+  const watch = { ...watchConfig({}), gateMs: 1_000 };
+  const parked = await run.make({ watch }).start(run.job.id);
+  assert.equal(parked.state, "failed");
+  assert.equal(parked.error.code, "gate_timeout");
+  assert.match(parked.error.message, /SOLOFACTORY_GATE_MINUTES/);
+  assert.equal(parked.attempt, 0, "no repair budget spent");
+  assert.equal(count(await started(run.store, run.job.id), "repair-"), 0, "no repair turn started");
+  assert.equal(limits[0], 1_000);
+  assert.equal(continuationAction(parked).action, "resume");
+
+  const resumed = await run.make({ watch }).resume(run.job.id);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+  assert.equal(count(await started(run.store, run.job.id), "repair-"), 0);
 });
 
 test("a pause after checks resumes at review: no rebuild, no duplicate completion", async () => {

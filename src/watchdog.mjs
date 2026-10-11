@@ -7,7 +7,7 @@ import { performance } from "node:perf_hooks";
 const PROGRESS_EVENTS = new Set(["gate.passed", "git.committed", "plan.approved", "slice.completed", "recovery.slice.completed", "job.completed"]);
 const NOTABLE = new Set(["Progress needs checking", "Recovering"]);
 
-// Only the two new settings live here; idle/hard/backoff stay with the providers that enforce them.
+// Only these settings live here; idle/hard/backoff stay with the providers that enforce them.
 export function watchConfig(env = process.env) {
   const read = (name, fallback, min, max) => {
     const raw = env[name];
@@ -19,6 +19,8 @@ export function watchConfig(env = process.env) {
     // 0 turns the progress warning off; idle and hard caps still bound every worker.
     progressMs: read("SOLOFACTORY_PROGRESS_MINUTES", 20, 0, 240) * 60_000,
     loopThreshold: read("SOLOFACTORY_LOOP_THRESHOLD", 3, 2, 10),
+    // Hard limit for each test/proof gate (install keeps at least 10). Raised for slow aggregate proofs; still bounded.
+    gateMs: read("SOLOFACTORY_GATE_MINUTES", 5, 1, 60) * 60_000,
     tickMs: 15_000,
   };
 }

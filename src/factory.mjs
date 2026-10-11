@@ -1042,6 +1042,7 @@ export class SoloFactory {
         await this.commit(current, `factory: ${passed} passed gates`);
         return current;
       }
+      if (failure.code === "gate_timeout") throw failure;
       // A pending Pause parks before the repair turn, not after it. Nothing is recorded or spent:
       // resume reruns these checks (no budget) and repairs from a fresh failure.
       if (this.active?.pauseRequested) {
@@ -1117,7 +1118,8 @@ export class SoloFactory {
       job.activeCommand = { gate, command, startedAt: new Date().toISOString() };
       await this.store.writeState(job);
       await this.emit(job.id, { type: "gate.started", state: job.state, gate, message: `${gate}: ${command.join(" ")}` });
-      const timeoutMs = gate === "install" ? 10 * 60_000 : 5 * 60_000;
+      const gateMs = this.watch.gateMs ?? 5 * 60_000;
+      const timeoutMs = gate === "install" ? Math.max(10 * 60_000, gateMs) : gateMs;
       // ponytail: node:test only; a proof that sets its own --test-reporter fails loudly on the mismatch.
       const events = cases.length ? path.join(this.store.jobDir(job.id), `cases-${gate}-${job.attempt ?? 0}.jsonl`) : null;
       if (events) await rm(events, { force: true });
@@ -1150,6 +1152,13 @@ export class SoloFactory {
         if (failed.length === cases.length && failed.every(([, value]) => value.status === "missing")) caseFailure = `${gate} recorded no test events for its cases; cased proofs must run under node:test without their own --test-reporter.`;
         else if (failed.length) caseFailure = `${gate} cases did not pass: ${failed.map(([id, value]) => `${id} ${value.status}`).join(", ")}.`;
         result = { ...result, caseResults: results };
+      }
+      if (result.timedOut) {
+        // A killed command proved nothing about the app, so it is not handed to a repair turn.
+        await this.emit(job.id, { type: "gate.failed", state: job.state, gate, durationMs, message: `${gate} timed out` });
+        return new FactoryError("gate_timeout", `${gate} did not finish within its ${timeoutMs / 60_000}-minute limit, so no repair turn ran: a timeout is not a failed check. If the checks are only slow, restart SoloFactory with SOLOFACTORY_GATE_MINUTES set higher (at most 60), then Resume. If they hang, the app needs fixing.`, {
+          gate, command, durationMs, proofKeys, timeoutMs, timeoutReason: result.timeoutReason, output: result.output,
+        });
       }
       if (result.code !== 0 || caseFailure) {
         await this.emit(job.id, { type: "gate.failed", state: job.state, gate, durationMs, message: `${gate} failed` });

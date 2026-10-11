@@ -162,6 +162,10 @@ file never leaves your machine; `GET /api/errors?limit=50` returns the latest en
   `SOLOFACTORY_LOOP_THRESHOLD` times (default 3, 2–10) on unchanged code, the factory stops
   repairing and says so instead of spending the rest of the repair budget. Repairs that do
   change the code are still bounded by the normal budget.
+- A test or proof gate that runs past `SOLOFACTORY_GATE_MINUTES` (default 5, 1–60; install
+  always gets at least 10) is stopped and the run parks with `gate_timeout`. No repair turn
+  runs and no attempt is spent, because a killed command proved nothing about the app. Raise
+  the limit and Resume if the checks are only slow.
 - If the server restarts while a worker it launched is still running, the run parks with
   **Stop worker** and its pid; Resume appears once that process has exited. A worker that
   started before this version recorded no pid, so its liveness cannot be checked.

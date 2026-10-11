@@ -89,7 +89,7 @@ only changes what a new plan may contain and how its gates are judged.
   gate fails loudly rather than passing.
 - **Events are reported by the app's process**, so a hostile app could forge them. This
   removes trust in the app's completeness logic, not in its honesty.
-- **Five-minute gate timeout is unchanged**; a large case table shares one window.
+- **A large case table shares one gate window** (`SOLOFACTORY_GATE_MINUTES`, default 5, at most 60). A timeout parks the run as `gate_timeout` without a repair turn.
 
 ## Tests
 

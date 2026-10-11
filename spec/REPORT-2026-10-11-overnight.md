@@ -72,6 +72,16 @@ route through `verifyWithRepairs`). Not covered: a repair triggered by a feature
 failure still runs (parking there would make resume repeat the review turn). Pending pause is
 still not visible in the API.
 
+## Gate timeouts (Codex inbox)
+
+A gate killed at its time limit used to be treated as a failed check, so a repair turn spent an
+attempt on no assertion failure (live: MODEL-ROOT aggregate proof, repair-19). Now a timed-out
+gate returns `gate_timeout`: the run parks, no repair runs, no attempt is spent, and the message
+names `SOLOFACTORY_GATE_MINUTES` (default 5, 1–60; install keeps at least 10). Resume reruns the
+gates. Ceiling: the limit is per server, not per proof, and needs a restart to change. A per-proof
+`timeoutMinutes` in the plan is the upgrade if one global limit proves too blunt. A hanging app
+also parks rather than being repaired; the owner decides.
+
 ## Other
 
 - `.claude/launch.json` has an uncommitted `smoke-watchdog-plan4` config (MAX_REPAIRS=4) used for
