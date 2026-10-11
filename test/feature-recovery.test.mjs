@@ -445,6 +445,25 @@ test('a pre-verified repair feature that its reviewer blocks goes to its builder
   assert.equal(result.attempt, ready.attempt, 'no repair turn was spent');
 });
 
+test('an approved batch parks after its features with cursor and budget kept; resume can approve another batch', async t => {
+  const env = await setup(t);
+  const ready = await env.factory.planRecovery(env.failed.id);
+  await assert.rejects(env.factory.startRecovery(ready.id, ready.recoveryPhase.planDigest, { features: 0 }), /positive whole number/);
+  assert.equal((await env.store.read(ready.id)).recoveryPhase.status, 'ready', 'a bad batch size changes nothing');
+  const parked = await env.factory.startRecovery(ready.id, ready.recoveryPhase.planDigest, { features: 1 });
+  assert.equal(parked.state, 'paused', parked.error?.message);
+  assert.deepEqual(parked.recoveryPhase.done, ['RECOVERY-1']); assert.equal(parked.recoveryPhase.status, 'running');
+  assert.equal(parked.recoveryPhase.batchEnd, null);
+  assert.equal(builds(env).length, 1, 'the next feature did not start'); assert.equal(env.deployments(), 0);
+  assert.equal(continuationAction(parked, { maxRepairs: 1 }).action, 'resume');
+  const events = await env.store.events(parked.id, 1000);
+  assert.match(events.findLast(e => e.type === 'job.paused').message, /building/);
+  const result = await env.factory.resume(parked.id, { features: 5 });
+  assert.equal(result.state, 'completed', result.error?.message);
+  assert.equal(builds(env).length, 2, 'the verified feature was not rebuilt');
+  assert.equal(result.repairBudgetLimit <= parked.recoveryPhase.totalRepairLimit, true);
+});
+
 test('a pending proof from an earlier recovery phase still gates completion after a later repair plan', async t => {
   let planned = 0; const proof = { code: 1 };
   const env = await setup(t, async args => {

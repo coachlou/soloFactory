@@ -409,7 +409,12 @@ export async function amendmentPacket(store, job) {
   return packet;
 }
 
-export async function runFeatureRecovery(factory, id, signal, approval = null) {
+// An owner-approved batch: park after this many more features instead of running the whole plan.
+export function assertBatch(features) {
+  if (features != null && !(Number.isInteger(features) && features > 0)) throw Object.assign(new Error('A batch size must be a positive whole number of features.'), { code: 'bad_batch' });
+}
+
+export async function runFeatureRecovery(factory, id, signal, approval = null, { features } = {}) {
   let job = await factory.store.read(id);
   try {
     const phase = job.recoveryPhase;
@@ -417,7 +422,10 @@ export async function runFeatureRecovery(factory, id, signal, approval = null) {
       await validateRecoveryApproval(factory, job, approval);
       phase.status = 'running'; phase.approvedAt = new Date().toISOString();
       phase.totalRepairLimit = job.attempt + factory.maxRepairs * (phase.plan.slices.length + 1);
+      phase.batchEnd = null;
     } else if (phase?.status !== 'running') throw new Error('No approved recovery execution to resume.');
+    // A plain resume keeps an unfinished batch's end, so an interruption cannot widen it.
+    if (features) phase.batchEnd = phase.done.length + features;
     job.error = null; job.failedState = null; job.recovery = null;
     await factory.store.writeState(job);
     const appDir = factory.store.appDir();
@@ -454,6 +462,11 @@ export async function runFeatureRecovery(factory, id, signal, approval = null) {
       phase.cursor = null;
       await factory.store.writeState(job);
       await factory.emit(id, { type: 'recovery.slice.completed', state: job.state, message: `Verified recovery feature ${slice.id}`, slice: slice.id });
+      if (phase.batchEnd != null && phase.done.length >= phase.batchEnd && i + 1 < phase.plan.slices.length) {
+        phase.batchEnd = null;
+        await factory.store.writeState(job);
+        throw Object.assign(new Error('The approved batch of features is done.'), { code: 'paused', details: { before: 'building' } });
+      }
     }
     await assertCurrent();
     phase.status = 'built'; phase.current = null;

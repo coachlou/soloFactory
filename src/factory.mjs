@@ -13,7 +13,7 @@ export { pendingProofFailure };
 import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
 import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, watchConfig, workerAlive } from "./watchdog.mjs";
-import { amendRepairPlan, archiveReview, consolidationBase, assertPlanningCurrent, digest, exhaustedPreparations, planFeatureRecovery, planKey, resumeAmendedReview, reviewedPlanKeys, runFeatureRecovery, sourceBaseline, validateRecoveryApproval, validateRecoveryPlan } from "./feature-recovery.mjs";
+import { amendRepairPlan, archiveReview, assertBatch, consolidationBase, assertPlanningCurrent, digest, exhaustedPreparations, planFeatureRecovery, planKey, resumeAmendedReview, reviewedPlanKeys, runFeatureRecovery, sourceBaseline, validateRecoveryApproval, validateRecoveryPlan } from "./feature-recovery.mjs";
 
 // Which harness produced a run, so runs.jsonl can compare harness changes. Read once at load.
 const harnessRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -69,13 +69,15 @@ export class SoloFactory {
   }
 
   // Refusals happen here, before activate writes anything: a refused action leaves the saved run unchanged.
-  async resume(jobId) {
+  async resume(jobId, { features } = {}) {
+    assertBatch(features);
     const job = await this.continuable(jobId);
+    if (features && job.recoveryPhase?.status !== "running") throw new FactoryError("bad_batch", "A batch size applies only to an approved repair plan that is running.");
     const next = continuationAction(job, { maxRepairs: this.maxRepairs });
     if (next.action !== "resume") throw new FactoryError(["prepare-plan", "revise-inputs", "amend-plan"].includes(next.action) ? "repair_plan_required" : "recovery_approval_required", `${next.reason} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next });
     // Exhausted corrections: Resume buys one review only for a plan the reviewer has not already blocked.
     await assertPlanReviewable(this.store, job, this.maxRepairs);
-    return this.activate(jobId, (signal) => this.runResume(jobId, signal));
+    return this.activate(jobId, (signal) => this.runResume(jobId, signal, { features }));
   }
 
   async planRecovery(jobId, guidance = "") {
@@ -93,9 +95,10 @@ export class SoloFactory {
       async () => assertPlanAmendable(this.store, await this.store.read(jobId), submission, { maxRepairs: this.maxRepairs }));
   }
 
-  async startRecovery(jobId, planDigest) {
+  async startRecovery(jobId, planDigest, { features } = {}) {
+    assertBatch(features);
     await validateRecoveryApproval(this, await this.continuable(jobId), planDigest);
-    return this.activate(jobId, signal => runFeatureRecovery(this, jobId, signal, planDigest));
+    return this.activate(jobId, signal => runFeatureRecovery(this, jobId, signal, planDigest, { features }));
   }
 
   // The policy's "none" (owner-cancelled, dismissed, not parked) refuses every continuation.
@@ -247,7 +250,7 @@ export class SoloFactory {
     }
   }
 
-  async runResume(jobId, signal) {
+  async runResume(jobId, signal, { features } = {}) {
     let job = await this.store.read(jobId);
     if (!TERMINAL.has(job.state) || job.state === "completed") {
       throw new FactoryError("not_resumable", "Only a failed, cancelled, or interrupted run can be resumed.");
@@ -257,7 +260,7 @@ export class SoloFactory {
     if (next.action !== "resume") {
       throw new FactoryError(["prepare-plan", "revise-inputs", "amend-plan"].includes(next.action) ? "repair_plan_required" : "recovery_approval_required", `${next.reason} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next });
     }
-    if (job.recoveryPhase?.status === "running") return runFeatureRecovery(this, jobId, signal);
+    if (job.recoveryPhase?.status === "running") return runFeatureRecovery(this, jobId, signal, null, { features });
     if (job.recoveryPhase?.status === "built") {
       try {
         job.error = null; job.failedState = null; job.recovery = null;

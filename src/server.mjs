@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JobStore } from "./store.mjs";
 import { withReviewDiagnostics } from "./review.mjs";
-import { amendmentPacket, validateRecoveryApproval } from "./feature-recovery.mjs";
+import { amendmentPacket, assertBatch, validateRecoveryApproval } from "./feature-recovery.mjs";
 import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, assertPlanInputsRevised, assertPlanReviewable, buildRecovery, buildRecoveryPacket, continuationAction, SoloFactory, withContinuation } from "./factory.mjs";
 import { watchConfig } from "./watchdog.mjs";
 import {
@@ -112,8 +112,8 @@ export async function createSoloFactoryServer(options = {}) {
       runs.set(entry.projectId, run);
       const launch = entry.mode === "recovery-plan" ? factory.planRecovery(job.id, entry.guidance)
         : entry.mode === "recovery-review" ? factory.amendRecovery(job.id, entry.submission)
-        : entry.mode === "recovery-start" ? factory.startRecovery(job.id, entry.planDigest)
-        : entry.mode === "resume" ? factory.resume(job.id) : entry.mode === "restart" ? factory.restartFromSlice(job.id, entry.fromSlice) : factory.start(job.id);
+        : entry.mode === "recovery-start" ? factory.startRecovery(job.id, entry.planDigest, { features: entry.features })
+        : entry.mode === "resume" ? factory.resume(job.id, { features: entry.features }) : entry.mode === "restart" ? factory.restartFromSlice(job.id, entry.fromSlice) : factory.start(job.id);
       run.promise = launch
         .catch((error) => {
           console.error(`run ${job.id}: ${error.message}`);
@@ -442,8 +442,9 @@ export async function createSoloFactoryServer(options = {}) {
           catch (error) { return json(response, 409, { error: error.message, nextAction: error.details.nextAction, blockers: error.details.blockers }); }
         }
         if (body.guidance !== undefined && (typeof body.guidance !== "string" || body.guidance.length > 6000)) return json(response, 400, { error: "Recovery plan feedback must be text of at most 6000 characters." });
+        try { assertBatch(body.features); } catch (error) { return json(response, 400, { error: error.message }); }
         if (runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start")) return json(response, 409, { error: "The project acquired another writer; retry after it parks." });
-        await enqueue(projectId, id, `recovery-${action}`, { front: true, planDigest: body.planDigest, guidance: body.guidance ?? "" });
+        await enqueue(projectId, id, `recovery-${action}`, { front: true, planDigest: body.planDigest, guidance: body.guidance ?? "", features: body.features });
         return json(response, 202, { accepted: true, jobId: id });
       }
       const amendMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/recovery-review$/);
@@ -506,8 +507,11 @@ export async function createSoloFactoryServer(options = {}) {
         const next = continuationAction(job, { maxRepairs, busy: queue.some((entry) => entry.jobId === job.id) || runs.get(projectId)?.jobId === job.id });
         if (next.action !== "resume") return json(response, 409, { error: next.endpoint ? `${next.reason} Next: ${next.label} (POST ${next.endpoint}).` : next.reason, nextAction: next });
         try { await assertPlanReviewable(jobStore, job, maxRepairs); } catch (error) { return json(response, 409, { error: error.message, code: error.code, nextAction: next }); }
+        const { features } = await readJson(request);
+        try { assertBatch(features); } catch (error) { return json(response, 400, { error: error.message }); }
+        if (features && job.recoveryPhase?.status !== "running") return json(response, 400, { error: "A batch size applies only to an approved repair plan that is running." });
         // Front of the queue: resolving a parked run is what unblocks everything behind it.
-        await enqueue(projectId, job.id, "resume", { front: true });
+        await enqueue(projectId, job.id, "resume", { front: true, features });
         return json(response, 202, { job, resumed: true, queued: queue.some((entry) => entry.jobId === job.id) });
       }
       const relaunchMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/relaunch$/);

@@ -51,6 +51,9 @@ contract or declare the original run complete with requirements deferred.
    passes goes straight to its scoped review; a failure is handed to the
    builder. This check spends no repair budget. A reviewer's blockers on a
    pre-verified slice start its build turn, not a repair.
+   The owner may approve a batch (`features: N` on `recovery-start` or on
+   `resume`): the run parks as paused after N more slices, with its cursor,
+   budgets and evidence kept. A plain resume keeps an unfinished batch's end.
 6. Resume after interruption at the unfinished recovery slice. Do not replay
    verified slices. Reuse prior evidence only when it still applies to the
    current code and contract.
