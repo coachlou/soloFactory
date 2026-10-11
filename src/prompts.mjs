@@ -310,7 +310,8 @@ const FEATURE_PLAN_SCHEMA = `{ "version": 2, "jobId": <copied from the request>,
       "proof": { "command": ["npm" | "node" | "npx", "<args>"...], "expect": "<expected result>", "pending"?: "integration" },
       "cases"?: [{ "id": "UPPER-CASE-ID", "surface": "api" | "browser" | "cli" | "unit" | "integration", "action": "<what the test does>",
         "field"?: "<field or element>", "boundary"?: "<limit or edge>", "expect": "<result or failure condition>",
-        "refs": ["<subset of the requirement refs; [] for a constraint case>"], "sources": [{ "path": "<one of the requirement's source files>", "locator": "<section>" }] }] }]
+        "refs": ["<subset of the requirement refs; [] for a constraint case>"], "sources": [{ "path": "<one of the requirement's source files>", "locator": "<section>" }],
+        "supersedes"?: ["<obligation id of an EARLIER feature that this case retires once this feature exists>"] }] }]
   }] }`;
 
 // Shared by new-run and repair planning: consolidation is allowed only as explicit, separately proved cases.
@@ -332,7 +333,9 @@ export const CONTROLLER_FACTS = `How the controller runs proofs:
 - data/ is gitignored owner data; tests use a temporary directory, never data/. The app starts with
   only PORT and NODE_ENV=production set.
 - Every proof of every built feature reruns at final integration, so a proof must stay true as
-  later features land: assert the feature's behavior, not the absence of later routes or files.`;
+  later features land. An obligation that is only true until a later feature exists (a stage gate
+  asserting a route or file is still absent) must be retired by that later feature: one of its
+  cases lists the obligation id in supersedes, and integration then skips it.`;
 
 // One checklist for planner, reviewer and corrector: the planner self-checks against exactly what
 // the reviewer blocks on, so a review round is not spent discovering a rule.

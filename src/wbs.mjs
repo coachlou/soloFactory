@@ -213,8 +213,12 @@ export function recordPendingProofs(job, planDigest, slice) {
 export function featureProofs(job) {
   const phase = job.recoveryPhase;
   const [plan, done] = phase?.done?.length ? [phase.plan, phase.done] : [job.approvedPlan?.plan, job.sliceDone ?? []];
-  return (plan?.slices ?? []).filter((slice) => done.includes(slice.id)).flatMap((slice) => (slice.acceptance ?? [])
-    .filter((item) => item?.proof?.command && !item.proof.pending)
+  const built = (plan?.slices ?? []).filter((slice) => done.includes(slice.id));
+  // A stage obligation (e.g. "the seed script fails until the summary exists") is retired once a built
+  // feature's case supersedes it; demanding its test at integration would be unrepairable.
+  const retired = new Set(built.flatMap((slice) => (slice.acceptance ?? []).flatMap((item) => (item.cases ?? []).flatMap((entry) => entry.supersedes ?? []))));
+  return built.flatMap((slice) => (slice.acceptance ?? [])
+    .filter((item) => item?.proof?.command && !item.proof.pending && !retired.has(item.id))
     .map((item) => ({ id: `${slice.id}.${item.id}`, proof: item.proof, cases: item.cases })));
 }
 
@@ -418,6 +422,15 @@ export function validateFeaturePlan(raw, { jobId, contractDigest, checks, source
     }
     if (acceptance.every((item) => item.proof.pending)) throw new Error(`${where} needs at least one obligation provable when the feature is built; only part of its proof may wait for integration.`);
     return { id: slice.id, title: slice.title.trim(), objective: slice.objective.trim(), demo: slice.demo.trim(), dependsOn: [...dependsOn], closes: [...slice.closes], acceptance };
+  });
+
+  // A case may retire an obligation of an earlier feature (a stage gate that stops being true once this
+  // feature exists). Ids outside this plan are a replacement plan's base obligations, judged by assertConsolidation.
+  const featureOf = new Map(slices.flatMap((slice, index) => slice.acceptance.map((item) => [item.id, index])));
+  slices.forEach((slice, index) => {
+    for (const item of slice.acceptance) for (const entry of item.cases ?? []) for (const id of entry.supersedes ?? []) {
+      if (featureOf.has(id) && featureOf.get(id) >= index) throw new Error(`${id} is kept and also superseded by case ${entry.id}; a case may supersede only an earlier feature's obligation.`);
+    }
   });
 
   const missing = [...registry.keys()].filter((id) => !owner.has(id));

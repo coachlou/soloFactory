@@ -284,3 +284,15 @@ test("failure mappings distinguish integrated proofs from a feature gate using t
   job.error.details.proofKeys = [job.outstandingProofs[0].key];
   assert.equal(pendingProofFailure(job).obligation.id, "B", "a deduplicated integration gate preserves its target");
 });
+
+test("a case may supersede only an earlier feature's obligation; unknown ids are left to assertConsolidation", () => {
+  const stage = (id, supersedes) => ({ id, surface: "cli", action: "run the seed script", expect: "exit 0 with PASS", refs: [], ...(supersedes ? { supersedes } : {}) });
+  const plan = (supersedes) => featurePlan([
+    feature("STORE", [], [ob("STORE-1", "Scores persist across a restart", []), { ...ob("STORE-GATE", "Until the trend exists the seed script exits 1", []), cases: [stage("STORE-GATE-FAIL")] }]),
+    feature("RECORD", ["MH-1"], [ob("RECORD-1", "Owner records one score per day", ["MH-1"])], ["STORE"]),
+    feature("TREND", ["MH-2", "SC-1"], [ob("TREND-1", "Trend shows the seven-day average", ["MH-2", "SC-1"]), { ...ob("TREND-SEED", "The seed script passes once the trend exists", []), cases: [stage("TREND-SEED-PASS", supersedes)] }], ["RECORD"]),
+  ]);
+  assert.deepEqual(validateFeaturePlan(plan(["STORE-GATE"]), binding).slices[2].acceptance[1].cases[0].supersedes, ["STORE-GATE"]);
+  assert.throws(() => validateFeaturePlan(plan(["TREND-1"]), binding), /kept and also superseded by case TREND-SEED-PASS/);
+  assert.doesNotThrow(() => validateFeaturePlan(plan(["OLD-PLAN-ITEM"]), binding));
+});

@@ -195,6 +195,35 @@ test("final integration reruns every verified feature's proofs, so a later featu
   assert.equal(count(await started(store, job.id), "repair-"), 1, "no feature repairs were spent");
 });
 
+test("a later feature's case supersedes an earlier stage obligation, so final integration does not demand the retired case", async () => {
+  // Seen live (smoke a943a5da): the plan's F1 stage gate asserted the seed script FAILS until F3 exists; F3's
+  // test replaced it, so rerunning F1's cases at integration would report the retired case missing and burn repairs.
+  const source = { path: ".factory/ACCEPTANCE.md", locator: "Acceptance contract" };
+  const stageCase = (id, expect, extra = {}) => ({ id, surface: "cli", action: "run the seed script", expect, refs: [], sources: [source], ...extra });
+  let uiBuilt = false;
+  const after = async (stage, cwd) => {
+    if (stage === "feature-plan") await patch(path.join(cwd, ".factory/slices.json"), (plan) => {
+      plan.slices[0].acceptance.push({ id: "SKELETON-STAGE", behavior: "Until the UI exists the seed script prints FAIL and exits 1", refs: [], sources: [source], proof: { command: ["node", "--test", "e2e/seed.test.mjs"], expect: "[SK-STAGE-FAIL] passes" }, cases: [stageCase("SK-STAGE-FAIL", "exit 1 with FAIL")] });
+      plan.slices[1].acceptance.push({ id: "UI-SEED", behavior: "With the UI in place the seed script prints PASS and exits 0", refs: [], sources: [source], proof: { command: ["node", "--test", "e2e/seed.test.mjs"], expect: "[UI-SEED-PASS] passes" }, cases: [stageCase("UI-SEED-PASS", "exit 0 with PASS", { supersedes: ["SKELETON-STAGE"] })] });
+    });
+    if (stage === "build-slice-SLICE-UI") uiBuilt = true;
+  };
+  const commandRunner = async (options) => {
+    if (options.args.includes("e2e/seed.test.mjs")) {
+      // The test file holds exactly one of the two named tests at a time, as the live plan's did.
+      const events = options.env.NODE_OPTIONS.match(/--test-reporter-destination="([^"]+)"/)[1];
+      await writeFile(events, `${JSON.stringify({ type: "test:pass", name: uiBuilt ? "[UI-SEED-PASS] seed passes" : "[SK-STAGE-FAIL] seed fails" })}\n`);
+    }
+    return { code: 0, output: "passed" };
+  };
+  const { store, job, factory } = await plannedRun({ after, commandRunner });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(count(await started(store, job.id), "repair-"), 0);
+  assert.equal(result.caseResults["SK-STAGE-FAIL"].status, "passed", "the stage case counted while its feature was built");
+  assert.equal(result.caseResults["UI-SEED-PASS"].status, "passed");
+});
+
 test("telemetry measures each feature's turns and gates, bound to the candidate each gate checked", async () => {
   const { store, job, factory } = await plannedRun();
   const result = await factory.start(job.id);
