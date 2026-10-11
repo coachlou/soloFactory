@@ -336,6 +336,9 @@ export function caseResults(cases, events) {
 }
 
 // sources (paths), when given, makes every obligation cite the authoritative input it implements.
+// Bare "npm", "npm CLI (…)", "Node.js": no version digits, so not a feature needing a different toolchain.
+const CONTROLLER_TOOLCHAIN_RE = /^(node(\.js)?|npm)(\s+cli)?(\s*\([^()\d]*\))?$/i;
+
 export function validateFeaturePlan(raw, { jobId, contractDigest, checks, sources = null }) {
   if (!raw || typeof raw !== "object" || raw.version !== 2) throw new Error("slices.json must be a version 2 feature plan.");
   if (raw.jobId !== jobId || raw.contractDigest !== contractDigest) throw new Error("Feature plan does not match this run and its frozen contract.");
@@ -345,6 +348,8 @@ export function validateFeaturePlan(raw, { jobId, contractDigest, checks, source
   if (!registry.size) throw new Error("Feature planning requires at least one original requirement or acceptance scenario.");
 
   for (const item of raw.compatibility ?? []) {
+    // The controller's own Node and npm run every gate; planners still list them as "blocked" despite the prompt.
+    if (CONTROLLER_TOOLCHAIN_RE.test(item?.subject ?? "")) continue;
     if (item?.status !== "verified") throw new Error(`Unresolved compatibility: ${item?.subject ?? JSON.stringify(item)}. Resolve it read-only before planning work that depends on it.`);
   }
 

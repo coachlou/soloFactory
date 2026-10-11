@@ -37,8 +37,9 @@ What still holds source fidelity: `assertConsolidation` against a reviewed plan 
 locator), and the plan reviewer. A planner can now cite a requirement's file with a vague
 locator and pass the schema check; only the reviewer catches that.
 
-The npm fix is prompt-only: `wbs.mjs` still throws on any compatibility item that isn't
-"verified", so a planner that lists npm as blocked anyway still spends a correction.
+The npm fix was prompt-only at first. A follow-up commit makes `wbs.mjs` skip compatibility entries
+that just name the controller's toolchain ("npm", "npm CLI (…)", "Node.js", with no version digits).
+Any other unverified entry still fails the plan, including "Node 18" and "node-canvas".
 
 Pause fix check: park() now may commit a red tree. Nothing treats HEAD as a green checkpoint —
 feature/slice checkpoints record their own SHAs, and HEAD-bound repair-plan baselines are taken

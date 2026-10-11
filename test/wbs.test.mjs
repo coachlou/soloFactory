@@ -213,6 +213,8 @@ test("v2: empty/fuzzy acceptance, malformed proof, forward deps and metadata are
     [(p) => { p.jobId = "other"; }, /this run/],
     [(p) => { delete p.version; }, /version 2/],
     [(p) => { p.compatibility = [{ subject: "sharp on arm64", status: "unknown" }]; }, /Unresolved compatibility: sharp on arm64/],
+    [(p) => { p.compatibility = [{ subject: "npm CLI", status: "blocked" }, { subject: "node-canvas", status: "blocked" }]; }, /Unresolved compatibility: node-canvas/],
+    [(p) => { p.compatibility = [{ subject: "Node 18", status: "blocked" }]; }, /Unresolved compatibility: Node 18/],
     [(p) => { p.slices[2].acceptance[0].proof.pending = "later"; }, /pending may only be "integration"/],
     [(p) => { p.slices[2].acceptance[0].proof.pending = "integration"; }, /at least one obligation provable when the feature is built/],
   ];
@@ -222,6 +224,10 @@ test("v2: empty/fuzzy acceptance, malformed proof, forward deps and metadata are
     assert.throws(() => validateFeaturePlan(plan, binding), pattern);
   }
   assert.doesNotThrow(() => validateFeaturePlan(fullPlan(), binding));
+  // Subjects real planners wrote for the controller's own toolchain (smoke 040de7db) do not spend a correction.
+  const toolchain = fullPlan();
+  toolchain.compatibility = ["npm CLI", "npm CLI (used for install/test/start argument arrays in factory.json)", "Node.js"].map((subject) => ({ subject, status: "blocked" }));
+  assert.doesNotThrow(() => validateFeaturePlan(toolchain, binding));
 });
 
 test("v2: a proof pending integration keeps the checks it proves pending when its feature is verified", () => {
