@@ -336,8 +336,8 @@ export function caseResults(cases, events) {
 }
 
 // sources (paths), when given, makes every obligation cite the authoritative input it implements.
-// Bare "npm", "npm CLI (…)", "Node.js": no version digits, so not a feature needing a different toolchain.
-const CONTROLLER_TOOLCHAIN_RE = /^(node(\.js)?|npm)(\s+cli)?(\s*\([^()\d]*\))?$/i;
+// Bare "npm", "npm CLI (…)", "Node.js": no version digits or version words, so not a feature needing a different toolchain.
+const CONTROLLER_TOOLCHAIN_RE = /^(node(\.js)?|npm)(\s+cli)?(\s*\((?![^()]*\b(version|lts|latest|requires?|required|minimum|newer|older|least)\b)[^()\d]*\))?$/i;
 
 export function validateFeaturePlan(raw, { jobId, contractDigest, checks, sources = null }) {
   if (!raw || typeof raw !== "object" || raw.version !== 2) throw new Error("slices.json must be a version 2 feature plan.");

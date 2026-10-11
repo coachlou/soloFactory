@@ -215,6 +215,7 @@ test("v2: empty/fuzzy acceptance, malformed proof, forward deps and metadata are
     [(p) => { p.compatibility = [{ subject: "sharp on arm64", status: "unknown" }]; }, /Unresolved compatibility: sharp on arm64/],
     [(p) => { p.compatibility = [{ subject: "npm CLI", status: "blocked" }, { subject: "node-canvas", status: "blocked" }]; }, /Unresolved compatibility: node-canvas/],
     [(p) => { p.compatibility = [{ subject: "Node 18", status: "blocked" }]; }, /Unresolved compatibility: Node 18/],
+    [(p) => { p.compatibility = [{ subject: "Node.js (latest LTS required)", status: "blocked" }]; }, /Unresolved compatibility: Node\.js \(latest LTS required\)/],
     [(p) => { p.slices[2].acceptance[0].proof.pending = "later"; }, /pending may only be "integration"/],
     [(p) => { p.slices[2].acceptance[0].proof.pending = "integration"; }, /at least one obligation provable when the feature is built/],
   ];

@@ -250,6 +250,32 @@ test("a pause requested during a blocking feature review parks before the repair
   assert.equal(resumed.attempt, 1);
 });
 
+test("a review-blocker repair interrupted after resume does not strand the feature cursor", async () => {
+  // Codex review: resume deleted cursor.reviewFailure before the repair saved, so a shutdown mid-repair left "repairing" with no blockers.
+  let factory, jobId, blocked = false, interrupt = false;
+  const hook = async (stage, cwd) => {
+    if (stage === "feature-review-SLICE-UI-1" && !blocked) {
+      blocked = true;
+      await factory.pause(jobId);
+      await patch(path.join(cwd, ".factory/review-result.json"), (report) => {
+        report.verdict = "blocked"; report.blockers = ["The score form is not wired to storage"]; report.checks[0].status = "missing";
+      });
+    }
+    if (interrupt && stage.startsWith("repair-")) { interrupt = false; await factory.cancel(jobId, { shutdown: true }); throw new Error("worker killed by shutdown"); }
+  };
+  const run = await plannedRun({ after: hook });
+  ({ factory } = run);
+  jobId = run.job.id;
+  assert.equal((await factory.start(jobId)).state, "paused");
+  interrupt = true;
+  factory = run.make();
+  const stopped = await factory.resume(jobId);
+  assert.equal(stopped.state, "interrupted", JSON.stringify(stopped.error));
+  factory = run.make();
+  const resumed = await factory.resume(jobId);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+});
+
 test("a pause requested during a blocking final review parks before the repair turn; resume repairs without re-reviewing first", async () => {
   // Inbox follow-up: 3dc63ac covered feature reviews; the final whole-app review still launched a repair under a pending Pause.
   let factory, jobId, blocked = false;

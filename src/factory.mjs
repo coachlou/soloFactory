@@ -594,12 +594,15 @@ export class SoloFactory {
         }
       }
       await this.emit(job.id, { type: "plan.blocked", state: job.state, message: blockers[0] });
-      if (this.active?.pauseRequested) {
+      // Only before a turn that would run, so a Pause never delays an exhausted budget's failure.
+      const pauseBeforeTurn = async () => {
+        if (!this.active?.pauseRequested) return;
         if (!(plan instanceof Error)) job.planBlockers = blockers;
         await this.store.writeState(job);
         this.takePause("specifying");
-      }
+      };
       if (plan instanceof Error && job.planSchemaFixes < PLAN_SCHEMA_FIXES) {
+        await pauseBeforeTurn();
         job.planSchemaFixes += 1;
         await this.store.writeState(job);
         await this.invoke(job, `plan-schema-fix-${job.planSchemaFixes}`, planCorrectionPrompt(blockers), signal);
@@ -610,6 +613,7 @@ export class SoloFactory {
       if (job.planCorrections >= this.maxRepairs) {
         throw new FactoryError("plan_blocked", `The feature plan is still blocked after ${job.planCorrections} corrections: ${blockers[0]}`, { blockers, output: blockers.join("\n") });
       }
+      await pauseBeforeTurn();
       job.planCorrections += 1;
       await this.store.writeState(job);
       await this.invoke(job, `plan-correction-${job.planCorrections}`, planCorrectionPrompt(blockers), signal);
@@ -713,6 +717,8 @@ export class SoloFactory {
     for (;;) {
       // Parked by a Pause after a blocking review: repair the recorded blockers, not another review turn.
       if (cursor.substage === "repairing") {
+        // A repair interrupted after resume already spent its attempt on these blockers: check and review again.
+        if (!cursor.reviewFailure) { await save("checking"); continue; }
         const { code, message, details } = cursor.reviewFailure;
         delete cursor.reviewFailure;
         job = await this.repair(job, new FactoryError(code, message, details), signal, slice);
@@ -726,6 +732,8 @@ export class SoloFactory {
         if (scope.probe && !cursor.implementStarted && !cursor.prechecked && runnable.length && runnable.every((item) => item.proof)) {
           job = await this.stage(job, "verifying", `Checking feature ${position} before building — ${slice.title}`);
           const failure = await this.verify(job, await this.readManifest(appDir), signal, { includeInstall: true, proofs: runnable });
+          // A timed-out check proved nothing for the builder; resume reruns this precheck.
+          if (failure?.code === "gate_timeout") throw failure;
           cursor.prechecked = true;
           if (!failure) {
             cursor.preVerified = true;

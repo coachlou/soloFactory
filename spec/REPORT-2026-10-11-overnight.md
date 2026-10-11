@@ -87,6 +87,22 @@ gates. Ceiling: the limit is per server, not per proof, and needs a restart to c
 `timeoutMinutes` in the plan is the upgrade if one global limit proves too blunt. A hanging app
 also parks rather than being repaired; the owner decides.
 
+## Codex review (retry, range 3e265b9..f31bcfc)
+
+Four findings, all accepted, each reproduced by a failing test first, fixed in one commit:
+
+- P1: resume dropped a feature's recorded review blockers before the repair saved; a shutdown
+  mid-repair left `repairing` with no blockers and the next resume crashed. Now it rechecks.
+- P2: a Pause during the last blocked repair-plan review parked as a retryable `plan_failed`,
+  dodging the exhausted-budget guard. Pauses now fire only before a turn that would run (same
+  reorder in feature planning).
+- P2: a recovery precheck that hit the gate time limit was handed to the builder as its failure.
+  Now it parks as `gate_timeout`; resume reruns the precheck.
+- P2: "Node.js (latest LTS required)" slipped through the controller-toolchain exemption. Version
+  words in the parenthetical now count as a real requirement.
+
+Suite: 267/267.
+
 ## Other
 
 - `.claude/launch.json` has an uncommitted `smoke-watchdog-plan4` config (MAX_REPAIRS=4) used for

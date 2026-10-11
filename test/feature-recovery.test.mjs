@@ -176,6 +176,24 @@ test('a pause requested during a blocking repair-plan review stops before the co
   assert.equal(ready.recoveryPhase.status, 'ready', ready.error?.message);
 });
 
+test('a pause during the last blocked repair-plan review still fails exhausted, not retryable', async t => {
+  // Codex review: the pause fired before phase.blocked was set, so a spent budget parked as a retryable plan_failed.
+  let reviews = 0, env;
+  env = await setup(t, async args => {
+    if (/^recovery-plan-review-/.test(args.context.stage)) {
+      reviews += 1;
+      if (reviews === 2) await env.factory.pause(env.failed.id);
+      const file = path.join(args.cwd, '.factory/plan-review-result.json'); const r = JSON.parse(await readFile(file, 'utf8'));
+      r.verdict = 'blocked'; r.blockers = ['SC-1 has no executable proof']; await writeFile(file, JSON.stringify(r));
+    }
+  });
+  const failed = await env.factory.planRecovery(env.failed.id);
+  assert.equal(failed.state, 'failed', failed.error?.message);
+  assert.equal(failed.error.code, 'plan_blocked');
+  assert.equal(failed.recoveryPhase.blocked, true);
+  assert.equal(continuationAction(failed).action, 'amend-plan');
+});
+
 test('a repair plan still blocked after its corrections offers a corrected-plan review, never a futile retry', async t => {
   let blocks = Infinity; // plan reviews still to block
   const env = await setup(t, async args => {
@@ -484,6 +502,26 @@ test('a repair feature whose checks fail before building hands that failure to i
   assert.ok(file, 'the builder is pointed at the pre-build failure');
   assert.match(await readFile(path.join(env.root, file), 'utf8'), /gap: RECOVERY-1 is not built/);
   assert.equal(result.attempt, ready.attempt);
+});
+
+test('a repair feature precheck that times out parks before its builder; resume reruns the precheck', async t => {
+  // Codex review: a timed-out precheck was recorded as the builder's failure and the build turn started.
+  const env = await setup(t);
+  const ready = await env.factory.planRecovery(env.failed.id);
+  let timedOut = false;
+  const run = env.factory.commandRunner;
+  env.factory.commandRunner = async opts => {
+    const cursor = (await env.store.read(ready.id)).recoveryPhase.cursor;
+    if (!timedOut && cursor?.substage === 'implementing' && !cursor.implementStarted) { timedOut = true; return { code: null, timedOut: true, timeoutReason: 'hard', output: 'Interrupted while running' }; }
+    return run(opts);
+  };
+  const parked = await env.factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);
+  assert.equal(parked.error?.code, 'gate_timeout', JSON.stringify(parked.error));
+  assert.deepEqual(builds(env), [], 'no builder turn after a timed-out precheck');
+  assert.ok(!parked.recoveryPhase.cursor.prechecked);
+  const result = await env.factory.resume(parked.id);
+  assert.equal(result.state, 'completed', result.error?.message);
+  assert.match(await readFile(path.join(env.root, '.factory/precheck-RECOVERY-1.txt'), 'utf8'), /gap: RECOVERY-1 is not built/);
 });
 
 test('a pre-verified repair feature that its reviewer blocks goes to its builder, not a repair turn', async t => {

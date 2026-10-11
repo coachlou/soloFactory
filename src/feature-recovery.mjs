@@ -331,10 +331,10 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
       }
       phase.planBlockers = planBlockers;
       await factory.emit(id, { type: 'plan.blocked', state: job.state, message: planBlockers[0] });
-      // Pausing abandons this preparation (plan_failed); its spent corrections still count on the next one.
-      factory.takePause('specifying');
       // ponytail: per phase, not per input fingerprint; each owner preparation gets its own few schema fixes.
       if (plan instanceof Error && !phase.amendment && (phase.schemaFixes ?? 0) < PLAN_SCHEMA_FIXES) {
+        // Pausing abandons this preparation (plan_failed); its spent corrections still count on the next one.
+        factory.takePause('specifying');
         phase.schemaFixes = (phase.schemaFixes ?? 0) + 1;
         await factory.store.writeState(job);
         await factory.invoke(job, `recovery-schema-fix-${request.id}-${phase.schemaFixes}`, repairCorrectionPrompt(planFile, planBlockers), signal);
@@ -344,6 +344,8 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
       }
       if (phase.amendment || phase.corrections >= factory.maxRepairs) phase.blocked = true;
       if (phase.blocked) throw Object.assign(new Error(`The repair plan is still blocked after ${phase.corrections} corrections: ${planBlockers[0]}`), { code: 'plan_blocked', details: { blockers: planBlockers } });
+      // After the exhaustion check, so a Pause never turns a spent budget into a retryable preparation.
+      factory.takePause('specifying');
       phase.corrections += 1;
       await factory.store.writeState(job);
       await factory.invoke(job, `recovery-correction-${request.id}-${phase.corrections}`, repairCorrectionPrompt(planFile, planBlockers), signal);
