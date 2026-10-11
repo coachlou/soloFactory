@@ -7,7 +7,7 @@ import http from "node:http";
 import { JobStore } from "../src/store.mjs";
 import { buildRecoveryPacket, FactoryError, SoloFactory, validateMetrics } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
-import { buildPrompt, continuationPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "../src/prompts.mjs";
+import { ALL_BLOCKERS, CONTROLLER_FACTS, PLAN_CHECKLIST, buildPrompt, continuationPrompt, featurePlanPrompt, planAuditPrompt, planCorrectionPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "../src/prompts.mjs";
 
 const brief = {
   workingName: "Pocket Pulse",
@@ -728,4 +728,14 @@ test("agent usage sums into run telemetry and each run segment lands in runs.jso
   assert.equal(last.tokens.total.inputTokens, 1000 * turns);
   assert.match(last.harness.version, /^\d+\.\d+\.\d+$/);
   assert.ok(last.wallMs > 0 && last.stageMs.specifying >= 0);
+});
+
+test("planner, plan reviewer and corrector share one checklist and the controller facts", () => {
+  // Live plans took four review rounds, each surfacing a rule the planner was never told.
+  for (const prompt of [featurePlanPrompt(), planAuditPrompt(), planCorrectionPrompt(["x"])]) {
+    assert.ok(prompt.includes(PLAN_CHECKLIST));
+    assert.ok(prompt.includes(CONTROLLER_FACTS));
+  }
+  assert.ok(planAuditPrompt().includes(ALL_BLOCKERS));
+  assert.match(CONTROLLER_FACTS, /Never assert on git status/);
 });

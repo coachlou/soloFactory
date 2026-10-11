@@ -594,7 +594,7 @@ export class SoloFactory {
           await this.store.writeState(job);
         }
       }
-      await this.emit(job.id, { type: "plan.blocked", state: job.state, message: blockers[0] });
+      await this.emit(job.id, { type: "plan.blocked", state: job.state, message: blockers[0], blockers });
       // Only before a turn that would run, so a Pause never delays an exhausted budget's failure.
       const pauseBeforeTurn = async () => {
         if (!this.active?.pauseRequested) return;

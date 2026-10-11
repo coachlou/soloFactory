@@ -576,9 +576,11 @@ for (const corrected of [false, true]) test(`a feature plan omitting detailed su
     });
     if (!stage.startsWith("plan-review-")) return;
     const cited = (await json(planFile)).slices.some((slice) => slice.acceptance.some((item) => item.sources?.some((ref) => ref.path === ".factory/uploads/SPEC.md" && /EXIF offsets/.test(ref.locator))));
-    if (!cited) await patch(path.join(cwd, ".factory/plan-review-result.json"), (verdict) => { verdict.verdict = "blocked"; verdict.blockers = ["SPEC.md §3 EXIF offsets has no obligation"]; });
+    if (!cited) await patch(path.join(cwd, ".factory/plan-review-result.json"), (verdict) => { verdict.verdict = "blocked"; verdict.blockers = ["SPEC.md §3 EXIF offsets has no obligation", "SC-1 lacks a failure case"]; });
   } });
   const result = await factory.start(job.id);
+  // Every blocker is recorded, not just the first, so review rounds per blocker are measurable.
+  assert.deepEqual((await store.events(job.id, Infinity)).find((event) => event.type === "plan.blocked").blockers, ["SPEC.md §3 EXIF offsets has no obligation", "SC-1 lacks a failure case"]);
   assert.ok(sourceRequests[0].sources.some((ref) => ref.path === ".factory/uploads/SPEC.md"), "the planner sees supplied specs");
   // The controller's own Node runs every gate; a planner that cannot run it read-only once spent a correction marking it blocked.
   assert.equal(sourceRequests[0].toolchain.node, process.version);

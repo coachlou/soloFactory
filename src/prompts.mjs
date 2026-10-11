@@ -321,6 +321,35 @@ export const CONSOLIDATION_RULES = `- Consolidate overlapping obligations into o
   runs node:test (no --test-reporter flag of its own) and each case has a test whose name contains
   [CASE-ID]. One passing case never proves its neighbors; never fold a case into a weaker assertion.`;
 
+// How the controller runs proofs. Planners lacked these facts and wrote proofs that could never
+// pass (e.g. asserting a clean git tree before the feature's checkpoint commit), costing a review round and repairs.
+export const CONTROLLER_FACTS = `How the controller runs proofs:
+- Gates run in the project root on the uncommitted working tree, in order install, test, build,
+  then each proof command, stopping at the first failure. Each command has a time limit (5 minutes
+  by default).
+- The factory commits (git add -A) only after a feature passes its review, so while its gates run
+  the feature's new files are untracked. Never assert on git status, a clean tree or commit history.
+- data/ is gitignored owner data; tests use a temporary directory, never data/. The app starts with
+  only PORT and NODE_ENV=production set.
+- Every proof of every built feature reruns at final integration, so a proof must stay true as
+  later features land: assert the feature's behavior, not the absence of later routes or files.`;
+
+// One checklist for planner, reviewer and corrector: the planner self-checks against exactly what
+// the reviewer blocks on, so a review round is not spent discovering a rule.
+export const PLAN_CHECKLIST = `A plan is blocked when:
+- an original check is not fully proved by its closing feature, or prerequisites are out of order;
+- a detailed obligation a source states is missing, or cites the wrong source or locator;
+- a feature is a horizontal layer or too large to verify alone;
+- a proof is not an executable test of real behavior, or depends on repo state, network, wall-clock
+  time or the order other tests run in;
+- a claim about escaping, validation, limits or errors is tested without the input that would
+  expose a failure (escaping needs markup in the input; a limit needs the boundary and one past it);
+- a requirement's refs are not all cited by its cases, or negative/failure cases are missing;
+- consolidated cases drop or blur a distinct field, action, boundary, failure condition or
+  API/browser surface;
+- a proof marked "pending": "integration" could run when its feature is built;
+- a required model, native package, runtime or tool is unverified.`;
+
 export function featurePlanPrompt({ followOn = false } = {}) {
   return `You are the feature planner for a small software factory. Read .factory/plan-request.json,
 .factory/requirements.json, .factory/PRD.md, .factory/PLAN.md, .factory/ACCEPTANCE.md and EVERY file in its
@@ -364,8 +393,17 @@ ${followOn
     : `- The first feature carries factory.json (version 1, install/test/build/start argument arrays,
   healthPath "/health", metricsPath "/_factory/metrics"), a production build, GET /health and
   privacy-preserving GET /_factory/metrics.`}
-A fresh reviewer audits the exact plan before any build. End with a one-line summary.`;
+${CONTROLLER_FACTS}
+
+A fresh reviewer audits the exact plan before any build against this checklist. Check the whole
+plan against it yourself before you finish:
+${PLAN_CHECKLIST}
+End with a one-line summary.`;
 }
+
+// Reviewers that stop at the first problem cost a review and a correction turn per problem.
+export const ALL_BLOCKERS = `Audit the whole plan before writing the verdict and list EVERY blocker you find, one entry each:
+the planner fixes them all in one correction, so a blocker held back costs a full extra round.`;
 
 export function planAuditPrompt({ followOn = false } = {}) {
   return `You are the independent planning reviewer. No build has started. Read
@@ -377,20 +415,20 @@ plan voids your verdict. Write:
 { "version": 1, "jobId", "token", "contractDigest", "planDigest" copied exactly from
   plan-review-request.json, "verdict": "approve" | "blocked", "blockers": ["<concrete problem>"] }
 
-Block when any original check is not fully proved by its closing feature, any detailed obligation
-a source states is missing or cites the wrong source or locator, a feature is a
-horizontal layer or too large to verify alone, prerequisites are out of order, a proof is not an
-executable test of real behavior, a proof marked "pending": "integration" could run when its feature
-is built, negative/failure cases are missing, consolidated cases drop or blur a distinct field, action,
-boundary, failure condition or API/browser surface, or a required model, native
-package, runtime or tool is unverified. Approve only a plan you would build as written.`;
+${PLAN_CHECKLIST}
+${CONTROLLER_FACTS}
+
+${ALL_BLOCKERS} Approve only a plan you would build as written.`;
 }
 
 export function planCorrectionPrompt(blockers) {
   return `You are correcting the feature plan after a blocked planning review. Read
 .factory/plan-request.json, the frozen contract files, every source it lists and .factory/slices.json. Rewrite ONLY
 .factory/slices.json (same version 2 schema, jobId and contractDigest) to resolve every blocker
-below without narrowing, waiving or dropping any original requirement. Do not write code.
+below without narrowing, waiving or dropping any original requirement. Do not write code. Then
+check the whole corrected plan against the reviewer's checklist, so the next review finds nothing new:
+${PLAN_CHECKLIST}
+${CONTROLLER_FACTS}
 Blockers:
 ${blockers.map((item) => `- ${item}`).join("\n")}`;
 }

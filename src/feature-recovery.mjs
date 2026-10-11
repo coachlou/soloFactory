@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile, writeFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { contractDigest, originalChecks, preparePlanReview, runInputs, sourceSet, validatePlanReview, validateReview } from './review.mjs';
-import { CONSOLIDATION_RULES } from './prompts.mjs';
+import { ALL_BLOCKERS, CONSOLIDATION_RULES, CONTROLLER_FACTS, PLAN_CHECKLIST } from './prompts.mjs';
 import { PLAN_SCHEMA_FIXES, assertConsolidation, failedIntegrationProofs, pendingProofFailure, validateFeaturePlan, validateSlicePlan } from './wbs.mjs';
 
 export const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -75,7 +75,9 @@ function repairPlanPrompt(planFile, request) {
 Write ONLY ${planFile} as JSON: ${PLAN_SCHEMA}.
 Every unfinished check has exactly one closing feature. A broad MH/SC summary is not enough: carry each detailed obligation the sources state for that gap (fields, states, limits, error cases, layout, copy) as its own acceptance item citing the source path and locator. Each proof is an executable test of real behavior.
 ${CONSOLIDATION_RULES}
-Preserve already passing behavior and completed features; no new walking skeleton. Use small dependency-ordered features. The plan is reviewed against the sources before execution.
+Preserve already passing behavior and completed features; no new walking skeleton. Use small dependency-ordered features. The plan is reviewed against the sources and this checklist before execution; check it yourself first:
+${PLAN_CHECKLIST}
+${CONTROLLER_FACTS}
 Request:
 ${JSON.stringify(request, null, 2)}`;
 }
@@ -87,11 +89,16 @@ function repairPlanAuditPrompt(planFile, priorBlockers = null, consolidated = fa
   return `You are the independent repair-plan reviewer. No repair has started.${amended}${mapped} Read .factory/plan-review-request.json (the unfinished checks, review findings and the authoritative sources), .factory/REVIEW.md, EVERY source file it lists, the existing app and tests, and ${planFile}.
 Do NOT modify ${planFile} or any file except .factory/plan-review-result.json. Editing the plan voids your verdict. Write:
 { "version": 1, "jobId", "token", "contractDigest", "planDigest" copied exactly from plan-review-request.json, "verdict": "approve" | "blocked", "blockers": ["<concrete problem>"] }
-Block when any detailed obligation a source states for an unfinished check is missing from the plan, an obligation cites the wrong source or locator, a finding is not addressed, a proof is not an executable test of real behavior, negative/failure cases are missing, consolidated cases drop or blur a distinct field, action, boundary, failure condition or API/browser surface, a feature is too large to verify alone, or a required model, package or tool is unverified. Approve only a plan you would execute as written.`;
+Block when a review finding is not addressed, or when (judged for the unfinished checks):
+${PLAN_CHECKLIST}
+${CONTROLLER_FACTS}
+${ALL_BLOCKERS} Approve only a plan you would execute as written.`;
 }
 
 function repairCorrectionPrompt(planFile, blockers) {
-  return `You are correcting the repair plan after a blocked review. Read the request in .factory/plan-review-request.json, every source it lists and ${planFile}. Rewrite ONLY ${planFile} (same schema, jobId, requestId and contractDigest) to resolve every blocker without narrowing, waiving or dropping a requirement. Do not write code.
+  return `You are correcting the repair plan after a blocked review. Read the request in .factory/plan-review-request.json, every source it lists and ${planFile}. Rewrite ONLY ${planFile} (same schema, jobId, requestId and contractDigest) to resolve every blocker without narrowing, waiving or dropping a requirement. Do not write code. Then check the whole corrected plan against the reviewer's checklist, so the next review finds nothing new:
+${PLAN_CHECKLIST}
+${CONTROLLER_FACTS}
 Blockers:
 ${blockers.map(item => `- ${item}`).join('\n')}`;
 }
@@ -330,7 +337,7 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
         }
       }
       phase.planBlockers = planBlockers;
-      await factory.emit(id, { type: 'plan.blocked', state: job.state, message: planBlockers[0] });
+      await factory.emit(id, { type: 'plan.blocked', state: job.state, message: planBlockers[0], blockers: planBlockers });
       // ponytail: per phase, not per input fingerprint; each owner preparation gets its own few schema fixes.
       if (plan instanceof Error && !phase.amendment && (phase.schemaFixes ?? 0) < PLAN_SCHEMA_FIXES) {
         // Pausing abandons this preparation (plan_failed); its spent corrections still count on the next one.
