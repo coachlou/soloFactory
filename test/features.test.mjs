@@ -369,6 +369,20 @@ test("Resume after exhausted plan corrections refuses an unchanged plan and revi
   assert.equal(count(await started(store, job.id), "plan-correction-"), 2, "Resume does not renew plan corrections");
 });
 
+test("Resume after exhausted plan corrections accepts owner-revised specs with a fresh correction budget", async () => {
+  const { store, job, make } = await plannedRun({ uploads: { "SPEC.md": "§3 EXIF offsets: group by calendar day in the capture offset.\n" }, after: async (stage, cwd) => {
+    if (!stage.startsWith("plan-review-")) return;
+    if (/EXIF/.test(await readFile(path.join(cwd, ".factory/uploads/SPEC.md"), "utf8"))) await patch(path.join(cwd, ".factory/plan-review-result.json"), (verdict) => { verdict.verdict = "blocked"; verdict.blockers = ["SPEC.md §3 EXIF offsets has no obligation"]; });
+  } });
+  assert.equal((await make().start(job.id)).error.code, "plan_blocked");
+  // The owner decides the requirement itself was wrong; the plan file is untouched.
+  await writeFile(path.join(store.appDir(job.id), ".factory/uploads/SPEC.md"), "§3 Group by calendar day in local time.\n");
+  const result = await make().resume(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(result.planCorrections, 0, "revised inputs get a fresh correction budget");
+  assert.ok((await store.events(job.id, 1000)).some((event) => event.type === "plan.inputs_revised"));
+});
+
 test("inputs changed after every feature verified reopen only the features that cited them", async () => {
   const { job, make } = await plannedRun({ uploads: { "SPEC.md": "v1" }, after: async (stage, cwd) => {
     if (stage === "feature-plan") await patch(path.join(cwd, ".factory/slices.json"), (plan) => { plan.slices[1].acceptance[0].sources.push({ path: ".factory/uploads/SPEC.md", locator: "§1" }); });
