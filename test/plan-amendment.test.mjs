@@ -49,6 +49,7 @@ async function setup(t, { malformed = false, ready = false } = {}) {
       if (reviewer(args.context.stage)) {
         requests.push(JSON.parse(await readFile(path.join(args.cwd, '.factory/plan-review-request.json'), 'utf8')));
         if (ctl.fail) { ctl.fail = false; throw new Error('provider interrupted'); }
+        if (ctl.hang) { ctl.hang = false; await new Promise(resolve => { ctl.release = resolve; }); throw new Error('provider stopped by shutdown'); }
         if (ctl.modify) { const file = path.join(args.cwd, args.context.job.recoveryPhase.planFile); const p = JSON.parse(await readFile(file, 'utf8')); p.slices[0].title += ' (edited by reviewer)'; await writeFile(file, JSON.stringify(p)); }
         if (ctl.block) {
           const file = path.join(args.cwd, '.factory/plan-review-result.json'); const r = JSON.parse(await readFile(file, 'utf8'));
@@ -272,6 +273,29 @@ for (const mode of ['modify', 'fail']) test(`a reviewer that ${mode === 'modify'
   assert.equal(ready.recoveryPhase.id, parked.recoveryPhase.id); assert.equal(ready.recoveryPhase.corrections, env.blocked.recoveryPhase.corrections);
   assert.equal(ready.recoveryPhase.planDigest, digest(validateRecoveryPlan(candidate(env.blocked), env.blocked.recoveryPhase.request)), 'the submitted plan, not the reviewer edit, is what was approved');
   assert.equal(env.stages.filter(stage => /^recovery-correction-/.test(stage)).length, 1);
+});
+
+test('a shutdown during an amendment review saves the run interrupted, and the retry continues only that review', async t => {
+  const env = await setup(t); const turns = env.stages.length;
+  env.ctl.block = false; env.ctl.hang = true;
+  const running = submit(env, candidate(env.blocked));
+  while (!env.ctl.release) await new Promise(resolve => setTimeout(resolve, 5));
+  // What server close() does for each live run.
+  await env.factory.cancel(env.blocked.id, { shutdown: true });
+  env.ctl.release();
+  const stopped = await running;
+  assert.equal(stopped.state, 'interrupted'); assert.equal(stopped.error.code, 'process_restarted');
+  assert.ok(stopped.recoveryPhase.amendment, 'the submitted candidate survives the shutdown');
+  assert.notEqual(stopped.recoveryPhase.status, 'ready');
+  const next = continuationAction(stopped);
+  assert.deepEqual([next.action, next.label], ['retry-plan', 'Resume plan review']);
+  const ready = await env.factory.planRecovery(stopped.id);
+  assert.equal(ready.recoveryPhase.status, 'ready', ready.error?.message);
+  const ran = env.stages.slice(turns);
+  assert.equal(ran.filter(planner).length, 0, 'no planner turn before or after the shutdown');
+  assert.ok(ran.every(reviewer), ran.join(', '));
+  assert.equal(ready.recoveryPhase.corrections, env.blocked.recoveryPhase.corrections, 'no correction budget renewed');
+  assert.equal(ready.recoveryPhase.planDigest, digest(validateRecoveryPlan(candidate(env.blocked), env.blocked.recoveryPhase.request)));
 });
 
 test('the plan key ignores formatting and the request id but not content', () => {
