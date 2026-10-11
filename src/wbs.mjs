@@ -226,6 +226,10 @@ export function pendingChecks(slice, { plan = null, outstanding = [] } = {}) {
   return (slice.closes ?? []).filter((id) => refs.has(id));
 }
 
+// A plan that fails the schema check gets its own small fix budget before it may spend a correction:
+// those failures are bookkeeping, and they cost real plans half their corrections (2026-10-11).
+// Fixed rather than tied to SOLOFACTORY_MAX_REPAIRS, so a zero repair budget still allows schema fixes.
+export const PLAN_SCHEMA_FIXES = 3;
 const text = (value, min) => typeof value === "string" && value.trim().length >= min;
 const normalSource = (ref) => ({ path: ref.path, locator: ref.locator.trim() });
 const sourceKey = (ref) => `${ref.path}\u0000${ref.locator.trim()}`;

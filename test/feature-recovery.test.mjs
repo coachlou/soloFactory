@@ -361,6 +361,19 @@ test('a supplied input edited after repair-plan approval stops recovery before t
   assert.equal(env.deployments(), 0);
 });
 
+test('a malformed repair plan is fixed on the schema budget without spending a correction', async t => {
+  let valid;
+  const env = await setup(t, async args => {
+    const file = path.join(args.cwd, `.factory/recovery-plan-${args.context.job.recoveryPhase?.id}.json`);
+    if (/^recovery-plan-(?!review)/.test(args.context.stage)) { valid = await readFile(file, 'utf8'); await writeFile(file, '{}'); }
+    if (/^recovery-schema-fix-/.test(args.context.stage)) await writeFile(file, valid);
+  });
+  const ready = await env.factory.planRecovery(env.failed.id);
+  assert.equal(ready.recoveryPhase.status, 'ready', ready.error?.message);
+  assert.equal(ready.recoveryPhase.corrections, 0);
+  assert.equal(env.stages.filter(s => /^recovery-schema-fix-/.test(s)).length, 1);
+});
+
 test('a pause pending when a recovery feature fails its checks parks before the repair turn, budget untouched', async t => {
   // Live run 4f2dd1cf: a proof failed under a pending Pause and repair-17 still started.
   const env = await setup(t);

@@ -55,12 +55,15 @@ after the park (park already committed before this change).
 
 Roughly half of all correction rounds were validator trivia.
 
-## Design issue: schema failures share the correction budget
+## Schema-fix budget (built on request)
 
-`readPlan` validation errors become plan blockers and consume `job.planCorrections`, the same
-budget as reviewer blocks. A cheap mechanical fix (schema-only retry that doesn't count, or a
-separate small schema budget) would stop trivia from killing plans. Not built: it changes the
-budget semantics the operator safeguards rely on, so it is your call.
+A plan that fails the schema check (bad JSON, missing field, case-table rule, or a repair plan's
+mapping check) now gets up to 3 schema-fix turns (`PLAN_SCHEMA_FIXES` in `src/wbs.mjs`) before
+it may spend a correction. Reviewer blocks still use the correction budget, which is unchanged.
+Fixed at 3, independent of `SOLOFACTORY_MAX_REPAIRS`. Feature planning stores `job.planSchemaFixes`
+(reset only with the existing owner input-revision reset); repair planning stores
+`phase.schemaFixes` per preparation, so each owner-requested preparation gets its own 3.
+Owner-submitted amendments get none. Worst case adds 3 planner turns (~$3–6 each) per plan.
 
 ## Pause fix ceiling
 

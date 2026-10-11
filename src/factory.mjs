@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./process.mjs";
 import { buildPrompt, continuationPrompt, featureBuildPrompt, featurePlanPrompt, featureReviewPrompt, planAuditPrompt, planCorrectionPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
-import { assertConsolidation, caseResults, orderSlices, integrationProofs, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
+import { PLAN_SCHEMA_FIXES, assertConsolidation, caseResults, orderSlices, integrationProofs, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
 export { pendingProofFailure };
 import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
@@ -284,7 +284,7 @@ export class SoloFactory {
       // since then is the owner's revision: re-baseline it and give it a fresh correction budget.
       if (job.planVersion === 2 && !job.approvedPlan && !job.recoveryPhase && previousError?.code === "plan_blocked" && await initialInputsRevised(this.store, job)) {
         job.planBaseline.inputs = digest(await sourceSet(appDir, runInputs(job)));
-        Object.assign(job, { planCorrections: 0, planBlockedDigests: [] });
+        Object.assign(job, { planCorrections: 0, planSchemaFixes: 0, planBlockedDigests: [] });
         await this.emit(job.id, { type: "plan.inputs_revised", state: failedState, message: "The supplied specs changed since the plan was blocked; plan review restarts with a fresh correction budget." });
       }
       job.error = null;
@@ -511,6 +511,7 @@ export class SoloFactory {
     job.planBaseline ??= { source: await sourceBaseline(this.store, { head: false }), contract };
     job.planBaseline.inputs ??= digest(sources);
     job.planCorrections ??= 0;
+    job.planSchemaFixes ??= 0;
     job.planReviews ??= 0;
     await this.store.writeState(job);
     const guard = async () => {
@@ -560,6 +561,14 @@ export class SoloFactory {
         }
       }
       await this.emit(job.id, { type: "plan.blocked", state: job.state, message: blockers[0] });
+      if (plan instanceof Error && job.planSchemaFixes < PLAN_SCHEMA_FIXES) {
+        job.planSchemaFixes += 1;
+        await this.store.writeState(job);
+        await this.invoke(job, `plan-schema-fix-${job.planSchemaFixes}`, planCorrectionPrompt(blockers), signal);
+        await guard();
+        plan = await readPlan();
+        continue;
+      }
       if (job.planCorrections >= this.maxRepairs) {
         throw new FactoryError("plan_blocked", `The feature plan is still blocked after ${job.planCorrections} corrections: ${blockers[0]}`, { blockers, output: blockers.join("\n") });
       }
@@ -1630,7 +1639,7 @@ function obligationCheck(item) {
 function stageKind(label = "unknown") {
   if (/^(build-slice|slice-resume)-/.test(label)) return "slice";
   if (label.startsWith("repair")) return "repair";
-  if (/^(plan-review|plan-correction)-\d+$/.test(label)) return label.replace(/-\d+$/, "");
+  if (/^(plan-review|plan-correction|plan-schema-fix)-\d+$/.test(label)) return label.replace(/-\d+$/, "");
   if (label.startsWith("feature-review-")) return "feature-review";
   return label.replace(/-resume$/, "");
 }

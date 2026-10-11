@@ -3,7 +3,7 @@ import { readFile, writeFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { contractDigest, originalChecks, preparePlanReview, runInputs, sourceSet, validatePlanReview, validateReview } from './review.mjs';
 import { CONSOLIDATION_RULES } from './prompts.mjs';
-import { assertConsolidation, failedIntegrationProofs, pendingProofFailure, validateFeaturePlan, validateSlicePlan } from './wbs.mjs';
+import { PLAN_SCHEMA_FIXES, assertConsolidation, failedIntegrationProofs, pendingProofFailure, validateFeaturePlan, validateSlicePlan } from './wbs.mjs';
 
 export const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 // v2 repair features close checks; v1 recovery slices (older ready phases) listed them as checks.
@@ -330,6 +330,15 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
       }
       phase.planBlockers = planBlockers;
       await factory.emit(id, { type: 'plan.blocked', state: job.state, message: planBlockers[0] });
+      // ponytail: per phase, not per input fingerprint; each owner preparation gets its own few schema fixes.
+      if (plan instanceof Error && !phase.amendment && (phase.schemaFixes ?? 0) < PLAN_SCHEMA_FIXES) {
+        phase.schemaFixes = (phase.schemaFixes ?? 0) + 1;
+        await factory.store.writeState(job);
+        await factory.invoke(job, `recovery-schema-fix-${request.id}-${phase.schemaFixes}`, repairCorrectionPrompt(planFile, planBlockers), signal);
+        await guard();
+        plan = await readPlan();
+        continue;
+      }
       if (phase.amendment || phase.corrections >= factory.maxRepairs) phase.blocked = true;
       if (phase.blocked) throw Object.assign(new Error(`The repair plan is still blocked after ${phase.corrections} corrections: ${planBlockers[0]}`), { code: 'plan_blocked', details: { blockers: planBlockers } });
       phase.corrections += 1;

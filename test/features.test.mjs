@@ -175,6 +175,26 @@ test("a reviewer that edits the candidate every time stops at the review cap", a
   assert.equal(count(await started(store, job.id), "build-slice-SLICE-UI"), 0, "a dependent never starts");
 });
 
+for (const fixedAfter of [2, Infinity]) test(`a malformed plan ${fixedAfter === 2 ? "is fixed on the schema budget without spending a correction" : "spends the schema budget, then the corrections, then blocks"}`, async () => {
+  // Real-provider plans lost half their corrections to schema trivia; those now get their own small budget.
+  let broken = 0;
+  const { store, job, factory } = await plannedRun({ after: async (stage, cwd) => {
+    if ((stage === "feature-plan" || /^plan-(schema-fix|correction)-\d+$/.test(stage)) && broken < fixedAfter) { broken += 1; await patch(path.join(cwd, ".factory/slices.json"), (plan) => { delete plan.slices[0].demo; }); }
+  } });
+  const result = await factory.start(job.id);
+  const turns = await started(store, job.id);
+  if (fixedAfter === 2) {
+    assert.equal(result.state, "completed", result.error?.message);
+    assert.equal(count(turns, "plan-schema-fix-"), 2);
+    assert.equal(result.planCorrections, 0, "no correction spent");
+  } else {
+    assert.equal(result.error.code, "plan_blocked");
+    assert.equal(count(turns, "plan-schema-fix-"), 3);
+    assert.equal(count(turns, "plan-correction-"), 2, "the correction budget is unchanged");
+    assert.equal(count(turns, "plan-review-"), 0);
+  }
+});
+
 test("a pause requested during failing checks parks before the repair turn, and resume reruns the checks", async () => {
   // Seen live (Codex inbox): a pending Pause let a repair turn start after a failed proof and spend quota.
   let factory, jobId, calls = 0;

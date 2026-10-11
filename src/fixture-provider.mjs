@@ -112,7 +112,7 @@ export function createFixtureProvider() {
         if (context.job?.sdlc === "slices" && context.job.planVersion !== 2) {
           await writeFile(path.join(cwd, ".factory", "slices.json"), `${JSON.stringify(fixtureSlicePlan, null, 2)}\n`);
         }
-      } else if (context.stage === "feature-plan" || /^plan-correction-\d+$/.test(context.stage)) {
+      } else if (context.stage === "feature-plan" || /^plan-(correction|schema-fix)-\d+$/.test(context.stage)) {
         const request = JSON.parse(await readFile(path.join(cwd, ".factory", "plan-request.json"), "utf8"));
         await writeFile(path.join(cwd, ".factory", "slices.json"), `${JSON.stringify(fixtureFeaturePlan(request), null, 2)}\n`);
       } else if (/^plan-review-\d+$/.test(context.stage)) {
