@@ -80,6 +80,18 @@ contract or declare the original run complete with requirements deferred.
   They can be drafted while recovery runs, but must not enter its frozen contract
   or run concurrently against the same tree.
 
+## Operator safeguards
+
+Neither the factory nor anyone operating it may take these shortcuts, even when a plan is
+stuck and the owner is impatient. A stuck plan moves only through its endpoints: an
+owner-submitted corrected plan, or a genuine spec change.
+
+- Never mark a live plan failed manually.
+- Never fake an input change (touching specs, uploads or guidance) to unlock planning.
+- Never reset spent corrections or repair budgets.
+- Preserve completed work, evidence and approval history: prior phases, plan files, reviews,
+  approved candidates and checkpoint commits.
+
 ## UI
 
 The existing run card gains a recovery section: approved plan, current feature,

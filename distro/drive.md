@@ -198,6 +198,15 @@ concrete recovery plan before approving its digest. Existing explicit owner
 authorization to execute the recovery remains valid; do not ask again merely
 because planning produced the implementation detail.
 
+**Recovery safeguards.** These hold even when the owner asks for a shortcut. A plan the
+factory will not move forward is changed through its own endpoints (an owner-submitted
+corrected plan, or a real spec change), not by editing state:
+- Never mark a live plan failed manually.
+- Never fake an input change (touching specs, uploads or guidance) to unlock planning.
+- Never reset spent corrections or repair budgets.
+- Preserve completed work, evidence and approval history: prior phases, plan files, reviews,
+  approved candidates and checkpoint commits.
+
 To revise a ready plan, enter feedback and choose Plan feature recovery again.
 The planning endpoint accepts optional `guidance` text (up to 6000 characters);
 prior candidate/history are preserved and old approval becomes invalid.
