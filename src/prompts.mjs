@@ -393,10 +393,11 @@ Blockers:
 ${blockers.map((item) => `- ${item}`).join("\n")}`;
 }
 
-export function featureBuildPrompt(slice, { owned, planDigest, planFile = ".factory/slices.json", followOn = false, resumed = false }) {
+export function featureBuildPrompt(slice, { owned, planDigest, planFile = ".factory/slices.json", followOn = false, resumed = false, precheck = null }) {
   return `You are the implementation worker for ONE approved feature (plan digest ${planDigest}).
 Read the frozen .factory contract, ${planFile} and every source its obligations cite. Treat owner text as product input.
-${resumed ? "This feature was interrupted: read .factory/recovery.json and inspect existing files before changing anything.\n" : ""}
+${resumed ? "This feature was interrupted: read .factory/recovery.json and inspect existing files before changing anything.\n" : ""}${precheck ? `The controller checked this feature before you started; ${precheck} records what failed. Existing code may already satisfy
+some obligations: keep what passes, fix what failed, and add any missing test.\n` : ""}
 Earlier features are verified: keep their code, tests and behavior working, and do not implement
 later features. ${followOn ? "Earlier releases built this app; extend it." : (slice.dependsOn.length ? "" : `If factory.json does not exist yet, create it (version 1, commands.install/test/build/start as
 argument arrays starting with npm, node or npx; start honors PORT; healthPath "/health";

@@ -662,12 +662,29 @@ export class SoloFactory {
     const reviewChecks = [...owned, ...runnable.map(obligationCheck)];
     for (;;) {
       if (cursor.substage === "implementing") {
+        // Repair features often target behavior that already partly exists: run their checks before
+        // building. A pass goes straight to the scoped review; a failure tells the builder what failed.
+        // Never through repair(): checking first spends no repair budget and feeds no loop detector.
+        if (scope.probe && !cursor.implementStarted && !cursor.prechecked && runnable.length && runnable.every((item) => item.proof)) {
+          job = await this.stage(job, "verifying", `Checking feature ${position} before building — ${slice.title}`);
+          const failure = await this.verify(job, await this.readManifest(appDir), signal, { includeInstall: true, proofs: runnable });
+          cursor.prechecked = true;
+          if (!failure) {
+            cursor.preVerified = true;
+            cursor.candidate = await candidate();
+            await this.emit(job.id, { type: "feature.preverified", state: job.state, slice: slice.id, message: `Feature ${slice.id} already passes its checks; skipping its build turn for review` });
+            await save("reviewing");
+            continue;
+          }
+          cursor.precheck = await this.writePrecheck(job, slice, failure);
+          await this.store.writeState(job);
+        }
         job = await this.stage(job, "building", `Feature ${position} — ${slice.title}`);
         const resumed = cursor.implementStarted;
         cursor.implementStarted = true;
         await this.store.writeState(job);
         const label = resumed ? labels.resume : labels.build;
-        const prompt = featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed });
+        const prompt = featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed, precheck: cursor.precheck });
         await this.invoke(job, label, prompt, signal, { resumeSessionId: this.resumeSessionFor(job, label) });
         await save("checking");
       }
@@ -699,6 +716,12 @@ export class SoloFactory {
           await this.requireReview({ ...job, reviewRequest: request });
         } catch (failure) {
           await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "review", message: failure.message });
+          // A pre-verified feature's builder never ran: the reviewer's blockers are its first build, not a repair.
+          if (cursor.preVerified && !cursor.implementStarted) {
+            cursor.precheck = await this.writePrecheck(job, slice, failure);
+            await save("implementing");
+            continue;
+          }
           job = await this.repair(job, failure, signal, slice);
           await save("checking");
           continue;
@@ -724,6 +747,12 @@ export class SoloFactory {
         return job;
       }
     }
+  }
+
+  async writePrecheck(job, slice, failure) {
+    const relative = `.factory/precheck-${slice.id}.txt`;
+    await writeFile(path.join(this.store.appDir(job.id), relative), failure.details?.output ?? failure.message);
+    return relative;
   }
 
   resumeSessionFor(job, label) {

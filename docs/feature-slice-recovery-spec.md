@@ -47,6 +47,10 @@ contract or declare the original run complete with requirements deferred.
 5. On approval, execute one recovery slice at a time through the existing
    provider, gate, queue, and project-lock mechanisms. Scope each repair to the
    current slice. Record a checkpoint only after its acceptance checks pass.
+   Before a slice's first build turn, run its checks: a slice that already
+   passes goes straight to its scoped review; a failure is handed to the
+   builder. This check spends no repair budget. A reviewer's blockers on a
+   pre-verified slice start its build turn, not a repair.
 6. Resume after interruption at the unfinished recovery slice. Do not replay
    verified slices. Reuse prior evidence only when it still applies to the
    current code and contract.

@@ -47,7 +47,7 @@ test('v2 repair plans may depend on already completed features but not on unknow
   assert.throws(() => validateRecoveryPlan(p, v2Request), /unknown slice MONTHLY-SUMMARY/);
 });
 
-async function setup(t, mutate = async () => {}, { uploads = {} } = {}) {
+async function setup(t, mutate = async () => {}, { uploads = {}, alreadyPasses = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'solo-feature-recovery-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const store = new JobStore(root); await store.init();
@@ -55,12 +55,17 @@ async function setup(t, mutate = async () => {}, { uploads = {} } = {}) {
   for (const [name, body] of Object.entries(uploads)) { await mkdir(path.join(root, '.factory/uploads'), { recursive: true }); await writeFile(path.join(root, '.factory/uploads', name), body); }
   const job = await store.create({ brief: { workingName: 'Recovery fixture', mustHaves: ['Live saved searches', 'Edit people'], acceptanceScenarios: ['A new item enters its smart album'] }, transcript: [{ role: 'user', content: 'Recover the missing behavior' }, ...Object.keys(uploads).map(name => ({ role: 'user', content: `Attached file: .factory/uploads/${name}` }))], provider: 'fixture', sdlc: 'single' });
   const fixture = createFixtureProvider(); let recovering = false; let deployments = 0;
-  const stages = [];
+  const stages = []; const prompts = {};
   const factory = new SoloFactory({ store, maxRepairs: 1,
-    commandRunner: async () => ({ code: 0, output: 'fixture tests pass' }),
+    commandRunner: async () => {
+      // A repair plan targets real gaps, so a feature's checks fail until its builder has run.
+      const cursor = (await store.read(job.id)).recoveryPhase?.cursor;
+      if (!alreadyPasses && cursor?.substage === 'implementing' && !cursor.implementStarted) return { code: 1, output: `gap: ${cursor.id} is not built` };
+      return { code: 0, output: 'fixture tests pass' };
+    },
     deployer: async () => { deployments++; return { status: 'live', url: 'http://127.0.0.1:9991' }; },
     provider: { id: 'fixture', async run(args) {
-      stages.push(args.context.stage);
+      stages.push(args.context.stage); prompts[args.context.stage] = args.prompt;
       if (args.context.stage.startsWith('recovery-plan-')) recovering = true;
       const result = await fixture.run(args);
       if (args.context.stage === 'review' && !recovering) {
@@ -74,7 +79,7 @@ async function setup(t, mutate = async () => {}, { uploads = {} } = {}) {
     } },
   });
   const failed = await factory.start(job.id); assert.equal(failed.state, 'failed');
-  return { root, store, factory, failed, stages, deployments: () => deployments };
+  return { root, store, factory, failed, stages, prompts, deployments: () => deployments };
 }
 
 test('plans, approves and executes same-run recovery, preserving contract and original evidence', async t => {
@@ -362,7 +367,7 @@ test('a recovery pause after checks resumes at review without re-implementing', 
   let paused = false;
   const run = env.factory.commandRunner;
   env.factory.commandRunner = async opts => {
-    if (!paused) { paused = true; await env.factory.pause(ready.id); }
+    if (!paused && (await env.store.read(ready.id)).recoveryPhase.cursor?.implementStarted) { paused = true; await env.factory.pause(ready.id); }
     return run(opts);
   };
   const parked = await env.factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);
@@ -395,6 +400,49 @@ test('a legacy recovery phase parked mid-feature (no cursor) resumes with its bu
   assert.equal(limits.at(-1), parked.repairBudgetLimit, 'the parked feature keeps its repair budget');
   assert.ok(result.recoveryPhase.stats['RECOVERY-1'], 'the migrated feature completed');
   assert.equal(result.recoveryPhase.done.length, 2);
+});
+
+const builds = env => env.stages.filter(s => /^recovery-(?!plan-|correction-).*-RECOVERY-\d+(-resume)?$/.test(s));
+test('a repair feature whose checks already pass skips its build turn but keeps its scoped review', async t => {
+  const env = await setup(t, async () => {}, { alreadyPasses: true });
+  const ready = await env.factory.planRecovery(env.failed.id);
+  const result = await env.factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);
+  assert.equal(result.state, 'completed', result.error?.message);
+  assert.deepEqual(builds(env), [], 'no builder turn for behavior that already passes');
+  assert.equal(env.stages.filter(s => /^recovery-.*-RECOVERY-\d+-review-\d+$/.test(s)).length, 2, 'each feature is still reviewed');
+  assert.equal(result.attempt, ready.attempt, 'checking first spends no repair budget');
+  const events = await env.store.events(result.id, 1000);
+  assert.equal(events.filter(e => e.type === 'feature.preverified').length, 2);
+});
+
+test('a repair feature whose checks fail before building hands that failure to its builder, spending no repair', async t => {
+  const env = await setup(t);
+  const ready = await env.factory.planRecovery(env.failed.id);
+  const result = await env.factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);
+  assert.equal(result.state, 'completed', result.error?.message);
+  assert.equal(builds(env).length, 2);
+  const prompt = env.prompts[builds(env)[0]];
+  const file = prompt.match(/\.factory\/precheck-RECOVERY-1\.txt/)?.[0];
+  assert.ok(file, 'the builder is pointed at the pre-build failure');
+  assert.match(await readFile(path.join(env.root, file), 'utf8'), /gap: RECOVERY-1 is not built/);
+  assert.equal(result.attempt, ready.attempt);
+});
+
+test('a pre-verified repair feature that its reviewer blocks goes to its builder, not a repair turn', async t => {
+  let blocked = false;
+  const env = await setup(t, async args => {
+    if (!blocked && /^recovery-.*-RECOVERY-1-review-1$/.test(args.context.stage)) {
+      blocked = true;
+      const p = path.join(args.cwd, '.factory/review-result.json'); const r = JSON.parse(await readFile(p)); r.verdict = 'blocked'; r.checks[0].status = 'missing'; r.blockers = ['Tests pass but the browser control is absent']; await writeFile(p, JSON.stringify(r));
+    }
+  }, { alreadyPasses: true });
+  const ready = await env.factory.planRecovery(env.failed.id);
+  const result = await env.factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);
+  assert.equal(result.state, 'completed', result.error?.message);
+  assert.equal(builds(env).length, 1); assert.match(builds(env)[0], /-RECOVERY-1$/);
+  assert.match(env.prompts[builds(env)[0]], /precheck-RECOVERY-1\.txt/);
+  assert.match(await readFile(path.join(env.root, '.factory/precheck-RECOVERY-1.txt'), 'utf8'), /browser control is absent/);
+  assert.equal(result.attempt, ready.attempt, 'no repair turn was spent');
 });
 
 test('a pending proof from an earlier recovery phase still gates completion after a later repair plan', async t => {
