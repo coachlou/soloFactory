@@ -36,3 +36,18 @@ Working file for the current stretch. Read this first after a `/clear`.
 - Resumed by Lou at 19:44Z; integration passed (the planted `throw` sat after `process.exit`, so it was dead code); final review passed (it noted the dead throw); deployed and healthy. First real-provider run to finish F1–F3 plus final integration. The recovery path was NOT exercised; the release gate is still open.
 - measure-run (agent 5500s, gates 17s, excluding 9084s parked): planning 10 turns / 2451s; F1 6 turns (600s review, 149s repair); F2 527s implement / 351s review; F3 211s / 311s; final review 298s. Reviews ≈ implementation time: this is the "before" for steps 2–3.
 - Next: restart :4205 on HEAD, fresh smoke with a reachable fault planted before final integration (e.g. break `percent` in src/summary.js) → park on quality_gate_failed → prepare plan → stop at ready, do NOT approve. Compare planning turns (target ≤4) and review time.
+
+## Smoke run 90b8b32e (project smoke-cases-5) — started 2026-10-11 on HEAD d516417
+- :4205 restarted on HEAD. Baseline a943a5da ran with SOLOFACTORY_MAX_REPAIRS=0 throughout (server env), so restart with 0 again while the plan waits for approval (paused; no work interrupted). Comparable, and any real gate failure parks with prepare-plan available.
+- Fault plant, only if no natural failure occurs: write it while the last feature's review turn runs (tree committed, integration gates not yet started), in a file that review won't read; never during the gates (stale-evidence park).
+- Plan approval is Lou's. Repair plan: stop at ready, do NOT approve.
+
+## Doc-wide triage of open items (2026-10-11)
+A full read of spec/, PROGRESS.md, SPEC.md, README.md and .aai/ found 26 open items. Disposition:
+- **Done now (suite 282/282):** 58702bc fixes the idle-deadline flake. 3399e71 adds a factory_busy test. 01a7792 adds a test for shutdown during an amendment review. ac8f2e2 adds a ready-plan help packet. c60c865 limits legacy-run diagnostics to the failing turn's log. e8d1ed7 adds a controller-level Claude-silence test. The PROGRESS.md BUG 1/2 note now records the fix in 7579594.
+- **Closed as limits:** Duplicate detection for legacy amendment phases can't improve, because earlier plans were overwritten on disk and only photo-library run 42d97519 is affected (Codex-owned). Legacy runs have no recorded pid, and that data does not exist. Continuation through start() uses the same invoke() wiring.
+- **In progress:** The release-gate recovery smoke is run 90b8b32e, with measurements to compare against the baseline. Real-provider checks of case tables, Claude task profiles and the Codex token line will be observed during it.
+- **Needs Lou:** installing the current build; the proof.tests evidence check versus the reviewer-only fallback for the photo candidate; housekeeping of stale smoke configs and branches (token-telemetry, remote claude/*); Node 24 verification (not installed).
+- **Deferred by design:** per-stage Codex model routing (M; needs a cost check on a live run); per-proof gate timeouts (only once one global limit proves too blunt); per-case staleness binding; Jev backlog items 3–6; grandchild process tracking.
+- **Codex-owned:** shadow-mode test selection (amendment items 3–4); false-completion investigation (item 5); measure-run on the photo-library run.
+- **Browser check of the amendment file input:** a source-level check only; run it on a ready plan once the smoke reaches one.

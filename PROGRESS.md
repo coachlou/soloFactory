@@ -835,7 +835,7 @@ Clean detached worktree at 77159ff (main checkout had foreign uncommitted watchd
 - BUG 1: stopping the server mid-planning recorded `job.cancelled` "The owner cancelled this run."
 - BUG 2: for that cancelled run continuationAction offered retry-plan (phase check precedes the cancelled check), but
   planFeatureRecovery rejects `cancelled` → "Repair planning requires an unresolved parked run." and flipped the run to
-  failed/unexpected_error (after which retry worked). Policy and executor disagree. Unfixed, awaiting Lou.
+  failed/unexpected_error (after which retry worked). Policy and executor disagree. Fixed in 7579594: shutdowns park as interrupted, and cancellation is final (continuationAction checks cancelled first).
 
 ## Exhausted plan corrections: supervised plan amendment (2026-10-10, branch fix/exhausted-plan-amendment off 1d5d37b) — implemented, committed, not installed
 
