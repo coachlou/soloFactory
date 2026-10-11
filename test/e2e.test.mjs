@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, utimes, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -78,6 +78,9 @@ test("HTTP recovery explains legacy blockers and resumes the same run id", async
   await writeFile(path.join(cwd, ".factory", "requirements.json"), JSON.stringify({ brief: job.brief, transcript: job.transcript }));
   const logDir = path.join(cwd, ".factory", "logs");
   await mkdir(logDir, { recursive: true });
+  // An earlier, finished turn whose output merely mentions an auth word must not become a blocker.
+  await writeFile(path.join(logDir, "specification.log"), "The API returns 401 Unauthorized for a missing token.\n");
+  await utimes(path.join(logDir, "specification.log"), new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
   await writeFile(
     path.join(logDir, "build.log"),
     "getaddrinfo ENOTFOUND registry.npmjs.org\nxcodebuild requires Xcode; active developer directory '/Library/Developer/CommandLineTools'\n",
@@ -86,6 +89,7 @@ test("HTTP recovery explains legacy blockers and resumes the same run id", async
   const failed = (await getJson(`${base}/api/jobs/${job.id}`)).job;
   assert.equal(failed.recovery.canResume, true);
   assert.equal(failed.recovery.actions.length, 2);
+  assert.doesNotMatch(JSON.stringify(failed.recovery), /sign-in|Sign in/, "only the failing turn's log is diagnosed");
   assert.match(failed.recovery.automaticRetry, /predates activity-aware recovery/);
   const packetResponse = await fetch(`${base}/api/jobs/${job.id}/recovery-packet`);
   assert.equal(packetResponse.ok, true);

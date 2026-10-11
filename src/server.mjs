@@ -624,9 +624,13 @@ async function ensureRecovery(job, store) {
   } catch {
     // A restart can happen before the first log is created.
   }
-  const chunks = await Promise.all(names.map((name) => readFile(path.join(logDir, name), "utf8").catch(() => "")));
-  const diagnostics = detectProviderDiagnostics(chunks.join("\n"));
   const messageLogPath = job.error.message?.match(/See (\/.*?\.log)\.?$/)?.[1] ?? null;
+  // Only the failing turn's log: earlier turns' output (specs, source) would match blocker words.
+  // It is the log the error names, else the newest one.
+  const named = messageLogPath && path.dirname(messageLogPath) === logDir && names.includes(path.basename(messageLogPath)) ? path.basename(messageLogPath) : null;
+  const dated = await Promise.all(names.map(async (name) => ({ name, at: (await stat(path.join(logDir, name)).catch(() => null))?.mtimeMs ?? 0 })));
+  const failing = named ?? dated.sort((a, b) => b.at - a.at)[0]?.name;
+  const diagnostics = detectProviderDiagnostics(failing ? await readFile(path.join(logDir, failing), "utf8").catch(() => "") : "");
   job.error.details ||= {};
   job.error.details.logPath ||= messageLogPath;
   job.recovery = buildRecovery(job, store.appDir(job.id), diagnostics, { legacy: true });
