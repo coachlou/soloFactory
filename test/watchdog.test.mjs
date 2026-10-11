@@ -111,6 +111,26 @@ test("controller: three unchanged failures stop repairs before the budget is spe
   assert.ok(resumed.error.details.loop);
 });
 
+test("controller: a second activation while a run is active is refused and writes nothing", async () => {
+  const { store, job } = await newJob("solo-watch-busy-");
+  const other = await store.create({ brief, transcript, provider: "fixture" });
+  const factory = new SoloFactory({ store, provider: createFixtureProvider(), watch: config });
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const first = factory.activate(job.id, () => held);
+  const before = JSON.stringify(await store.read(other.id));
+  let ran = false;
+  // A double click on another run, or on the same one, must not start a second writer.
+  for (const id of [other.id, job.id]) {
+    await assert.rejects(factory.activate(id, async () => { ran = true; }), (error) => error.code === "factory_busy");
+  }
+  assert.equal(ran, false);
+  assert.equal(JSON.stringify(await store.read(other.id)), before);
+  release("done");
+  assert.equal(await first, "done");
+  assert.equal(await factory.activate(other.id, async () => "second"), "second", "the guard lifts once the active run ends");
+});
+
 test("controller: repairs that change code are not a loop and stay bounded by the budget", async () => {
   const { store, job } = await newJob("solo-watch-changed-");
   const fixture = createFixtureProvider();
