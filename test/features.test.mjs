@@ -175,6 +175,30 @@ test("a reviewer that edits the candidate every time stops at the review cap", a
   assert.equal(count(await started(store, job.id), "build-slice-SLICE-UI"), 0, "a dependent never starts");
 });
 
+test("a pause requested during failing checks parks before the repair turn, and resume reruns the checks", async () => {
+  // Seen live (Codex inbox): a pending Pause let a repair turn start after a failed proof and spend quota.
+  let factory, jobId, calls = 0;
+  const commandRunner = async () => {
+    calls += 1;
+    if (calls === 1) { await factory.pause(jobId); return { code: 1, output: "1 failing" }; }
+    return { code: 0, output: "passed" };
+  };
+  const run = await plannedRun({ commandRunner });
+  ({ factory } = run);
+  jobId = run.job.id;
+  const parked = await factory.start(jobId);
+  assert.equal(parked.state, "paused", parked.error?.message);
+  assert.equal(parked.featureCursor.substage, "checking");
+  assert.equal(parked.attempt, 0, "no repair budget spent");
+  assert.doesNotMatch(parked.recovery.summary, /green/);
+  assert.equal(count(await started(run.store, jobId), "repair-"), 0, "no repair turn started");
+
+  const resumed = await run.make().resume(jobId);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+  assert.equal(count(await started(run.store, jobId), "repair-"), 0);
+  assert.equal(resumed.attempt, 0);
+});
+
 test("a pause after checks resumes at review: no rebuild, no duplicate completion", async () => {
   let factory;
   let jobId;

@@ -865,7 +865,7 @@ export class SoloFactory {
     job.state = "paused";
     job.stage = `Paused before ${before}`;
     job.error = null;
-    job.recovery = { ...buildRecovery(job, this.store.appDir(job.id)), title: "Paused by the owner", summary: `The tree is committed and green. Resume continues from ${before}.` };
+    job.recovery = { ...buildRecovery(job, this.store.appDir(job.id)), title: "Paused by the owner", summary: before === "verifying" ? "The tree is committed; its last checks failed. Resume reruns them and repairs from there." : `The tree is committed and green. Resume continues from ${before}.` };
     await this.store.writeState(job);
     await this.emit(job.id, { type: "job.paused", state: job.state, message: job.stage });
     return job;
@@ -1032,6 +1032,12 @@ export class SoloFactory {
         const passed = slice ? `slice ${slice.id}` : [...current.stageHistory].reverse().find((s) => !["verifying", "repairing"].includes(s.state))?.state ?? "build";
         await this.commit(current, `factory: ${passed} passed gates`);
         return current;
+      }
+      // A pending Pause parks before the repair turn, not after it. Nothing is recorded or spent:
+      // resume reruns these checks (no budget) and repairs from a fresh failure.
+      if (this.active?.pauseRequested) {
+        this.active.pauseRequested = false;
+        throw new FactoryError("paused", "Paused before repairing", { before: "verifying" });
       }
       current = await this.repair(current, failure, signal, slice);
       manifest = await this.readManifest(this.store.appDir(current.id));

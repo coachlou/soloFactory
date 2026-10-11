@@ -361,6 +361,28 @@ test('a supplied input edited after repair-plan approval stops recovery before t
   assert.equal(env.deployments(), 0);
 });
 
+test('a pause pending when a recovery feature fails its checks parks before the repair turn, budget untouched', async t => {
+  // Live run 4f2dd1cf: a proof failed under a pending Pause and repair-17 still started.
+  const env = await setup(t);
+  const ready = await env.factory.planRecovery(env.failed.id);
+  const repairs = () => env.stages.filter(s => /^repair-/.test(s)).length, before = repairs();
+  let failed = false;
+  const run = env.factory.commandRunner;
+  env.factory.commandRunner = async opts => {
+    const cursor = (await env.store.read(ready.id)).recoveryPhase.cursor;
+    if (!failed && cursor?.substage === 'checking') { failed = true; await env.factory.pause(ready.id); return { code: 1, output: 'proof failed' }; }
+    return run(opts);
+  };
+  const parked = await env.factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);
+  assert.equal(parked.state, 'paused', parked.error?.message);
+  assert.equal(parked.recoveryPhase.cursor.substage, 'checking');
+  assert.equal(parked.attempt, ready.attempt, 'no repair budget spent');
+  assert.equal(repairs(), before, 'no repair turn');
+  const result = await env.factory.resume(parked.id);
+  assert.equal(result.state, 'completed', result.error?.message);
+  assert.equal(repairs(), before);
+});
+
 test('a recovery pause after checks resumes at review without re-implementing', async t => {
   const env = await setup(t);
   const ready = await env.factory.planRecovery(env.failed.id);
