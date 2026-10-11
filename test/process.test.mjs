@@ -33,9 +33,11 @@ test("command contract rejects shell execution", () => {
 test("agent activity extends the idle deadline", async () => {
   const result = await runProcess({
     executable: process.execPath,
-    args: ["-e", "let n=0; const timer=setInterval(() => { console.log(++n); if (n === 6) clearInterval(timer); }, 30)"],
-    idleTimeoutMs: 100,
-    hardTimeoutMs: 1_000,
+    // Wide windows: under full-suite load, child startup alone can exceed a 100ms idle limit.
+    // Output spans 1.5s, longer than the 1s idle limit, so passing still proves activity extends it.
+    args: ["-e", "let n=0; console.log(n); const timer=setInterval(() => { console.log(++n); if (n === 6) clearInterval(timer); }, 250)"],
+    idleTimeoutMs: 1_000,
+    hardTimeoutMs: 10_000,
   });
   assert.equal(result.code, 0);
   assert.equal(result.timedOut, false);
