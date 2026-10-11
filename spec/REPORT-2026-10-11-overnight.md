@@ -131,3 +131,9 @@ Suite: 267/267.
 
 - `src/measure.mjs` derives per-phase agent time, tokens and gate cost from the event log; exposed as telemetry `measurement` and `scripts/measure-run.mjs`.
 - Smoke run a943a5da: agent 5202s vs controller gates 15.7s. On this app, gate optimization has nothing to save; agent turns (review ≈ implement per feature) dominate.
+
+## Update 2026-10-11 19:50Z — smoke run a943a5da completed
+Real provider, f31bcfc: F1–F3 verified, final integration and review passed, deployed. The planted
+fault was unreachable (after `process.exit`), so recovery was not exercised and the release gate
+stays open. A prepare-plan request against the stale-evidence park overwrote the run error; fixed in
+a547f61. Measurements: spec/PROGRESS-2026-10-11-planning-efficiency.md.
