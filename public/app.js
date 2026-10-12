@@ -620,9 +620,10 @@ function renderAmendment(features, next, phase, action) {
     catch (error) { pending.error = error.message; showError(error); show(); }
   });
   show();
-  details.append(summary, label, file, status, submit);
-  if (!blocked) packet.textContent = "Download plan packet for a replacement";
-  features.append(note, packet, details);
+  // A ready plan's replacement is the advanced path, so its explanation and packet sit inside the
+  // disclosure; loose, they rendered under "Prepare repair plan" and read as that button's description.
+  if (blocked) { details.append(summary, label, file, status, submit); features.append(note, packet, details); }
+  else { packet.textContent = "Download plan packet for a replacement"; details.append(summary, note, packet, label, file, status, submit); features.append(details); }
   const alternative = blocked && next.alternatives?.[0];
   if (alternative) { const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = alternative.reason; features.append(hint); action(alternative.label, "recovery-plan"); }
 }
