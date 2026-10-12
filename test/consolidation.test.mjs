@@ -187,6 +187,7 @@ test('the feature builder is told how cases are proved', () => {
   assert.match(prompt, /one node:test per case\nwhose name contains \[CASE-ID\]/);
   assert.match(prompt, /without a --test-reporter flag of its own/);
   assert.match(prompt, /a script that prints its own\nok\/fail lines records nothing/);
+  assert.match(prompt, /do not read \.factory\/slices\.json or other features' plans/);
 });
 
 test('only the last feature builder is asked for the README', () => {

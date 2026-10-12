@@ -244,8 +244,8 @@ export function repairPrompt(failurePath, slice = null) {
 The failure is inside slice ${slice.id} (${slice.title}). Earlier completed slices must be
 preserved — fix only what this slice's acceptance criteria need.`
     : "";
-  return `You are the repair worker. Read the frozen .factory requirements, PRD, plan, and
-acceptance contract, then read ${failurePath}. Fix the root cause of the recorded controller
+  return `You are the repair worker. Read ${failurePath} first, then only the parts of the frozen
+.factory contract and plan that the failure touches${slice ? ` (in the plan, only slice ${slice.id})` : ""}. Fix the root cause of the recorded controller
 gate failure with the smallest coherent change. Do not weaken, skip, rename, or delete tests,
 health checks, metrics, build commands, or acceptance criteria.${sliceLines} Run the relevant
 checks and leave the app ready for the controller to rerun every gate.
@@ -495,7 +495,8 @@ function sharedCommands(slice) {
 export function featureBuildPrompt(slice, { owned, planDigest, planFile = ".factory/slices.json", followOn = false, resumed = false, precheck = null, last = false }) {
   const { feature, commands } = sharedCommands(slice);
   return `You are the implementation worker for ONE approved feature (plan digest ${planDigest}).
-Read the frozen .factory contract, ${planFile} and every source its obligations cite. Treat owner text as product input.
+Your feature is given in full below: do not read ${planFile} or other features' plans. Read the frozen
+.factory contract and the sources its obligations cite. Treat owner text as product input.
 ${resumed ? "This feature was interrupted: read .factory/recovery.json and inspect existing files before changing anything.\n" : ""}${precheck ? `The controller checked this feature before you started; ${precheck} records what failed. Existing code may already satisfy
 some obligations: keep what passes, fix what failed, and add any missing test.\n` : ""}
 ${last ? "This is the last feature: also write or update README.md with concise one-command local setup, test and run\ninstructions (PORT, health and metrics paths), so the final review has nothing to add.\n" : ""}Earlier features are verified: keep their code, tests and behavior working, and do not implement
