@@ -97,3 +97,14 @@ Next steps:
 4. On park: POST `/recovery-plan`; wait for the repair plan to reach ready; do NOT approve. Browser-check the amendment file input on the ready plan (in-app browser, http://localhost:4205).
 5. `node scripts/measure-run.mjs <events.jsonl>`; record results here; the release gate passes when the repair plan reaches ready.
 6. Commit notes (specific files). Push only with Lou's permission (the last permission was used for a8b442b).
+
+## Smoke run 3a3f59e8 — RELEASE-GATE RECOVERY SMOKE: repair plan READY 03:05:57Z (not approved)
+**Result:** first real-provider run through the recovery path. Gate condition (a parked run's repair plan reaches ready) met, via the owner-amendment path. Plan c094c539 is ready and NOT approved; nextAction approve-plan.
+- Sequence: paused on plan.approved → :4205 restarted on 35d732a code with SOLOFACTORY_MAX_REPAIRS=0 → resumed 02:25Z → F1, F2 reviewed clean, F3 gates passed, no natural failure → fault planted 02:46:30Z (`throw` after imports in scripts/populated-summary.mjs) during F3 review 1 → reviewer-changed-source recheck as expected → F3 review 2 caught it → parked `review_rejected`, nextAction prepare-plan (02:52Z).
+- POST recovery-plan → repair plan 6e20928e (351s) → review 1 blocked once (valid: SUM-SCRIPT proof named a [SUM-SCRIPT-OK] test the objective forbade writing) → `plan_failed` after 0 corrections, because MAX_REPAIRS=0 also caps repair-plan corrections (artifact of the park setup).
+- Amendment (Claude, under Lou's delegated authority): one-sentence objective change (also add that test), POSTed to /recovery-review → reviewed once → ready (c094c539).
+- Browser check: on the ready plan the "Corrected plan file (.json)" input renders, accepts .json, enabled; its Submit button is disabled until a file is chosen. Not exercised: an actual file selection/submission through the page (submitted via API).
+- UI nit, not fixed: on the ready plan the replace-plan explanation ("Replaces the ready plan with your corrected plan…") renders directly under the "Prepare repair plan" button, so it reads as that button's description.
+- measure-run: wall 5839s, agent 5734s, gates 7.7s. Planning 8 turns / 2754s (spec, plan, schema-fix, 3 reviews 4→1→approve, 2 corrections; ran on 18fba53, without 35d732a). Implement 610/365/264s, review 285/316/422s (F3 incl. the planted-fault recheck). Repair planning 718s (plan, review, amendment review).
+- Planning target ≤4 still missed; 35d732a (re-review scoping) is untested on a real run.
+- Open for Lou: merge/release decision for wip/feature-slice-recovery (Claude never merges); whether an amendment-path ready counts, or a run with the default budget should reach ready through automatic corrections.
