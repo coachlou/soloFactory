@@ -70,6 +70,27 @@ process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify
   }
 });
 
+test("Claude turns ignore the owner's personal config and write turns may run the plan's proofs", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "sf-claude-isolation-"));
+  const capture = path.join(cwd, "args.json");
+  await withFakeCli("claude", `require("node:fs").writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2)));
+process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({result:"ok"})));`, async () => {
+    const args = async (mode, context) => {
+      await createProvider("claude").run({ cwd, prompt: "ok", mode, context });
+      return JSON.parse(await readFile(capture, "utf8"));
+    };
+    const write = await args("write", { stage: "build-slice-F1", proofCommands: [["node", "scripts/process-check.mjs"], ["node", "scripts/process-check.mjs"]] });
+    assert.equal(write[write.indexOf("--setting-sources") + 1], "project,local");
+    assert.ok(write.includes("--strict-mcp-config"));
+    assert.equal(write[write.indexOf("--disallowedTools") + 1], "Agent");
+    assert.equal(write.filter((arg) => arg === "Bash(node scripts/process-check.mjs:*)").length, 1);
+    assert.ok(write.includes("Bash(node --test:*)"));
+    const read = await args("read", { stage: "review" });
+    assert.ok(read.includes("--strict-mcp-config"));
+    assert.ok(!read.includes("--allowedTools"));
+  });
+});
+
 test("the real Codex adapter sums every turn.completed and reports no cost", async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), "sf-codex-run-"));
   const turn = { type: "turn.completed", usage: { input_tokens: 23152, cached_input_tokens: 12032, cache_write_input_tokens: 0, output_tokens: 5, reasoning_output_tokens: 3 } };

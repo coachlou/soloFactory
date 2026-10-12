@@ -237,10 +237,19 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
     ? process.env.SOLOFACTORY_CLAUDE_REASONING_EFFORT || "low"
     : process.env.SOLOFACTORY_CLAUDE_EFFORT || "medium";
   const args = ["-p", "--no-session-persistence", "--output-format", "json", "--model", model, "--effort", effort];
+  // Agent turns must not inherit the owner's personal Claude Code config: on 2026-10-12 builds ran the user's
+  // Fable advisor (62% of a feature's cost), an rtk hook that rewrote commands, and every claude.ai connector.
+  args.push("--setting-sources", "project,local", "--strict-mcp-config");
   args.push("--permission-mode", mode === "read" ? "plan" : "acceptEdits");
   // Headless acceptEdits silently denies unlisted shell commands, so repair agents shipped fixes they could not run
-  // (~20 denials per repair on 2026-09-27). Allow only the commands the controller's own gates already run.
-  if (mode !== "read") args.push("--allowedTools", "Bash(npm install:*)", "Bash(npm test:*)", "Bash(npm run build:*)", "Bash(node .factory/check-plan.mjs:*)");
+  // (~20 denials per repair on 2026-09-27; 46 across smoke 11's builds). Allow the commands the controller's own
+  // gates run, including the plan's proof commands, plus read-only orientation.
+  if (mode !== "read") {
+    const proofs = [...new Set((context.proofCommands ?? []).map((command) => `Bash(${command.join(" ")}:*)`))];
+    args.push("--disallowedTools", "Agent");
+    args.push("--allowedTools", "Bash(npm install:*)", "Bash(npm test:*)", "Bash(npm run build:*)", "Bash(node .factory/check-plan.mjs:*)",
+      "Bash(node --test:*)", "Bash(ls:*)", "Bash(git ls-files:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", ...proofs);
+  }
   if (schema) args.push("--json-schema", JSON.stringify(schema));
   const result = await runProcess({
     executable: "claude",

@@ -1024,6 +1024,7 @@ export class SoloFactory {
         context: {
           stage: label,
           job,
+          proofCommands: planProofCommands(job),
           onActivity: () => monitor?.activity(),
           onSpawn: (child, { hardTimeoutMs } = {}) => { spawned = this.trackWorker(job, child, { kind: "agent", label, hardLimitMs: hardTimeoutMs ?? null }); },
           allowContinuation: () => this.allowContinuation(job, label),
@@ -1755,6 +1756,9 @@ function obligationCheck(item) {
 
 // The feature a turn or gate serves, for per-feature measurement; null while planning or integrating.
 const featureOf = (job) => job.recoveryPhase?.cursor?.id ?? job.featureCursor?.id ?? null;
+// Every proof the controller may gate on, so a builder or repair agent can run it before finishing.
+const planProofCommands = (job) => ((job.recoveryPhase?.plan ?? job.approvedPlan?.plan)?.slices ?? [])
+  .flatMap((slice) => slice.acceptance ?? []).map((item) => item?.proof?.command).filter(Array.isArray);
 const caseCounts = (results) => results ? Object.values(results).reduce((counts, { status }) => ({ ...counts, [status]: (counts[status] ?? 0) + 1 }), {}) : undefined;
 
 function stageKind(label = "unknown") {
