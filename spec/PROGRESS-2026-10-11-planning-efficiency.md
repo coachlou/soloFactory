@@ -80,7 +80,7 @@ A full read of spec/, PROGRESS.md, SPEC.md, README.md and .aai/ found 26 open it
 - If it fails planning: the next run goes on HEAD with both fixes; the stopping rule applies to that run.
 - 35d732a: later plan-review rounds get `priorBlockers` (accumulated) in plan-review-request.json and check those plus regressions/unrunnable proofs only. Suite 284/284.
 
-## RESUME HERE after /clear (written 02:17Z 2026-10-12)
+## (Superseded) resume notes for the 3a3f59e8 smoke — done; see the CURRENT STATE section at the end
 **Bottom line:** run 3a3f59e8 passed planning (8 turns incl. spec: plan, schema-fix, review 4 blockers → correction → review 1 new blocker → correction → approved 02:14Z). A pause was POSTed on approval; the run parks after its current turn (build-slice-SKELETON-STORE). Recovery path still not exercised.
 
 State outside the repo (background tasks from the old context are NOT tracked after a clear):
@@ -108,3 +108,9 @@ Next steps:
 - measure-run: wall 5839s, agent 5734s, gates 7.7s. Planning 8 turns / 2754s (spec, plan, schema-fix, 3 reviews 4→1→approve, 2 corrections; ran on 18fba53, without 35d732a). Implement 610/365/264s, review 285/316/422s (F3 incl. the planted-fault recheck). Repair planning 718s (plan, review, amendment review).
 - Planning target ≤4 still missed; 35d732a (re-review scoping) is untested on a real run.
 - Open for Lou: merge/release decision for wip/feature-slice-recovery (Claude never merges); whether an amendment-path ready counts, or a run with the default budget should reach ready through automatic corrections.
+
+## CURRENT STATE — read this first after /clear (03:15Z 2026-10-12)
+- Recovery smoke DONE: run 3a3f59e8 repair plan c094c539 is ready, NOT approved. Never call /recovery-start on it.
+- :4205 still runs from this worktree (35d732a code, SOLOFACTORY_MAX_REPAIRS=0). Leave it or stop it (pid via `lsof -nP -iTCP:4205 -sTCP:LISTEN`); restart with the default budget before any new smoke.
+- Waiting on Lou: (1) does an amendment-path ready satisfy the release gate, or run one more smoke with default budget that reaches ready via automatic corrections; (2) merge/release of wip/feature-slice-recovery (Claude never merges); (3) push of commits after a8b442b.
+- Next dev work if Lou wants it: a real run on HEAD to test 35d732a (re-review scoping) against the ≤4 planning-turn target; stopping rule applies (another novel late-round blocker → stop iterating prompts, hand Lou the blocker lists). Optional UI nit: replace-plan explanation renders under "Prepare repair plan".
