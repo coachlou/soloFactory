@@ -245,6 +245,28 @@ test("a run saved before install and integration results were recorded reinstall
     const gates = (await run.store.events(run.job.id, Infinity)).slice(mark).filter((event) => event.type === "gate.passed").map((event) => event.gate);
     assert.ok(gates.includes("install") && gates.includes("test"), `resume reinstalled and re-verified: ${gates}`);
   }
+  // Parked mid-check on a later feature: with no install record, the resumed check reinstalls.
+  {
+    let factory, jobId, builds = 0;
+    const commandRunner = async (options) => {
+      if (gateOf(options) === "build" && ++builds === 2) { await factory.pause(jobId); return { code: 1, output: "1 failing" }; }
+      return { code: 0, output: "passed" };
+    };
+    const run = await plannedRun({ after: scopedProofs, commandRunner });
+    ({ factory } = run);
+    jobId = run.job.id;
+    const parked = await factory.start(jobId);
+    assert.equal(parked.state, "paused", parked.error?.message);
+    assert.equal(parked.featureCursor.substage, "checking");
+    assert.equal(parked.featureCursor.id, "SLICE-UI");
+    await legacy(run.store, jobId);
+    const mark = (await run.store.events(jobId, Infinity)).length;
+    const resumed = await run.make().resume(jobId);
+    assert.equal(resumed.state, "completed", resumed.error?.message);
+    const gates = (await run.store.events(jobId, Infinity)).slice(mark).filter((event) => event.type === "gate.started").map((event) => event.gate);
+    assert.equal(gates[0], "install", `the resumed check reinstalled first: ${gates}`);
+    assert.ok(resumed.installedDeps, "install result recorded again");
+  }
   // Parked at the final review: with no recorded integration result, the post-review verify cannot be skipped.
   {
     let failed = false;
