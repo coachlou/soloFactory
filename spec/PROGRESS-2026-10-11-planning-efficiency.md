@@ -88,6 +88,8 @@ State outside the repo (background tasks from the old context are NOT tracked af
 - Run: `J=2026-10-12-3a3f59e8`, project dir `.solofactory/smoke-watchdog/projects/smoke-cases-8`, events `$P/.solofactory/runs/$J/events.jsonl`. State: `curl -s localhost:4205/api/jobs/$J`.
 - Routes: POST `/api/jobs/$J/pause`, `/resume`, `/recovery-plan` (prepare repair plan), `/recovery-start` (= approve: NEVER call). `nextAction` in the job JSON names the next valid endpoint.
 
+- **Update 02:25Z:** steps 1–2 done. Paused, :4205 restarted (pid via lsof) on HEAD code with SOLOFACTORY_MAX_REPAIRS=0, resumed into feature 1 review. Continue from step 3.
+
 Next steps:
 1. Wait until state is paused. Kill the :4205 server (pid from lsof above), restart it in the background with the same env plus `SOLOFACTORY_MAX_REPAIRS=0` (restarting on HEAD 35d732a code is fine; the plan is already approved).
 2. POST `/resume`. Any gate failure now parks with nextAction prepare-plan.
