@@ -854,3 +854,25 @@ PRD: `spec/PRD-exhausted-plan-amendment-recovery.md`.
   covered by the existing fresh-budget assertions kept in `feature-recovery.test.mjs`.
 - Gaps: no real-provider smoke test; no browser-driven test of the file input (source checks only); duplicate detection for legacy phases is
   best-effort (only the last on-disk plan); Node 24 was not available, tests ran on Node v26.5.0.
+
+## Smoke 11 vs smoke 9: pipeline optimizations (2026-10-12, wip/feature-slice-recovery)
+
+Smoke 11: project smoke-cases-11, run 2026-10-12-20e1e4ce, home `.solofactory/smoke-watchdog`, smoke 9 brief, HEAD 3fa33da, Claude
+with Opus reasoning. Completed and deployed. Baseline: smoke 9 (07631040, Fable reasoning).
+
+| | Smoke 9 | Smoke 11 |
+|---|---|---|
+| Wall / agent / gate time | 3289 / 3258.5 / 29.2 s | 2110.3 / 2098.4 / 10.6 s |
+| Planning turns (incl. spec) / time | 6 / 1461 s | 5 / 435 s |
+| Plan correction | 533 s | 138 s |
+| Final review | 297.7 s | 64.3 s |
+| Full-suite `test` runs / installs | 5 / 3 | 2 / 1 |
+| Tokens in / out | 21.7M / 221K | 14.2M / 134K |
+
+- Planning turns missed the ≤4 target by one: the builder-side check-plan ran (not denied after 3fa33da) but one correction remained.
+- T5 ran correctly: the scoped final reviewer fixed a real crash (`new URL(req.url)` outside the try in src/server.js) and added a test.
+- Last feature wrote the README. F1 needed one 354 s repair because its script proof printed its own ok lines and recorded no
+  cases; c28b480 tells builders cased proofs must run under node:test.
+- Caveat: Opus vs Fable confounds the planning and review timings. Smoke 10 (Fable) hit the subscription limit after 9 m / $6.48;
+  c4a7c0e makes Opus the reasoning default.
+- Next cost centre: feature builds, ~1120 s of 2100 s (F1 516 s + repair).
