@@ -418,7 +418,13 @@ End with a one-line summary.`;
 export const ALL_BLOCKERS = `Audit the whole plan before writing the verdict and list EVERY blocker you find, one entry each:
 the planner fixes them all in one correction, so a blocker held back costs a full extra round.`;
 
-export function planAuditPrompt({ followOn = false } = {}) {
+// Smoke 90b8b32e and 29924815: every later round found new nits in parts no correction touched, so
+// corrections ran out on reviewer variance. Feature reviews and gates still judge what gets built.
+const REREVIEW = `This is a later review round: plan-review-request.json lists the priorBlockers earlier rounds
+raised. Check each one is resolved. Elsewhere, block only on a regression the corrections introduced or a
+proof that cannot run as written; do not raise new findings about parts earlier rounds accepted.`;
+
+export function planAuditPrompt({ followOn = false, rereview = false } = {}) {
   return `You are the independent planning reviewer. No build has started. Read
 .factory/plan-request.json, .factory/plan-review-request.json, .factory/requirements.json, PRD.md,
 PLAN.md, ACCEPTANCE.md, EVERY source file plan-review-request.json lists and .factory/slices.json${followOn ? ", plus the existing app and tests (inspect delivered\nbehavior and regression evidence before accepting that work is already done)" : ""}.
@@ -431,7 +437,7 @@ plan voids your verdict. Write:
 ${PLAN_CHECKLIST}
 ${CONTROLLER_FACTS}
 
-${ALL_BLOCKERS} Approve only a plan you would build as written.`;
+${ALL_BLOCKERS}${rereview ? `\n${REREVIEW}` : ""} Approve only a plan you would build as written.`;
 }
 
 export function planCorrectionPrompt(blockers) {

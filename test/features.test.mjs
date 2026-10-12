@@ -30,7 +30,7 @@ async function plannedRun({ after = async () => {}, commandRunner = passing, upl
   const fixture = createFixtureProvider();
   const provider = { id: "fixture", async run(options) {
     const result = await fixture.run(options);
-    await after(options.context.stage, options.cwd, options.context);
+    await after(options.context.stage, options.cwd, options.context, options.prompt);
     return result;
   } };
   const make = (overrides = {}) => new SoloFactory({ store, provider, commandRunner, deployer, ...overrides });
@@ -596,10 +596,11 @@ test("changed inputs get a repair plan that keeps verified features and names th
 });
 
 for (const corrected of [false, true]) test(`a feature plan omitting detailed supplied requirements ${corrected ? "is corrected before" : "blocks before any"} build`, async () => {
-  const sourceRequests = [];
-  const { store, job, factory } = await plannedRun({ uploads: { "SPEC.md": "§3 EXIF offsets: group by calendar day in the capture offset.\n" }, after: async (stage, cwd) => {
+  const sourceRequests = [], reviews = {};
+  const { store, job, factory } = await plannedRun({ uploads: { "SPEC.md": "§3 EXIF offsets: group by calendar day in the capture offset.\n" }, after: async (stage, cwd, context, prompt) => {
     const planFile = path.join(cwd, ".factory/slices.json");
     if (stage === "feature-plan") sourceRequests.push(await json(path.join(cwd, ".factory/plan-request.json")));
+    if (stage.startsWith("plan-review-")) reviews[stage] = { request: await json(path.join(cwd, ".factory/plan-review-request.json")), prompt };
     if (corrected && stage.startsWith("plan-correction-")) await patch(planFile, (plan) => {
       plan.slices[1].acceptance.push({ id: "EXIF-1", behavior: "Calendar-day grouping honors EXIF offsets", refs: plan.slices[1].closes.slice(0, 1), sources: [{ path: ".factory/uploads/SPEC.md", locator: "§3 EXIF offsets" }], proof: { command: ["npm", "test"], expect: "exif offsets test passes" } });
     });
@@ -613,6 +614,11 @@ for (const corrected of [false, true]) test(`a feature plan omitting detailed su
   assert.ok(sourceRequests[0].sources.some((ref) => ref.path === ".factory/uploads/SPEC.md"), "the planner sees supplied specs");
   // The controller's own Node runs every gate; a planner that cannot run it read-only once spent a correction marking it blocked.
   assert.equal(sourceRequests[0].toolchain.node, process.version);
+  // Smoke 90b8b32e/29924815: later rounds found new nits each time; they now judge the earlier blockers.
+  assert.equal(reviews["plan-review-1"].request.priorBlockers, undefined);
+  assert.doesNotMatch(reviews["plan-review-1"].prompt, /priorBlockers/);
+  assert.deepEqual(reviews["plan-review-2"].request.priorBlockers, ["SPEC.md §3 EXIF offsets has no obligation", "SC-1 lacks a failure case"]);
+  assert.match(reviews["plan-review-2"].prompt, /priorBlockers/);
   if (corrected) {
     assert.equal(result.state, "completed", result.error?.message);
     assert.ok(result.approvedPlan.plan.slices[1].acceptance.some((item) => item.id === "EXIF-1"));

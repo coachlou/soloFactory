@@ -296,7 +296,7 @@ export class SoloFactory {
       // since then is the owner's revision: re-baseline it and give it a fresh correction budget.
       if (job.planVersion === 2 && !job.approvedPlan && !job.recoveryPhase && previousError?.code === "plan_blocked" && await initialInputsRevised(this.store, job)) {
         job.planBaseline.inputs = digest(await sourceSet(appDir, runInputs(job)));
-        Object.assign(job, { planCorrections: 0, planSchemaFixes: 0, planBlockedDigests: [] });
+        Object.assign(job, { planCorrections: 0, planSchemaFixes: 0, planBlockedDigests: [], planBlockerHistory: [] });
         await this.emit(job.id, { type: "plan.inputs_revised", state: failedState, message: "The supplied specs changed since the plan was blocked; plan review restarts with a fresh correction budget." });
       }
       job.error = null;
@@ -574,10 +574,11 @@ export class SoloFactory {
       else {
         this.takePause("specifying");
         const planDigest = digest(plan);
-        const request = await preparePlanReview(appDir, job, planDigest, { checks, sources });
+        const priorBlockers = job.planBlockerHistory ?? [];
+        const request = await preparePlanReview(appDir, job, planDigest, { checks, sources, ...(priorBlockers.length && { priorBlockers }) });
         job.planReviews += 1;
         await this.store.writeState(job);
-        await this.invoke(job, `plan-review-${job.planReviews}`, planAuditPrompt({ followOn: job.followOn }), signal);
+        await this.invoke(job, `plan-review-${job.planReviews}`, planAuditPrompt({ followOn: job.followOn, rereview: priorBlockers.length > 0 }), signal);
         await guard();
         const after = await readPlan();
         if (after instanceof Error || digest(after) !== planDigest) {
@@ -591,6 +592,7 @@ export class SoloFactory {
           blockers = error.details.blockers.length ? error.details.blockers : [error.message];
           // Durable, so neither a restart nor switching back to an earlier rejected plan buys another review.
           job.planBlockedDigests = [...new Set([...(job.planBlockedDigests ?? []), await planFileDigest(appDir)])];
+          job.planBlockerHistory = [...new Set([...(job.planBlockerHistory ?? []), ...blockers])];
           await this.store.writeState(job);
         }
       }
