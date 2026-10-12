@@ -426,7 +426,8 @@ ${CONTROLLER_FACTS}
 A fresh reviewer audits the exact plan before any build against this checklist. Check the whole
 plan against it yourself before you finish:
 ${PLAN_CHECKLIST}
-Before you finish, run node .factory/check-plan.mjs: it applies the controller's own validation to
+Before you finish, run exactly node .factory/check-plan.mjs as its own command from your working directory
+(no cd, absolute path or chaining: any other form is denied permission). It applies the controller's own validation to
 slices.json. Fix every error it prints and rerun it until it prints OK; an invalid plan costs a whole
 extra turn.
 End with a one-line summary.`;
@@ -471,7 +472,8 @@ blocker without narrowing, waiving or dropping any original requirement. Do not 
 entries you changed (and anything that references them) against the reviewer's checklist:
 ${PLAN_CHECKLIST}
 ${CONTROLLER_FACTS}
-Before you finish, run node .factory/check-plan.mjs: it applies the controller's own validation to
+Before you finish, run exactly node .factory/check-plan.mjs as its own command from your working directory
+(no cd, absolute path or chaining: any other form is denied permission). It applies the controller's own validation to
 slices.json. Fix every error it prints and rerun it until it prints OK; an invalid plan costs a whole
 extra turn.
 Blockers:

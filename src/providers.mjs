@@ -240,7 +240,7 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
   args.push("--permission-mode", mode === "read" ? "plan" : "acceptEdits");
   // Headless acceptEdits silently denies unlisted shell commands, so repair agents shipped fixes they could not run
   // (~20 denials per repair on 2026-09-27). Allow only the commands the controller's own gates already run.
-  if (mode !== "read") args.push("--allowedTools", "Bash(npm install:*)", "Bash(npm test:*)", "Bash(npm run build:*)", "Bash(node .factory/check-plan.mjs)");
+  if (mode !== "read") args.push("--allowedTools", "Bash(npm install:*)", "Bash(npm test:*)", "Bash(npm run build:*)", "Bash(node .factory/check-plan.mjs:*)");
   if (schema) args.push("--json-schema", JSON.stringify(schema));
   const result = await runProcess({
     executable: "claude",
