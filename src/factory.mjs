@@ -765,7 +765,9 @@ export class SoloFactory {
         await save("checking");
       }
       if (cursor.substage === "checking") {
-        job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: true, slice, proofs: runnable.filter((item) => item.proof) });
+        // Feature-scoped: build plus this feature's proofs, installing only when its dependencies changed.
+        // The whole suite first runs at final integration.
+        job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: await depsDigest(appDir) !== job.installedDeps, slice, proofs: runnable.filter((item) => item.proof) });
         cursor.candidate = await candidate();
         await save("reviewing");
       }

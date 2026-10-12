@@ -172,6 +172,7 @@ test("a feature's checks run its own proofs without the whole suite; after a rep
   // The repair left dependencies alone, so install does not rerun.
   assert.deepEqual(order.slice(failed + 1, failed + 3), ["proof-SKELETON-1", "build"]);
   assert.ok(order.includes("test"), "the whole suite still runs at final integration");
+  assert.equal(order.filter((gate) => gate === "install").length, 1, "later features and integration reuse the first install");
 });
 
 test("the post-review integration verify runs only when the final reviewer changed source", async () => {
@@ -268,7 +269,8 @@ test("telemetry measures each feature's turns and gates, bound to the candidate 
   assert.deepEqual(measurement.buckets.map((b) => b.id).sort(), ["SLICE-SKELETON", "SLICE-UI", "integration", "planning"]);
   for (const id of ["SLICE-SKELETON", "SLICE-UI"]) {
     const b = measurement.buckets.find((item) => item.id === id);
-    assert.ok(b.gates.runs >= 3 && b.agent.byActivity.implement >= 0 && b.agent.byActivity.review >= 0, id);
+    // A feature with unchanged dependencies runs only its build and its own proofs.
+    assert.ok(b.gates.runs >= 2 && b.agent.byActivity.implement >= 0 && b.agent.byActivity.review >= 0, id);
   }
   const gates = (await store.events(job.id, Infinity)).filter((event) => event.type === "gate.started" && event.gate !== "install");
   assert.ok(gates.every((event) => /^[0-9a-f]{64}$/.test(event.candidate) && Array.isArray(event.command)));
