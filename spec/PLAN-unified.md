@@ -7,13 +7,14 @@ This plan merges three sources:
 - the open INBOX audit "nested regression replay and final candidate composition".
 
 Steps are ordered by leverage: the biggest time or risk cut per unit of work comes first. Each step is a separate
-commit (or small series), with acceptance criteria proved by `npm test` and cheap targeted checks. Real-provider
-smoke runs (~35 min, ~$20) are batched: one per group of agent-behaviour changes, not one per step.
+commit (or small series), with acceptance criteria proved by `npm test` and cheap targeted checks. The factory is
+developed the way the PRD wants it to develop apps: the real-provider smoke run (~35 min, ~$20) is **release QA**,
+run once before a release (push or install), never per step. Its findings come back as owned fixes.
 
 | # | Step | Source | Size | Why here |
 |---|---|---|---|---|
 | 1 | **Hermetic, verifiable agent turns** | Design A+B | S | 46 permission denials and a Fable advisor in every build; the F1 repair (354 s) came from a blocked proof run. Biggest cut for the least code. |
-| 2 | Smoke rerun and measurement | Design plan | – | Success: 0 denials, no Fable in `modelUsage`, builds plus repairs under 900 s (from 1478 s). |
+| 2 | *(moved to release QA)* | Design plan | – | Pre-release smoke checks: 0 denials, no Fable in `modelUsage`, builds plus repairs under 900 s (from 1478 s). |
 | 3 | Inline the builder's own slice | Design D | S | Stops the full 31 KB `slices.json` dump in every build and repair. Decide from step 2's logs. |
 | 4 | Per-release fixed-cost measurement | PRD (pre-stage 1) | – | No code: run one brief as one job vs three follow-on briefs. Sizes the payoff of stages 2–4. |
 | 5 | Feature records and declared `writes` | PRD stage 1 | L | Fixes the Restart-from-slice budget refill defect. Prerequisite for impact selection and for continuing past a blocked feature. |
@@ -42,7 +43,7 @@ smoke runs (~35 min, ~$20) are batched: one per group of agent-behaviour changes
 - [ ] A unit test asserts the args contain the isolation flags.
 - [ ] A unit test asserts a build turn's allow-list contains its feature's proof commands.
 - [ ] `npm test` passes.
-- [ ] Smoke 12 shows 0 permission denials and no `claude-fable` in any build's `modelUsage`.
+- [ ] Release-QA smoke shows 0 permission denials and no `claude-fable` in any build's `modelUsage`.
 
 ## Open questions (from the PRD, decide by step 7)
 
