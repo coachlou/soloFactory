@@ -46,6 +46,15 @@ test("every worker prompt keeps owner data in data/ and tests out of it", () => 
   }
 });
 
+test("the final review is scoped to integration and deploy readiness only after feature reviews", () => {
+  const scoped = reviewPrompt({ featureReviewed: true });
+  assert.match(scoped, /cross-feature/);
+  assert.match(scoped, /health endpoint/);
+  assert.doesNotMatch(reviewPrompt(), /cross-feature/);
+  // Scoping never drops the per-check verdict contract the controller validates.
+  for (const prompt of [scoped, reviewPrompt()]) assert.match(prompt, /exactly one \{id,status,evidence\} per check/);
+});
+
 test("full lifecycle reaches completed only after real health and metrics checks", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-test-"));
   const store = new JobStore(root);

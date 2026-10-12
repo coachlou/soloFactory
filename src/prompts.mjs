@@ -253,10 +253,24 @@ checks and leave the app ready for the controller to rerun every gate.
 ${DATA_RULE}`;
 }
 
-export function reviewPrompt() {
+// Deliberate scoping: in feature mode each feature already passed a candidate-bound scoped review of its own
+// obligations, and the controller reran every feature and integration proof just before this turn. Re-auditing
+// each obligation from scratch duplicated that work (smoke 9: 298 s final review), so the final reviewer
+// concentrates on what no feature review could see. Every check still gets a review-result.json entry.
+const FEATURE_REVIEWED_SCOPE = `
+Every feature already passed its own scoped review, and the controller reran every feature and
+integration proof just before this review. Do not re-audit individual obligations from scratch.
+Spend this review on what no single feature review could see: integration (cross-feature
+interactions, shared state such as storage, config and middleware, and API consistency of routes,
+error shapes and status codes across features) and deploy readiness (the health endpoint, the
+metrics endpoint, and startup behavior: PORT, first run with missing data directories or files).
+For a check a feature review already covered, confirm its cited test still exists and cite it as
+evidence; reopen it only when the integration or deploy audit shows it no longer holds.`;
+
+export function reviewPrompt({ featureReviewed = false } = {}) {
   return `You are the final implementation reviewer. Audit the current app against every
 requirement in .factory/PRD.md and every scenario in .factory/ACCEPTANCE.md. Inspect the real
-code and tests. Fix concrete correctness, wiring, error-handling, accessibility, privacy, or
+code and tests.${featureReviewed ? FEATURE_REVIEWED_SCOPE + "\n" : " "}Fix concrete correctness, wiring, error-handling, accessibility, privacy, or
 operator-documentation gaps you find. Keep the scope small. Do not deploy and do not claim a
 gate passed; the controller will rerun tests, build, health, and telemetry checks afterward.
 Write a concise review record to .factory/REVIEW.md. Also read .factory/review-request.json

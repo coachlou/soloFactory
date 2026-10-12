@@ -426,7 +426,7 @@ export class SoloFactory {
       job.reviewContractDigest = request.contractDigest;
       job.reviewRequest = request;
       await this.store.writeState(job);
-      await this.invoke(job, "review", reviewPrompt(), signal);
+      await this.invoke(job, "review", reviewPrompt({ featureReviewed: job.planVersion === 2 }), signal);
       try {
         await this.requireReview(job);
       } catch (failure) {
