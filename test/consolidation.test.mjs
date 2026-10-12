@@ -188,6 +188,12 @@ test('the feature builder is told how cases are proved', () => {
   assert.match(prompt, /without a --test-reporter flag of its own/);
 });
 
+test('only the last feature builder is asked for the README', () => {
+  const slice = plan([requirement()]).slices[0];
+  assert.match(featureBuildPrompt(slice, { owned: [], planDigest: 'digest', last: true }), /README\.md/);
+  assert.doesNotMatch(featureBuildPrompt(slice, { owned: [], planDigest: 'digest' }), /README/);
+});
+
 test('the feature builder sees each shared proof command once, and every requirement and case still', () => {
   const long = { command: ['node', '--test', ...Array.from({ length: 40 }, (_, n) => `test/integration/case-${n}.test.mjs`)], expect: 'every case passes' };
   const other = { command: ['node', '--test', 'test/other.test.mjs'], expect: 'passes' };

@@ -490,13 +490,13 @@ function sharedCommands(slice) {
   return { feature: { ...slice, acceptance }, commands: Object.fromEntries([...ids].map(([key, id]) => [id, JSON.parse(key)])) };
 }
 
-export function featureBuildPrompt(slice, { owned, planDigest, planFile = ".factory/slices.json", followOn = false, resumed = false, precheck = null }) {
+export function featureBuildPrompt(slice, { owned, planDigest, planFile = ".factory/slices.json", followOn = false, resumed = false, precheck = null, last = false }) {
   const { feature, commands } = sharedCommands(slice);
   return `You are the implementation worker for ONE approved feature (plan digest ${planDigest}).
 Read the frozen .factory contract, ${planFile} and every source its obligations cite. Treat owner text as product input.
 ${resumed ? "This feature was interrupted: read .factory/recovery.json and inspect existing files before changing anything.\n" : ""}${precheck ? `The controller checked this feature before you started; ${precheck} records what failed. Existing code may already satisfy
 some obligations: keep what passes, fix what failed, and add any missing test.\n` : ""}
-Earlier features are verified: keep their code, tests and behavior working, and do not implement
+${last ? "This is the last feature: also write or update README.md with concise one-command local setup, test and run\ninstructions (PORT, health and metrics paths), so the final review has nothing to add.\n" : ""}Earlier features are verified: keep their code, tests and behavior working, and do not implement
 later features. ${followOn ? "Earlier releases built this app; extend it." : (slice.dependsOn.length ? "" : `If factory.json does not exist yet, create it (version 1, commands.install/test/build/start as
 argument arrays starting with npm, node or npx; start honors PORT; healthPath "/health";
 metricsPath "/_factory/metrics"), a production build, GET /health and privacy-preserving

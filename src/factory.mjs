@@ -762,7 +762,9 @@ export class SoloFactory {
         cursor.implementStarted = true;
         await this.store.writeState(job);
         const label = resumed ? labels.resume : labels.build;
-        const prompt = featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed, precheck: cursor.precheck });
+        // The last feature writes the README; left to the final reviewer it is a source change that forces the post-review gate rerun.
+        const [index, total] = position.split("/");
+        const prompt = featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed, precheck: cursor.precheck, last: index === total });
         await this.invoke(job, label, prompt, signal, { resumeSessionId: this.resumeSessionFor(job, label) });
         await save("checking");
       }
