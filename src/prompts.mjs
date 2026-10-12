@@ -331,9 +331,10 @@ export const CONSOLIDATION_RULES = `- Consolidate overlapping obligations into o
 // How the controller runs proofs. Planners lacked these facts and wrote proofs that could never
 // pass (e.g. asserting a clean git tree before the feature's checkpoint commit), costing a review round and repairs.
 export const CONTROLLER_FACTS = `How the controller runs proofs:
-- Gates run in the project root on the uncommitted working tree, in order install, test, build,
-  then each proof command, stopping at the first failure. Each command has a time limit (5 minutes
-  by default).
+- Gates run in the project root on the uncommitted working tree, stopping at the first failure.
+  A feature's checks run build + that feature's own proofs (install only when dependencies changed).
+  Final integration runs install, test, build + all proofs: the whole test suite runs there, not per
+  feature. Each command has a time limit (5 minutes by default).
 - The factory commits (git add -A) only after a feature passes its review, so while its gates run
   the feature's new files are untracked. Never assert on git status, a clean tree or commit history.
 - data/ is gitignored owner data; tests use a temporary directory, never data/. The app starts with
@@ -487,7 +488,7 @@ Write each obligation's proof test first, then the minimum real behavior that pa
 string assertions do not prove user behavior. An obligation with cases needs one node:test per case
 whose name contains [CASE-ID], run by its proof command without a --test-reporter flag of its own; the
 controller passes it only when every case's own test passed. Do not edit .factory contract or plan files. Do not
-deploy; the controller reruns install/test/build and every proof command, then a scoped review.
+deploy; the controller runs build and this feature's proof commands, then a scoped review.
 
 ${DATA_RULE}`;
 }
@@ -495,7 +496,8 @@ ${DATA_RULE}`;
 export function featureReviewPrompt(slice) {
   return `You are the scoped reviewer for ONE feature. Review it against every check in
 .factory/review-request.json: its obligations and the original requirements it closes. The
-controller already ran its proof commands, test and build on this exact candidate; their output is in
+controller already ran build and the feature's own proof commands on this exact candidate (the whole
+test suite runs at final integration, not per feature); their output is in
 .factory/logs/<gate>-<attempt>.log. Do not rerun them. Read the proofs and their logs, and run only
 targeted checks of real behavior the proofs do not exercise. A requirement with cases passes only when every case is
 "passed" in the request's caseResults (the controller's own record of the tests named [CASE-ID]). For a

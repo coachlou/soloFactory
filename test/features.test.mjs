@@ -190,6 +190,82 @@ test("the post-review integration verify runs only when the final reviewer chang
   }
 });
 
+// Neither feature's proof is the whole suite, so only final integration runs npm test.
+const scopedProofs = async (stage, cwd) => {
+  if (stage === "feature-plan") await patch(path.join(cwd, ".factory/slices.json"), (plan) => {
+    plan.slices[0].acceptance[0].proof.command = ["node", "e2e/skeleton.mjs"];
+    plan.slices[1].acceptance[0].proof.command = ["node", "--test", "ui.test.mjs"];
+  });
+};
+
+test("a later feature that breaks an earlier feature's test is caught and repaired at final integration", async () => {
+  const order = [];
+  let broken = false;
+  const after = async (stage, cwd) => {
+    await scopedProofs(stage, cwd);
+    if (stage === "build-slice-SLICE-UI") broken = true;
+    if (stage.startsWith("repair-")) { broken = false; await writeFile(path.join(cwd, "regression-fix.js"), "// fixed\n"); }
+  };
+  const commandRunner = async (options) => {
+    order.push(gateOf(options));
+    return [options.executable, ...options.args].join(" ") === "npm test" && broken ? { code: 1, output: "server.test.mjs: 1 failing" } : { code: 0, output: "passed" };
+  };
+  const { store, job, factory } = await plannedRun({ after, commandRunner });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  const events = await store.events(job.id, Infinity);
+  const lastFeature = events.findLastIndex((event) => event.type === "slice.completed");
+  assert.ok(!events.slice(0, lastFeature).some((event) => event.type === "gate.started" && event.gate === "test"), "feature checks never ran the whole suite");
+  const final = events.slice(lastFeature);
+  assert.ok(final.some((event) => event.type === "gate.failed" && event.gate === "test"), "integration caught the regression");
+  assert.equal(count(await started(store, job.id), "repair-"), 1, "one integration repair, no feature repairs");
+  assert.ok(final.findLastIndex((event) => event.type === "gate.passed" && event.gate === "test") > final.findIndex((event) => event.type === "gate.failed"), "the suite passes after the repair");
+});
+
+test("a run saved before install and integration results were recorded reinstalls and re-verifies on resume", async () => {
+  const legacy = async (store, id) => {
+    const file = path.join(store.jobDir(id), "state.json");
+    await patch(file, (state) => { delete state.installedDeps; delete state.integrationVerified; });
+  };
+  // Parked at integration: resume reinstalls and reruns the whole suite.
+  {
+    let timedOut = false;
+    const commandRunner = async (options) => {
+      const gate = gateOf(options);
+      if (gate === "test" && !timedOut) { timedOut = true; return { code: null, timedOut: true, timeoutReason: "hard", output: "interrupted" }; }
+      return { code: 0, output: "passed" };
+    };
+    const run = await plannedRun({ after: scopedProofs, commandRunner });
+    const parked = await run.factory.start(run.job.id);
+    assert.equal(parked.error?.code, "gate_timeout");
+    await legacy(run.store, run.job.id);
+    const mark = (await run.store.events(run.job.id, Infinity)).length;
+    const resumed = await run.make().resume(run.job.id);
+    assert.equal(resumed.state, "completed", resumed.error?.message);
+    const gates = (await run.store.events(run.job.id, Infinity)).slice(mark).filter((event) => event.type === "gate.passed").map((event) => event.gate);
+    assert.ok(gates.includes("install") && gates.includes("test"), `resume reinstalled and re-verified: ${gates}`);
+  }
+  // Parked at the final review: with no recorded integration result, the post-review verify cannot be skipped.
+  {
+    let failed = false;
+    const after = async (stage, cwd) => {
+      await scopedProofs(stage, cwd);
+      if (stage === "review" && !failed) { failed = true; throw Object.assign(new Error("review turn crashed"), { code: "provider_failed" }); }
+    };
+    const run = await plannedRun({ after });
+    const parked = await run.factory.start(run.job.id);
+    assert.equal(parked.state, "failed");
+    assert.equal(parked.failedState, "reviewing");
+    await legacy(run.store, run.job.id);
+    const mark = (await run.store.events(run.job.id, Infinity)).length;
+    const resumed = await run.make().resume(run.job.id);
+    assert.equal(resumed.state, "completed", resumed.error?.message);
+    const events = (await run.store.events(run.job.id, Infinity)).slice(mark);
+    assert.ok(!events.some((event) => event.type === "gate.skipped"), "nothing is skipped without a recorded result");
+    assert.ok(events.some((event) => event.type === "gate.passed" && event.gate === "test"), "the whole suite reran before completion");
+  }
+});
+
 test("a repair that changes dependencies reinstalls before the next check", async () => {
   const order = [];
   let failures = 1;
