@@ -231,7 +231,7 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
   await mkdir(cwd, { recursive: true });
   const reasoningTask = /^(specification(?:-|$)|feature-plan(?:-|$)|plan-review$|plan-correction-|recovery-plan-)|(?:^|-)review(?:-|$)/.test(context.stage ?? "");
   const model = reasoningTask
-    ? process.env.SOLOFACTORY_CLAUDE_REASONING_MODEL || "fable"
+    ? process.env.SOLOFACTORY_CLAUDE_REASONING_MODEL || "opus"
     : process.env.SOLOFACTORY_CLAUDE_MODEL || "opus";
   const effort = reasoningTask
     ? process.env.SOLOFACTORY_CLAUDE_REASONING_EFFORT || "low"

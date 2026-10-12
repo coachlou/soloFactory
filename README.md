@@ -69,15 +69,15 @@ factory. Resume the preserved run after restarting; its completed features remai
 ## Claude model settings
 
 Claude uses `opus` with `medium` effort for the Guide, coding, and repairs.
-Plan correction also uses `opus`. Specification, feature planning, plan review, recovery planning,
-feature review, and final AI review use `fable` with `low` effort. Model aliases
+Specification, feature planning, plan review, plan correction, recovery planning, feature review,
+and final AI review also use `opus`, with `low` effort. Model aliases
 resolve through the installed Claude Code CLI. Deterministic tests run as commands and do not use a model.
 
 Override either profile when starting the factory:
 
 ```bash
 SOLOFACTORY_CLAUDE_MODEL=opus SOLOFACTORY_CLAUDE_EFFORT=medium \
-SOLOFACTORY_CLAUDE_REASONING_MODEL=fable SOLOFACTORY_CLAUDE_REASONING_EFFORT=low npm start
+SOLOFACTORY_CLAUDE_REASONING_MODEL=opus SOLOFACTORY_CLAUDE_REASONING_EFFORT=low npm start
 ```
 
 These profiles apply to Claude runs; the provider of an existing run remains

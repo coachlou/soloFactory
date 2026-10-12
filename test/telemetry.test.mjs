@@ -57,7 +57,7 @@ process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify
         assert.equal(args[args.indexOf("--effort") + 1], effort, stage);
       };
       for (const stage of ["interview", "build", "build-resume", "build-slice-PEOPLE", "slice-resume-PEOPLE", "repair-2", "recovery-feature-PEOPLE"]) await run(stage, "opus", "medium");
-      for (const stage of ["specification", "specification-resume", "plan-review", "recovery-plan-id", "review", "review-resume", "recovery-feature-PEOPLE-review-2", "feature-plan", "feature-plan-resume", "plan-review-2", "plan-correction-1"]) await run(stage, "fable", "low");
+      for (const stage of ["specification", "specification-resume", "plan-review", "recovery-plan-id", "review", "review-resume", "recovery-feature-PEOPLE-review-2", "feature-plan", "feature-plan-resume", "plan-review-2", "plan-correction-1"]) await run(stage, "opus", "low");
       process.env.SOLOFACTORY_CLAUDE_MODEL = "coding-model";
       process.env.SOLOFACTORY_CLAUDE_EFFORT = "high";
       process.env.SOLOFACTORY_CLAUDE_REASONING_MODEL = "review-model";
