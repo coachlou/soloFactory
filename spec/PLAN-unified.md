@@ -45,6 +45,51 @@ run once before a release (push or install), never per step. Its findings come b
 - [ ] `npm test` passes.
 - [ ] Release-QA smoke shows 0 permission denials and no `claude-fable` in any build's `modelUsage`.
 
+## Step 4: deferred to release QA
+
+It needs real-provider runs, so it rides along with the next release-QA smoke instead of costing its own runs.
+
+## Step 5: proposal (awaiting approval)
+
+**What the code actually shows about the PRD's restart defect.** `restartFromSlice` (factory.mjs:114) sets
+`attempt = 0` and clears `repairBudgetLimit`. Features before the restart point are already done, and each rebuilt
+feature gets exactly `0 + maxRepairs`, so the budgets come out right. Three real defects sit nearby:
+
+- **Stale agent session (likely the worst).** `agentSessions` is never cleared, and `resumeSessionFor` matches any
+  session key containing the slice id. A rebuilt feature can resume the parked run's session, including a
+  reviewer's, about work the rewind threw away. This is a suspicion: 5b starts by writing the test that reproduces it.
+- **Label collisions.** `attempt` restarts at 1, so `repair-1.log`, `<gate>-1.log` and `last-failure-1.txt`
+  overwrite the parked run's records (`.factory/logs/` is gitignored, so the reset doesn't remove them).
+- **Stale `recoveryPhase`.** Restart leaves it in place, and its `totalRepairLimit` was computed from the old `attempt`.
+
+So stage 1's value is mostly **testability plus the restart fixes**, not a budget refill. The work splits in two:
+
+**5a. Declared `writes`, done first because step 6 needs it.** It touches 4 files: `src/wbs.mjs`,
+`src/prompts.mjs`, `src/factory.mjs` and `test/wbs` (or `test/features`, as new tests only).
+- Schema: each slice gets `writes: [glob]`, required for new v2 plans. Older plans without it skip enforcement.
+- Validator: two slices with no `dependsOn` path between them must not overlap. Overlap is checked by globbing
+  each side's patterns against the other's literal prefix, using `path.matchesGlob` from Node 22, so no new
+  dependency.
+- **Foundation features.** The default proposal: a slice with no `dependsOn` is foundation. Only foundation slices
+  may write the shared files (`package.json`, the entry point, README, migrations).
+- Plan-review prompt: flag implausible or too-broad `writes`, and `dependsOn` entries with no real need.
+- Enforcement: after the build or repair turn, `git status --porcelain` paths must all match the feature's
+  `writes`. Always exempt: `.factory/**`, `package-lock.json`, and README for the last feature. A violation fails
+  the gate and names the file. Final-integration repairs (no slice) are checked against the union of all `writes`.
+
+**5b. Feature record, restart and migration.** It touches about 7 files: a new `src/feature-record.mjs`,
+`factory.mjs`, `feature-recovery.mjs`, `store.mjs` (migration on read), `server.mjs`, `watchdog.mjs` and tests.
+- `job.attempt` stays the run-wide, ever-increasing counter, because labels, logs, `repairAttempts` and the
+  watchdog depend on it.
+- The record holds `{ id, substage, limit, spent, reviews, candidate, commit, stats }`. A pure module manages it, so
+  budgets and reviews can be tested without a Factory.
+- Restart stops zeroing `attempt`. It drops the rewound features' records and their `agentSessions`, and clears a
+  stale `recoveryPhase`.
+- Migration on read turns `featureCursor` / `phase.cursor` plus `repairBudgetLimit` into a record with the same
+  remaining budget.
+- `test/features.test.mjs` asserts on `featureCursor` and `attempt` in 21 places. To keep it unchanged, the record
+  stays at `job.featureCursor`, with the new fields added, rather than being renamed.
+
 ## Open questions (from the PRD, decide by step 7)
 
 - What triggers release QA: every N merged features, a milestone, or on request?
