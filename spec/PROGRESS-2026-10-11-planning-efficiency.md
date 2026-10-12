@@ -73,3 +73,9 @@ A full read of spec/, PROGRESS.md, SPEC.md, README.md and .aai/ found 26 open it
 - Fix (next commit): PLAN_CHECKLIST case coverage applies only to requirements with a cases table; failure paths are needed somewhere in the plan, not duplicated.
 - Finding for Lou: b86c07b's "step its action never performs" rule appeared verbatim as a round-1 blocker, so first drafts still miss checklist rules the planner was given. ≤4 planning turns depends on better first drafts, not more checklist lines.
 - Next: re-review scoping (later rounds judge prior blockers, regressions and unrunnable proofs only). Stopping rule: if the next run with both fixes fails planning on another novel blocker, stop iterating prompts and leave Lou the blocker lists.
+
+## Smoke run 3a3f59e8 (smoke-cases-8) — started on 18fba53
+- Has the cases-optional fix, not re-review scoping (35d732a, committed after launch; the server loaded 18fba53).
+- Watcher b9jz6ices POSTs pause on `plan.approved`. Then: restart :4205 with SOLOFACTORY_MAX_REPAIRS=0, resume, park on a gate failure (plant during the last feature review only if none occurs), POST recovery-plan, stop at ready, do NOT approve, measure.
+- If it fails planning: the next run goes on HEAD with both fixes; the stopping rule applies to that run.
+- 35d732a: later plan-review rounds get `priorBlockers` (accumulated) in plan-review-request.json and check those plus regressions/unrunnable proofs only. Suite 284/284.
