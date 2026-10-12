@@ -58,3 +58,11 @@ A full read of spec/, PROGRESS.md, SPEC.md, README.md and .aai/ found 26 open it
 - Turn sequence: spec 324s, feature-plan 520s, schema-fix 59s, then review→correction ×2 and a third review (196s, 205s, 231s, 188s, 350s).
 - Blockers per round: 1 (schema) → 6 → 6 → 3, each round's set mostly *new*, not leftovers. The reviewer surfaces boundary-coverage gaps incrementally (lower bound of name length, month/day 00 on one surface) despite ALL_BLOCKERS. One of the final 3 is a real defect (F1-HM-SELF action never calls /health); two are "mirror the boundary set from another case" asks.
 - Next fix candidate: make the planner/corrector apply the boundary rule uniformly (every validated range gets both ends accepted and rejected, on every surface that validates it), so the reviewer has nothing new to find; or let review rounds after the first judge only the previous blockers plus regressions.
+
+## Smoke run 410d1905 (project smoke-cases-6) — started on b86c07b
+- Lou (AFK, 2026-10-11) delegated decision and approval authority: approve this run's feature plan when it is ready. Repair plan still stops at ready (that is the gate's success condition), not approved.
+- Restart :4205 with SOLOFACTORY_MAX_REPAIRS=0 while the plan waits (paused), then approve.
+- **Completed 00:36Z, deployed and verified.** Planning 5 turns / 2112s (baseline 10 / 2451s; 90b8b32e 8 / 2074s and failed): one review blocked (5 blockers), one correction, approved. Features: implement 402/203/263s, review 286/262/229s; final review 288s. Wall 4348s, agent 4330s, gates 16.8s.
+- No human approval step exists for an initial feature plan: `plan.approved` comes from the plan reviewer and building starts at once. My "pause for approval" assumption was wrong.
+- Recovery path NOT exercised: final integration failed naturally (F1-SEEDED-SCRIPT proof rerun), but MAX_REPAIRS was the default 2, so repair-1 fixed it and the run finished.
+- MAX_REPAIRS also caps feature-plan corrections (src/factory.mjs:614), so a run can't start with 0. Next run: POST /pause on `plan.approved` (parks after the current turn), restart :4205 with 0 while paused, resume.
