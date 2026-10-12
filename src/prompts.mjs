@@ -514,7 +514,9 @@ ${JSON.stringify(owned, null, 2)}
 Write each obligation's proof test first, then the minimum real behavior that passes it. Source-
 string assertions do not prove user behavior. An obligation with cases needs one node:test per case
 whose name contains [CASE-ID], run by its proof command without a --test-reporter flag of its own; the
-controller passes it only when every case's own test passed. Do not edit .factory contract or plan files. Do not
+controller passes it only when every case's own test passed. Cases are read only from node:test events, so even
+a standalone script proof must import node:test and wrap each case in test(); a script that prints its own
+ok/fail lines records nothing and fails its gate. Do not edit .factory contract or plan files. Do not
 deploy; the controller runs build and this feature's proof commands, then a scoped review.
 
 ${DATA_RULE}`;

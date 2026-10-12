@@ -186,6 +186,7 @@ test('the feature builder is told how cases are proved', () => {
   const prompt = featureBuildPrompt(plan([requirement()]).slices[0], { owned: [], planDigest: 'digest' });
   assert.match(prompt, /one node:test per case\nwhose name contains \[CASE-ID\]/);
   assert.match(prompt, /without a --test-reporter flag of its own/);
+  assert.match(prompt, /a script that prints its own\nok\/fail lines records nothing/);
 });
 
 test('only the last feature builder is asked for the README', () => {
