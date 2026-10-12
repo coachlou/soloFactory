@@ -445,11 +445,16 @@ ${ALL_BLOCKERS}${rereview ? `\n${REREVIEW}` : ""} Approve only a plan you would 
 }
 
 export function planCorrectionPrompt(blockers) {
-  return `You are correcting the feature plan after a blocked planning review. Read
-.factory/plan-request.json, the frozen contract files, every source it lists and .factory/slices.json. Rewrite ONLY
-.factory/slices.json (same version 2 schema, jobId and contractDigest) to resolve every blocker
-below without narrowing, waiving or dropping any original requirement. Do not write code. Then
-check the whole corrected plan against the reviewer's checklist, so the next review finds nothing new:
+  // Patch, not re-plan: smoke 9's correction re-read every source and rewrote the plan (533s, 3.5M input
+  // tokens, more than drafting it). Later review rounds judge only prior blockers and regressions (REREVIEW),
+  // so entries no blocker names are already accepted.
+  return `You are correcting the feature plan after a blocked planning review. Patch .factory/slices.json:
+change ONLY the features, acceptance items and proofs the blockers below name (adding an item or feature
+only where a blocker requires it) and leave every other entry exactly as it is, byte for byte. Read
+.factory/slices.json and .factory/plan-request.json; open a contract file or source only where a blocker
+cites it or resolving it needs it. Keep the version 2 schema, jobId and contractDigest. Resolve every
+blocker without narrowing, waiving or dropping any original requirement. Do not write code. Then check the
+entries you changed (and anything that references them) against the reviewer's checklist:
 ${PLAN_CHECKLIST}
 ${CONTROLLER_FACTS}
 Before you finish, run node .factory/check-plan.mjs: it applies the controller's own validation to
