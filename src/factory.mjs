@@ -442,7 +442,14 @@ export class SoloFactory {
         continue;
       }
       const attempt = job.attempt;
-      job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: false });
+      // The reviewer may fix code; if it changed nothing, the integration verify that preceded it still holds.
+      const verified = job.integrationVerified;
+      if (verified?.set === integrationSet(job) && verified.candidate === await sourceBaseline(this.store, { head: false })) {
+        await this.commit(job, "factory: reviewing passed gates");
+        await this.emit(job.id, { type: "gate.skipped", state: job.state, gate: "integration", candidate: verified.candidate, message: "post-review verify skipped: source unchanged" });
+      } else {
+        job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: false });
+      }
       // Any gate repair changes the app after the verdict; require a fresh review.
       if (attempt !== job.attempt) continue;
       await this.requireReview(job);
@@ -1101,11 +1108,13 @@ export class SoloFactory {
     let first = null;
     for (;;) {
       current = await this.stage(current, "verifying", "Running deterministic quality gates");
-      const failure = await this.verify(current, manifest, signal, { includeInstall, proofs, first });
+      const failure = await this.verify(current, manifest, signal, { includeInstall, proofs, first, skipTest: Boolean(slice && proofs.length) });
       if (!failure) {
-        if (!slice && integrationProofs(current).length) {
+        if (!slice) {
           const candidate = await sourceBaseline(this.store, { head: false });
           if (integrationProofs(current).some(entry => entry.proofCandidate !== candidate)) throw new FactoryError("review_rejected", "Integration gates changed the application source; proof evidence is stale.");
+          current.integrationVerified = { candidate, set: integrationSet(current) };
+          await this.store.writeState(current);
         }
         const passed = slice ? `slice ${slice.id}` : [...current.stageHistory].reverse().find((s) => !["verifying", "repairing"].includes(s.state))?.state ?? "build";
         await this.commit(current, `factory: ${passed} passed gates`);
@@ -1120,7 +1129,8 @@ export class SoloFactory {
       }
       current = await this.repair(current, failure, signal, slice);
       manifest = await this.readManifest(this.store.appDir(current.id));
-      includeInstall = true;
+      // Reinstall only when the repair touched dependencies or install itself failed.
+      includeInstall = failure.details?.gate === "install" || await depsDigest(this.store.appDir(current.id)) !== current.installedDeps;
       // The gate that just failed is the likeliest to fail again, so the next pass learns that first.
       first = failure.details?.command ?? null;
     }
@@ -1155,8 +1165,11 @@ export class SoloFactory {
     await this.store.writeState(job);
   }
 
-  async verify(job, manifest, signal, { includeInstall, proofs = [], first = null }) {
-    const gates = (includeInstall ? ["install", "test", "build"] : ["test", "build"]).map((gate) => [gate, manifest.commands[gate]]);
+  async verify(job, manifest, signal, { includeInstall, proofs = [], first = null, skipTest = false }) {
+    // skipTest: a feature's own proofs are its acceptance; the whole suite runs at integration. A proof that
+    // is the test command itself keeps the test gate, so its gate name and repair routing are unchanged.
+    if (proofs.some((item) => JSON.stringify(item.proof.command) === JSON.stringify(manifest.commands.test))) skipTest = false;
+    const gates =["install", "test", "build"].filter((gate) => (gate !== "install" || includeInstall) && (gate !== "test" || !skipTest)).map((gate) => [gate, manifest.commands[gate]]);
     // Each distinct obligation proof is its own gate; one identical to an earlier command already ran.
     const seen = new Map();
     for (const gate of gates) {
@@ -1247,6 +1260,8 @@ export class SoloFactory {
         });
       }
       await this.emit(job.id, { type: "gate.passed", state: job.state, gate, feature, durationMs, cases: caseCounts(result.caseResults), message: `${gate} passed` });
+      // After install, since install may write the lockfile.
+      if (gate === "install") job.installedDeps = await depsDigest(this.store.appDir(job.id));
     }
     job.activeCommand = null;
     await this.store.writeState(job);
@@ -1684,6 +1699,16 @@ async function waitForHttp(url, child, signal, timeoutMs = 30_000) {
   }
   child.kill("SIGTERM");
   throw new FactoryError("health_check_failed", `No successful health response from ${url}.`);
+}
+
+// What install consumes. Unchanged since the last passing install means node_modules is still current.
+async function depsDigest(appDir) {
+  return digest(await Promise.all(["package.json", "package-lock.json", "npm-shrinkwrap.json"].map((file) => readFile(path.join(appDir, file), "utf8").catch(() => null))));
+}
+
+// The proof set an integration verify runs; a passing verify only stands for this exact set.
+function integrationSet(job) {
+  return digest([featureProofs(job).map((item) => [item.id, item.proof.command]), integrationProofs(job).map((entry) => entry.key)]);
 }
 
 async function fetchJson(url) {

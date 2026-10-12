@@ -156,7 +156,7 @@ const e2eSkeleton = async (stage, cwd) => {
 };
 const gateOf = (options) => path.basename(options.logPath).replace(/-\d+\.log$/, "");
 
-test("after a repair the failed gate runs first, behind install only", async () => {
+test("a feature's checks run its own proofs without the whole suite; after a repair the failed gate runs first", async () => {
   const order = [];
   let failures = 1;
   const commandRunner = async (options) => {
@@ -168,8 +168,44 @@ test("after a repair the failed gate runs first, behind install only", async () 
   const result = await factory.start(job.id);
   assert.equal(result.state, "completed", result.error?.message);
   const failed = order.indexOf("proof-SKELETON-1");
-  assert.deepEqual(order.slice(0, failed + 1), ["install", "test", "build", "proof-SKELETON-1"]);
-  assert.deepEqual(order.slice(failed + 1, failed + 5), ["install", "proof-SKELETON-1", "test", "build"]);
+  assert.deepEqual(order.slice(0, failed + 1), ["install", "build", "proof-SKELETON-1"]);
+  // The repair left dependencies alone, so install does not rerun.
+  assert.deepEqual(order.slice(failed + 1, failed + 3), ["proof-SKELETON-1", "build"]);
+  assert.ok(order.includes("test"), "the whole suite still runs at final integration");
+});
+
+test("the post-review integration verify runs only when the final reviewer changed source", async () => {
+  for (const edits of [false, true]) {
+    const { store, job, factory } = await plannedRun({ after: async (stage, cwd) => {
+      if (edits && stage === "review") await writeFile(path.join(cwd, "review-fix.js"), "// reviewer fix\n");
+    } });
+    const result = await factory.start(job.id);
+    assert.equal(result.state, "completed", result.error?.message);
+    const events = await store.events(job.id, Infinity);
+    const review = events.findLastIndex((event) => event.type === "agent.started" && event.stage === "review");
+    const after = events.slice(review);
+    assert.equal(after.some((event) => event.type === "gate.skipped"), !edits);
+    assert.equal(after.some((event) => event.type === "gate.started" && event.gate === "test"), edits);
+  }
+});
+
+test("a repair that changes dependencies reinstalls before the next check", async () => {
+  const order = [];
+  let failures = 1;
+  const after = async (stage, cwd) => {
+    await e2eSkeleton(stage, cwd);
+    if (stage.startsWith("repair-")) await writeFile(path.join(cwd, "package-lock.json"), "{}\n");
+  };
+  const commandRunner = async (options) => {
+    order.push(gateOf(options));
+    if (options.args[0] === "e2e/skeleton.mjs" && failures-- > 0) return { code: 1, output: "skeleton e2e failed" };
+    return { code: 0, output: "passed" };
+  };
+  const { job, factory } = await plannedRun({ after, commandRunner });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  const failed = order.indexOf("proof-SKELETON-1");
+  assert.deepEqual(order.slice(failed + 1, failed + 4), ["install", "proof-SKELETON-1", "build"]);
 });
 
 test("final integration reruns every verified feature's proofs, so a later feature's regression is repaired", async () => {
@@ -856,7 +892,8 @@ test("a deployment repair invalidates passed integration evidence and reruns its
   const done = await factory.start(job.id);
   assert.equal(done.state, "completed", done.error?.message);
   assert.equal(deploys, 2);
-  assert.ok(proofRunsAfterDeploy >= 2, "proof runs after deployment repair and again after final review");
+  // The final reviewer changed nothing, so the verify after the deployment repair still holds: no second run.
+  assert.equal(proofRunsAfterDeploy, 1, "proof runs once after deployment repair");
   assert.notEqual(done.outstandingProofs[0].candidate, originalCandidate);
   assert.ok(done.outstandingProofs.every(e => e.status === "passed"));
 });
