@@ -66,3 +66,10 @@ A full read of spec/, PROGRESS.md, SPEC.md, README.md and .aai/ found 26 open it
 - No human approval step exists for an initial feature plan: `plan.approved` comes from the plan reviewer and building starts at once. My "pause for approval" assumption was wrong.
 - Recovery path NOT exercised: final integration failed naturally (F1-SEEDED-SCRIPT proof rerun), but MAX_REPAIRS was the default 2, so repair-1 fixed it and the run finished.
 - MAX_REPAIRS also caps feature-plan corrections (src/factory.mjs:614), so a run can't start with 0. Next run: POST /pause on `plan.approved` (parks after the current turn), restart :4205 with 0 while paused, resume.
+
+## Smoke run 29924815 (smoke-cases-7) — failed in planning 01:23Z
+- `plan_blocked` after 2 corrections. Blockers per round: 6 → 1 → 1. Round 3 blocked POPULATED-SUMMARY-SCRIPT for having no cases table; correction-1 had deliberately left it case-less (schema: cases optional, proof pending integration, failure path proved by SEEDED-SUMMARY-E2E) and review 2 accepted it. Reviewer variance plus a checklist line the controller doesn't enforce.
+- Not resumed: assertPlanReviewable refuses an already-blocked plan digest, and slices.json is not hand-edited.
+- Fix (next commit): PLAN_CHECKLIST case coverage applies only to requirements with a cases table; failure paths are needed somewhere in the plan, not duplicated.
+- Finding for Lou: b86c07b's "step its action never performs" rule appeared verbatim as a round-1 blocker, so first drafts still miss checklist rules the planner was given. ≤4 planning turns depends on better first drafts, not more checklist lines.
+- Next: re-review scoping (later rounds judge prior blockers, regressions and unrunnable proofs only). Stopping rule: if the next run with both fixes fails planning on another novel blocker, stop iterating prompts and leave Lou the blocker lists.

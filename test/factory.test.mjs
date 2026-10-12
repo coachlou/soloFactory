@@ -741,6 +741,8 @@ test("planner, plan reviewer and corrector share one checklist and the controlle
   assert.match(PLAN_CHECKLIST, /BOTH ends/);
   assert.match(PLAN_CHECKLIST, /every input or route that validates it/);
   assert.match(PLAN_CHECKLIST, /step its action never performs/);
+  // Smoke 29924815: a third reviewer blocked a case-less requirement two earlier reviews accepted.
+  assert.match(PLAN_CHECKLIST, /cases are optional/);
   assert.match(CONTROLLER_FACTS, /Never assert on git status/);
 });
 

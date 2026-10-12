@@ -355,7 +355,9 @@ export const PLAN_CHECKLIST = `A plan is blocked when:
   expose a failure (escaping needs markup in the input; a validated range needs BOTH ends, each limit
   accepted and one past it rejected, on every input or route that validates it);
 - a case's expectation depends on a step its action never performs;
-- a requirement's refs are not all cited by its cases, or negative/failure cases are missing;
+- a requirement with a cases table has refs none of its cases cites, or negative/failure cases the
+  contract implies are proved nowhere in the plan (cases are optional: a requirement without a table is
+  proved by its proof command, and a failure path another requirement's cases prove is not repeated);
 - consolidated cases drop or blur a distinct field, action, boundary, failure condition or
   API/browser surface;
 - a proof marked "pending": "integration" could run when its feature is built;
