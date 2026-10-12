@@ -79,3 +79,19 @@ A full read of spec/, PROGRESS.md, SPEC.md, README.md and .aai/ found 26 open it
 - Watcher b9jz6ices POSTs pause on `plan.approved`. Then: restart :4205 with SOLOFACTORY_MAX_REPAIRS=0, resume, park on a gate failure (plant during the last feature review only if none occurs), POST recovery-plan, stop at ready, do NOT approve, measure.
 - If it fails planning: the next run goes on HEAD with both fixes; the stopping rule applies to that run.
 - 35d732a: later plan-review rounds get `priorBlockers` (accumulated) in plan-review-request.json and check those plus regressions/unrunnable proofs only. Suite 284/284.
+
+## RESUME HERE after /clear (written 02:17Z 2026-10-12)
+**Bottom line:** run 3a3f59e8 passed planning (8 turns incl. spec: plan, schema-fix, review 4 blockers → correction → review 1 new blocker → correction → approved 02:14Z). A pause was POSTed on approval; the run parks after its current turn (build-slice-SKELETON-STORE). Recovery path still not exercised.
+
+State outside the repo (background tasks from the old context are NOT tracked after a clear):
+- :4205 server runs from this worktree on 18fba53 code. Env: `PORT=4205 SOLOFACTORY_HOME=.solofactory/smoke-watchdog SOLOFACTORY_ROOT=.solofactory/smoke-watchdog SOLOFACTORY_PROGRESS_MINUTES=2` (repair budget default 2). Find its pid with `lsof -nP -iTCP:4205 -sTCP:LISTEN` (NOT `lsof -ti`, which once matched a Claude Helper).
+- Run: `J=2026-10-12-3a3f59e8`, project dir `.solofactory/smoke-watchdog/projects/smoke-cases-8`, events `$P/.solofactory/runs/$J/events.jsonl`. State: `curl -s localhost:4205/api/jobs/$J`.
+- Routes: POST `/api/jobs/$J/pause`, `/resume`, `/recovery-plan` (prepare repair plan), `/recovery-start` (= approve: NEVER call). `nextAction` in the job JSON names the next valid endpoint.
+
+Next steps:
+1. Wait until state is paused. Kill the :4205 server (pid from lsof above), restart it in the background with the same env plus `SOLOFACTORY_MAX_REPAIRS=0` (restarting on HEAD 35d732a code is fine; the plan is already approved).
+2. POST `/resume`. Any gate failure now parks with nextAction prepare-plan.
+3. If no failure by the last feature: plant a fault WHILE the last feature's review turn runs (tree committed, gates not started), in a file review won't read. Template: `.solofactory/smoke-watchdog/plant.sh` (paths are for old run a943a5da/smoke-cases-4; update R/EV; note the old plant was dead code after `process.exit`, so make the fault reachable, e.g. break an exported function the proof calls). Never plant during gates (stale-evidence park).
+4. On park: POST `/recovery-plan`; wait for the repair plan to reach ready; do NOT approve. Browser-check the amendment file input on the ready plan (in-app browser, http://localhost:4205).
+5. `node scripts/measure-run.mjs <events.jsonl>`; record results here; the release gate passes when the repair plan reaches ready.
+6. Commit notes (specific files). Push only with Lou's permission (the last permission was used for a8b442b).
