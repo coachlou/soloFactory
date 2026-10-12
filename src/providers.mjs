@@ -229,7 +229,7 @@ async function runCodexAttempt({
 
 async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = "write", context = {} }) {
   await mkdir(cwd, { recursive: true });
-  const reasoningTask = /^(specification(?:-|$)|feature-plan(?:-|$)|plan-review$|recovery-plan-)|(?:^|-)review(?:-|$)/.test(context.stage ?? "");
+  const reasoningTask = /^(specification(?:-|$)|feature-plan(?:-|$)|plan-review$|plan-correction-|recovery-plan-)|(?:^|-)review(?:-|$)/.test(context.stage ?? "");
   const model = reasoningTask
     ? process.env.SOLOFACTORY_CLAUDE_REASONING_MODEL || "fable"
     : process.env.SOLOFACTORY_CLAUDE_MODEL || "opus";

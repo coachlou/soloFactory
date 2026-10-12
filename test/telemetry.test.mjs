@@ -40,7 +40,7 @@ test("the real Claude adapter returns usage from the CLI envelope", async () => 
   assert.deepEqual(result.usage, { inputTokens: 58764, cachedInputTokens: 26979, cacheWriteTokens: 31783, outputTokens: 4, costUsd: 0.1325718, models: ["claude-sonnet-5"] });
 });
 
-test("Claude routes planning and every review to the reasoning profile, with configurable overrides", async () => {
+test("Claude routes planning, plan corrections and every review to the reasoning profile, with configurable overrides", async () => {
   const keys = ["SOLOFACTORY_CLAUDE_MODEL", "SOLOFACTORY_CLAUDE_EFFORT", "SOLOFACTORY_CLAUDE_REASONING_MODEL", "SOLOFACTORY_CLAUDE_REASONING_EFFORT"];
   const saved = keys.map(key => process.env[key]);
   const cwd = await mkdtemp(path.join(os.tmpdir(), "sf-claude-profiles-"));
@@ -56,8 +56,8 @@ process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify
         assert.equal(args[args.indexOf("--model") + 1], model, stage);
         assert.equal(args[args.indexOf("--effort") + 1], effort, stage);
       };
-      for (const stage of ["interview", "build", "build-resume", "build-slice-PEOPLE", "slice-resume-PEOPLE", "repair-2", "plan-correction-1", "recovery-feature-PEOPLE"]) await run(stage, "opus", "medium");
-      for (const stage of ["specification", "specification-resume", "plan-review", "recovery-plan-id", "review", "review-resume", "recovery-feature-PEOPLE-review-2", "feature-plan", "feature-plan-resume", "plan-review-2"]) await run(stage, "fable", "low");
+      for (const stage of ["interview", "build", "build-resume", "build-slice-PEOPLE", "slice-resume-PEOPLE", "repair-2", "recovery-feature-PEOPLE"]) await run(stage, "opus", "medium");
+      for (const stage of ["specification", "specification-resume", "plan-review", "recovery-plan-id", "review", "review-resume", "recovery-feature-PEOPLE-review-2", "feature-plan", "feature-plan-resume", "plan-review-2", "plan-correction-1"]) await run(stage, "fable", "low");
       process.env.SOLOFACTORY_CLAUDE_MODEL = "coding-model";
       process.env.SOLOFACTORY_CLAUDE_EFFORT = "high";
       process.env.SOLOFACTORY_CLAUDE_REASONING_MODEL = "review-model";
