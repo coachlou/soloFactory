@@ -7,8 +7,8 @@ This plan merges three sources:
 - the open INBOX audit "nested regression replay and final candidate composition".
 
 Steps are ordered by leverage: the biggest time or risk cut per unit of work comes first. Each step is a separate
-commit (or small series), has its own acceptance criteria, and is measured with `scripts/measure-run.mjs` against
-smoke 11 before the next step begins.
+commit (or small series), with acceptance criteria proved by `npm test` and cheap targeted checks. Real-provider
+smoke runs (~35 min, ~$20) are batched: one per group of agent-behaviour changes, not one per step.
 
 | # | Step | Source | Size | Why here |
 |---|---|---|---|---|
