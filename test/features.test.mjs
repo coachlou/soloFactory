@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { execFile } from "node:child_process";
 import os from "node:os";
 import { JobStore } from "../src/store.mjs";
 import { SoloFactory, continuationAction } from "../src/factory.mjs";
@@ -188,6 +189,26 @@ test("the post-review integration verify runs only when the final reviewer chang
     assert.equal(after.some((event) => event.type === "gate.skipped"), !edits);
     assert.equal(after.some((event) => event.type === "gate.started" && event.gate === "test"), edits);
   }
+});
+
+test("planning agents can run the controller's own plan validation before they finish", async () => {
+  const runs = [];
+  const after = async (stage, cwd) => {
+    if (stage !== "feature-plan") return;
+    const check = () => new Promise((resolve) => execFile(process.execPath, [".factory/check-plan.mjs"], { cwd }, (error, stdout, stderr) => resolve({ code: error?.code ?? 0, out: stdout + stderr })));
+    runs.push(await check());
+    const file = path.join(cwd, ".factory/slices.json");
+    const valid = await readFile(file, "utf8");
+    await patch(file, (plan) => { plan.contractDigest = "stale"; });
+    runs.push(await check());
+    await writeFile(file, valid);
+  };
+  const { job, factory } = await plannedRun({ after });
+  assert.equal((await factory.start(job.id)).state, "completed");
+  assert.equal(runs[0].code, 0, runs[0].out);
+  assert.match(runs[0].out, /^OK/);
+  assert.equal(runs[1].code, 1);
+  assert.match(runs[1].out, /INVALID: Feature plan does not match this run/);
 });
 
 // Neither feature's proof is the whole suite, so only final integration runs npm test.

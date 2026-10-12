@@ -412,6 +412,9 @@ ${CONTROLLER_FACTS}
 A fresh reviewer audits the exact plan before any build against this checklist. Check the whole
 plan against it yourself before you finish:
 ${PLAN_CHECKLIST}
+Before you finish, run node .factory/check-plan.mjs: it applies the controller's own validation to
+slices.json. Fix every error it prints and rerun it until it prints OK; an invalid plan costs a whole
+extra turn.
 End with a one-line summary.`;
 }
 
@@ -449,6 +452,9 @@ below without narrowing, waiving or dropping any original requirement. Do not wr
 check the whole corrected plan against the reviewer's checklist, so the next review finds nothing new:
 ${PLAN_CHECKLIST}
 ${CONTROLLER_FACTS}
+Before you finish, run node .factory/check-plan.mjs: it applies the controller's own validation to
+slices.json. Fix every error it prints and rerun it until it prints OK; an invalid plan costs a whole
+extra turn.
 Blockers:
 ${blockers.map((item) => `- ${item}`).join("\n")}`;
 }

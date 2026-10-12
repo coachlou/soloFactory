@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { appendFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./process.mjs";
 import { buildPrompt, continuationPrompt, featureBuildPrompt, featurePlanPrompt, featureReviewPrompt, planAuditPrompt, planCorrectionPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
 import { PLAN_SCHEMA_FIXES, assertConsolidation, caseResults, featureProofs, orderSlices, integrationProofs, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
@@ -540,6 +540,8 @@ export class SoloFactory {
     // Detailed obligations come from every authoritative input, not only the MH/SC summaries.
     const sources = await sourceSet(appDir, runInputs(job));
     await writeFile(path.join(factoryDir, "plan-request.json"), `${JSON.stringify({ version: 1, jobId: job.id, contractDigest: contract, checks, sources, toolchain: { node: process.version } }, null, 2)}\n`);
+    // Planning agents run this to check slices.json with the controller's own validation before finishing.
+    await writeFile(path.join(factoryDir, "check-plan.mjs"), `import ${JSON.stringify(pathToFileURL(fileURLToPath(new URL("./check-plan.mjs", import.meta.url))).href)};\n`);
     job = await this.stage(job, "specifying", "Planning features against the frozen contract");
     // Persisted, so a mutation left behind by a parked planning turn still blocks after resume.
     job.planBaseline ??= { source: await sourceBaseline(this.store, { head: false }), contract };
