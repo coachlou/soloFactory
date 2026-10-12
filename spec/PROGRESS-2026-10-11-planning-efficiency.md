@@ -129,3 +129,9 @@ Next steps:
 - **Completed 05:21Z, deployed and verified, zero repairs, first-try reviews.** Wall 3289s (smoke 8: 5839s; 410d1905: 4348s), agent 3259s, gates 29s. Implement 553/360/312s, review 122/98/56s (smoke 8: 285/316/422s; a943a5da: 600/351/311s), final review 298s.
 - Feature reviews are now ~20–35% of implement time (were ≈100%). fa408cd/35d732a prompts plus opus/medium; model change confounds attribution. "Contract cards" not needed on this evidence.
 - Recovery path not exercised (no failure, no plant: smoke 8 already covered it).
+
+## CURRENT STATE (05:30Z 2026-10-12) — supersedes the 03:15Z section above
+- Smoke 9 (07631040) done: planning 6 turns (scoped re-review approved in one round), completed with zero repairs, wall 3289s. ≤4 target still missed by 2 turns; the stopping rule did not trigger, but the remaining gap is first-draft coverage, not reviewer drift. Decision: stop prompt iteration here; further gains need a first-draft change (e.g. a planner self-check against PLAN_CHECKLIST before submitting), which is Lou's call on cost vs benefit.
+- f8596e8 UI nit fixed and browser-verified on 3a3f59e8's ready plan (replace-plan note + packet now inside the "Advanced" disclosure). :4205 active project is smoke-cases-8 for that check; nothing is running.
+- :4205 still running (opus reasoning env, default budget). Plans c094c539 and 42d97519 stay unapproved.
+- Waiting on Lou: release-gate interpretation (amendment-path ready), merge of wip/feature-slice-recovery, push of commits after a8b442b, whether to pursue the ≤4 target further.
