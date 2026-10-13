@@ -70,7 +70,10 @@ async function declaredRun(stray) {
       value.slices[0].acceptance[0].proof.command = ["node", "--test", "server.test.mjs"];
       await writeFile(file, JSON.stringify(value, null, 2));
     }
-    if (stray && stage === "build-slice-SLICE-UI") await writeFile(path.join(options.cwd, "stray.mjs"), "export {};\n");
+    if (stray && stage === "build-slice-SLICE-UI") {
+      await writeFile(path.join(options.cwd, "stray.mjs"), "export {};\n");
+      if (stray === "committed") await store.git("add", "stray.mjs").then(() => store.git("commit", "-qm", "agent commit"));
+    }
     return result;
   } };
   const factory = new SoloFactory({ store, provider, commandRunner: async () => ({ code: 0, output: "passed" }), deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9982" }) });
@@ -92,6 +95,12 @@ test("a build turn that edits a file outside its writes fails its gates and the 
   assert.equal(result.state, "failed");
   assert.equal(result.error.details?.gate, "writes");
   assert.match(result.error.message, /stray\.mjs/);
+});
+
+test("a stray file the build agent committed itself still fails the writes gate", async () => {
+  const { result, events } = await declaredRun("committed");
+  assert.match(events.find((event) => event.gate === "writes")?.message ?? "", /SLICE-UI changed files outside its declared writes: stray\.mjs/);
+  assert.equal(result.state, "failed");
 });
 
 test("a change reaches the features that own the file and every built feature depending on them", () => {

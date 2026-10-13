@@ -522,7 +522,7 @@ export async function runFeatureRecovery(factory, id, signal, approval = null, {
         await factory.store.writeState(job);
       } else if (phase.cursor?.id !== slice.id) {
         // Persisted substage cursor: pause/resume continues exactly where the feature stopped.
-        phase.cursor = { id: slice.id, substage: 'implementing', implementStarted: false, reviews: 0, startedAt: new Date().toISOString(), attemptBefore: job.attempt };
+        phase.cursor = { id: slice.id, substage: 'implementing', implementStarted: false, reviews: 0, startedAt: new Date().toISOString(), attemptBefore: job.attempt, base: await factory.store.git('rev-parse', 'HEAD') };
         phase.current = slice.id;
         job.repairBudgetLimit = Math.min(job.attempt + factory.maxRepairs, phase.totalRepairLimit);
         await factory.store.writeState(job);

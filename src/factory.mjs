@@ -1230,10 +1230,14 @@ export class SoloFactory {
       .map((file) => ({ id: `QA-${file.replace(/\.test\.[cm]?js$/, "")}`, proof: { command: ["node", "--test", `qa/${file}`] } }));
   }
 
-  // A feature may change only the files it declared; impact selection later trusts these lists. The tree
-  // holds just this feature's work: every passed gate commits, so earlier features are already in HEAD.
+  // A feature may change only the files it declared; impact selection later trusts these lists. Diffing
+  // from the feature's start commit also catches files the agent committed itself. A cursor without a
+  // base (saved by an older release) falls back to the uncommitted tree.
   async writesFailure(job, slice) {
-    const changed = [...new Set((await this.store.git("ls-files", "-z", "-m", "-o", "-d", "--exclude-standard")).split("\0").filter(Boolean))];
+    const base = [job.recoveryPhase?.cursor, job.featureCursor].find((cursor) => cursor?.id === slice.id)?.base;
+    const listed = base ? [await this.store.git("diff", "--name-only", "-z", base), await this.store.git("ls-files", "-z", "-o", "--exclude-standard")]
+      : [await this.store.git("ls-files", "-z", "-m", "-o", "-d", "--exclude-standard")];
+    const changed = [...new Set(listed.join("\0").split("\0").filter(Boolean))];
     const outside = outsideWrites(changed, slice.writes);
     if (!outside.length) return null;
     const message = `Feature ${slice.id} changed files outside its declared writes: ${outside.join(", ")}.`;
