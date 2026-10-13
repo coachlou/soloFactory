@@ -325,6 +325,7 @@ const FEATURE_PLAN_SCHEMA = `{ "version": 2, "jobId": <copied from the request>,
     "demo": "<what an observer opens or runs and sees>",
     "dependsOn": ["<EARLIER slice ids only>"],
     "closes": ["<original MH-n/SC-n ids this feature finally proves; [] only for a named prerequisite>"],
+    "writes": ["<app-relative path, directory or glob this feature creates or edits, its tests included>"],
     "acceptance": [{ "id": "UPPER-CASE-ID", "behavior": "<concrete expected behavior>", "refs": ["<original ids it supports or proves>"],
       "sources": [{ "path": "<one of plan-request.json sources>", "locator": "<section, heading, line or element>" }],
       "proof": { "command": ["npm" | "node" | "npx", "<args>"...], "expect": "<expected result>", "pending"?: "integration" },
@@ -376,7 +377,9 @@ export const PLAN_CHECKLIST = `A plan is blocked when:
 - consolidated cases drop or blur a distinct field, action, boundary, failure condition or
   API/browser surface;
 - a proof marked "pending": "integration" could run when its feature is built;
-- a required model, native package, runtime or tool is unverified.`;
+- a required model, native package, runtime or tool is unverified;
+- a feature's writes miss files its obligations plainly need, or are broad enough to serialize the plan
+  (a glob over a whole tree), or a dependsOn exists only to permit a shared file rather than real use.`;
 
 export function featurePlanPrompt({ followOn = false } = {}) {
   return `You are the feature planner for a small software factory. Read .factory/plan-request.json,
@@ -405,6 +408,11 @@ Rules the controller enforces:
   path and locator. The final review evaluates the same source set.
 - A feature with an empty closes is a named prerequisite: it needs its own observable acceptance
   and proof, and a later closing feature must depend on it.
+- Every feature declares writes: the paths, directories or globs it creates or edits, tests included.
+  The controller fails a feature that changes any other file. Features with no dependsOn path between
+  them must write different files. package.json and factory.json belong to a foundation feature (one
+  with no dependsOn), so put every dependency there. .factory/, package-lock.json, README.md and
+  .gitignore are always writable.
 - Proof commands are argument arrays starting with npm, node or npx — never shell strings. Name
   the test file and expected result; the file may not exist yet, it must exist and pass when the
   feature is verified. Include negative and failure cases the contract implies.
@@ -517,7 +525,8 @@ string assertions do not prove user behavior. An obligation with cases needs one
 whose name contains [CASE-ID], run by its proof command without a --test-reporter flag of its own; the
 controller passes it only when every case's own test passed. Cases are read only from node:test events, so even
 a standalone script proof must import node:test and wrap each case in test(); a script that prints its own
-ok/fail lines records nothing and fails its gate. Do not edit .factory contract or plan files. Do not
+ok/fail lines records nothing and fails its gate. Change only the files your feature's writes list; any other
+changed file fails its checks. Do not edit .factory contract or plan files. Do not
 deploy; the controller runs build and this feature's proof commands, then a scoped review.
 
 ${DATA_RULE}`;

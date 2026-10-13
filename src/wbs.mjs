@@ -13,6 +13,7 @@
 //   contract instead of merely being plausible.
 
 import { createHash } from "node:crypto";
+import { matchesGlob } from "node:path";
 import { assertAllowedCommand } from "./process.mjs";
 
 export const SLICE_ID_RE = /^[A-Z][A-Z0-9-]{0,63}$/;
@@ -421,8 +422,10 @@ export function validateFeaturePlan(raw, { jobId, contractDigest, checks, source
       if (!acceptance.some((item) => item.refs.includes(id))) throw new Error(`${where} closes ${id} but no obligation in it proves ${id}.`);
     }
     if (acceptance.every((item) => item.proof.pending)) throw new Error(`${where} needs at least one obligation provable when the feature is built; only part of its proof may wait for integration.`);
-    return { id: slice.id, title: slice.title.trim(), objective: slice.objective.trim(), demo: slice.demo.trim(), dependsOn: [...dependsOn], closes: [...slice.closes], acceptance };
+    const writes = slice.writes === undefined ? null : validateWrites(slice, dependsOn);
+    return { id: slice.id, title: slice.title.trim(), objective: slice.objective.trim(), demo: slice.demo.trim(), dependsOn: [...dependsOn], closes: [...slice.closes], acceptance, ...(writes ? { writes } : {}) };
   });
+  assertDisjointWrites(slices);
 
   // A case may retire an obligation of an earlier feature (a stage gate that stops being true once this
   // feature exists). Ids outside this plan are a replacement plan's base obligations, judged by assertConsolidation.
@@ -447,4 +450,59 @@ export function validateFeaturePlan(raw, { jobId, contractDigest, checks, source
   }
 
   return { version: 2, jobId, contractDigest, compatibility: [...(raw.compatibility ?? [])], slices };
+}
+
+// ---------------------------------------------------------------------------
+// Declared writes: each feature lists the paths or globs it may change, so the controller can enforce
+// ownership after every turn and later rerun only the proofs a change can reach. Optional per feature:
+// plans from before 2026-10-12 have none, and a feature without a list is not enforced.
+
+// Files every feature builds on. Only a foundation feature (one with no dependsOn) may own them.
+export const SHARED_FILES = ["package.json", "factory.json"];
+// Changed by the controller, npm or the last feature's README pass, never owned by one feature.
+const ALWAYS_WRITABLE = [".factory/**", "package-lock.json", "README.md", ".gitignore"];
+const GLOB_RE = /[*?[\]{}]/;
+const dirOf = (pattern) => pattern.replace(/\/+$/, "") + "/";
+// The literal directory a pattern stays inside: "src/routes/*.js" → "src/routes/", "**/x" → "".
+const stem = (pattern) => { const head = pattern.split(GLOB_RE)[0]; return head.slice(0, head.lastIndexOf("/") + 1); };
+
+// A literal entry covers itself and, as a directory, everything under it.
+export const writesCover = (patterns, file) => patterns.some((pattern) => matchesGlob(file, pattern) || (!GLOB_RE.test(pattern) && (file === pattern || file.startsWith(dirOf(pattern)))));
+export const outsideWrites = (files, writes) => files.filter((file) => !writesCover([...writes, ...ALWAYS_WRITABLE], file));
+
+// ponytail: two globs overlap when one's literal directory contains the other's, so "src/*.js" and
+// "src/*.css" count as overlapping. Exact glob intersection if planners hit false rejections.
+function overlaps(a, b) {
+  const literalA = !GLOB_RE.test(a);
+  const literalB = !GLOB_RE.test(b);
+  if (literalA && literalB) return writesCover([a], b) || writesCover([b], a);
+  if (literalB) return writesCover([a], b) || stem(a).startsWith(dirOf(b));
+  if (literalA) return writesCover([b], a) || stem(b).startsWith(dirOf(a));
+  return stem(a).startsWith(stem(b)) || stem(b).startsWith(stem(a));
+}
+
+function validateWrites(slice, dependsOn) {
+  const where = `Feature ${slice.id}`;
+  if (!Array.isArray(slice.writes) || !slice.writes.length || slice.writes.some((entry) => typeof entry !== "string" || !entry.trim())) throw new Error(`${where} has a malformed writes list; list the paths or globs it creates or edits.`);
+  const writes = slice.writes.map((entry) => entry.trim().replace(/^\.\//, ""));
+  const bad = writes.find((entry) => entry.startsWith("/") || entry.split("/").includes(".."));
+  if (bad) throw new Error(`${where} writes ${bad}, which is outside the app; use paths relative to the app folder.`);
+  const shared = dependsOn.length ? SHARED_FILES.filter((file) => writesCover(writes, file)) : [];
+  if (shared.length) throw new Error(`${where} depends on other features but writes ${shared.join(", ")}. Shared files belong to a foundation feature (one with no dependsOn).`);
+  return writes;
+}
+
+// Features with no dependency path between them may be built in either order, so they must not share files.
+function assertDisjointWrites(slices) {
+  const before = new Map();
+  for (const slice of slices) before.set(slice.id, new Set(slice.dependsOn.flatMap((dep) => [dep, ...before.get(dep)])));
+  const problems = [];
+  slices.forEach((a, index) => {
+    for (const b of slices.slice(index + 1)) {
+      if (!a.writes || !b.writes || before.get(b.id).has(a.id)) continue;
+      const pair = a.writes.flatMap((x) => b.writes.filter((y) => overlaps(x, y)).map((y) => x === y ? x : `${x} / ${y}`));
+      if (pair.length) problems.push(`${a.id} and ${b.id} both write ${pair.join(", ")}`);
+    }
+  });
+  if (problems.length) throw new Error(`Features with no dependency between them must write different files: ${problems.join("; ")}. Split the files, or add the dependsOn the work really needs.`);
 }

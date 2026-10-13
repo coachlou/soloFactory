@@ -49,7 +49,7 @@ run once before a release (push or install), never per step. Its findings come b
 
 It needs real-provider runs, so it rides along with the next release-QA smoke instead of costing its own runs.
 
-## Step 5: proposal (awaiting approval)
+## Step 5 (approved 2026-10-12; 5a done)
 
 **What the code actually shows about the PRD's restart defect.** `restartFromSlice` (factory.mjs:114) sets
 `attempt = 0` and clears `repairBudgetLimit`. Features before the restart point are already done, and each rebuilt
@@ -76,6 +76,10 @@ So stage 1's value is mostly **testability plus the restart fixes**, not a budge
 - Enforcement: after the build or repair turn, `git status --porcelain` paths must all match the feature's
   `writes`. Always exempt: `.factory/**`, `package-lock.json`, and README for the last feature. A violation fails
   the gate and names the file. Final-integration repairs (no slice) are checked against the union of all `writes`.
+
+*5a as built:* final-integration and final-review repairs are not checked yet. Step 7 turns release findings
+into owned bug items, which carries the check to them. A non-foundation feature that needs a new npm
+dependency fails its gate by design: the plan must put the dependency in a foundation feature.
 
 **5b. Feature record, restart and migration.** It touches about 7 files: a new `src/feature-record.mjs`,
 `factory.mjs`, `feature-recovery.mjs`, `store.mjs` (migration on read), `server.mjs`, `watchdog.mjs` and tests.

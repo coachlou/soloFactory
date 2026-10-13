@@ -1,0 +1,93 @@
+// Declared writes (PRD stage 1): each feature lists the files it may change; the validator keeps
+// independent features apart and the controller fails a feature that changes anything else.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
+import { JobStore } from "../src/store.mjs";
+import { SoloFactory } from "../src/factory.mjs";
+import { createFixtureProvider } from "../src/fixture-provider.mjs";
+import { outsideWrites, validateFeaturePlan } from "../src/wbs.mjs";
+
+const checks = [{ id: "MH-1", text: "Record a score" }, { id: "MH-2", text: "See history" }];
+const opts = { jobId: "job", contractDigest: "contract", checks };
+const feature = (id, { dependsOn = [], closes = [], writes } = {}) => ({
+  id, title: `Feature ${id}`, objective: `Observable ${id}`, demo: `Open the app and use ${id}`, dependsOn, closes,
+  acceptance: [{ id: `${id}-A`, behavior: `Behavior ${id} works end to end`, refs: closes, proof: { command: ["node", "--test", `test/${id}.test.mjs`], expect: "passes" } }],
+  ...(writes ? { writes } : {}),
+});
+const plan = (...slices) => ({ version: 2, jobId: "job", contractDigest: "contract", compatibility: [], slices });
+const base = (writes) => feature("BASE", { closes: [], writes: writes ?? ["package.json", "factory.json", "server.mjs"] });
+
+test("independent features with overlapping writes are rejected before any build", () => {
+  assert.throws(() => validateFeaturePlan(plan(base(),
+    feature("RECORD", { dependsOn: ["BASE"], closes: ["MH-1"], writes: ["src/routes/**", "test/RECORD.test.mjs"] }),
+    feature("HISTORY", { dependsOn: ["BASE"], closes: ["MH-2"], writes: ["src/routes/history.js", "test/HISTORY.test.mjs"] })), opts),
+  /RECORD and HISTORY both write src\/routes\/\*\* \/ src\/routes\/history\.js/);
+});
+
+test("a dependency path lets a later feature edit an earlier feature's files", () => {
+  const valid = validateFeaturePlan(plan(base(),
+    feature("RECORD", { dependsOn: ["BASE"], closes: ["MH-1"], writes: ["src/routes/", "./test/RECORD.test.mjs"] }),
+    feature("HISTORY", { dependsOn: ["RECORD"], closes: ["MH-2"], writes: ["src/routes/history.js", "server.mjs"] })), opts);
+  assert.deepEqual(valid.slices[1].writes, ["src/routes/", "test/RECORD.test.mjs"], "writes survive normalization");
+  // Disjoint siblings are fine, including globs in different directories.
+  validateFeaturePlan(plan(base(),
+    feature("RECORD", { dependsOn: ["BASE"], closes: ["MH-1"], writes: ["src/record/*.js"] }),
+    feature("HISTORY", { dependsOn: ["BASE"], closes: ["MH-2"], writes: ["src/history/*.js"] })), opts);
+});
+
+test("shared files belong to foundation features, and paths stay inside the app", () => {
+  assert.throws(() => validateFeaturePlan(plan(base(), feature("RECORD", { dependsOn: ["BASE"], closes: ["MH-1", "MH-2"], writes: ["package.json", "src/**"] })), opts),
+    /RECORD depends on other features but writes package\.json/);
+  assert.throws(() => validateFeaturePlan(plan(base(), feature("RECORD", { dependsOn: ["BASE"], closes: ["MH-1", "MH-2"], writes: ["**"] })), opts),
+    /writes package\.json, factory\.json/, "a whole-tree glob reaches the shared files");
+  assert.throws(() => validateFeaturePlan(plan(base(["../outside.js"]), feature("RECORD", { dependsOn: ["BASE"], closes: ["MH-1", "MH-2"] })), opts), /outside the app/);
+  assert.throws(() => validateFeaturePlan(plan(base([]), feature("RECORD", { dependsOn: ["BASE"], closes: ["MH-1", "MH-2"] })), opts), /malformed writes/);
+});
+
+test("controller and npm files are always writable", () => {
+  assert.deepEqual(outsideWrites([".factory/logs/x.log", "package-lock.json", "README.md", ".gitignore", "src/a.js", "lib/b.js"], ["src"]), ["lib/b.js"]);
+});
+
+const brief = { workingName: "Pocket Pulse", acceptanceScenarios: ["A user records a score."] };
+const transcript = [{ role: "user", content: "A daily tracker with clear acceptance behavior." }];
+
+async function declaredRun(stray) {
+  const store = new JobStore(await mkdtemp(path.join(os.tmpdir(), "solo-factory-writes-")));
+  await store.init();
+  const job = await store.create({ brief, transcript, provider: "fixture" });
+  const fixture = createFixtureProvider();
+  const provider = { id: "fixture", async run(options) {
+    const result = await fixture.run(options);
+    const { stage } = options.context;
+    if (stage === "feature-plan") {
+      const file = path.join(options.cwd, ".factory/slices.json");
+      const value = JSON.parse(await readFile(file, "utf8"));
+      for (const slice of value.slices) slice.writes = slice.dependsOn.length ? ["index.html", "ui.test.mjs"] : ["*"];
+      await writeFile(file, JSON.stringify(value, null, 2));
+    }
+    if (stray && stage === "build-slice-SLICE-UI") await writeFile(path.join(options.cwd, "stray.mjs"), "export {};\n");
+    return result;
+  } };
+  const factory = new SoloFactory({ store, provider, commandRunner: async () => ({ code: 0, output: "passed" }), deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9982" }) });
+  const result = await factory.start(job.id);
+  return { result, events: await store.events(job.id, 1000) };
+}
+
+test("a feature that stays inside its declared writes completes", async () => {
+  const { result, events } = await declaredRun(false);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.deepEqual(result.approvedPlan.plan.slices.map((slice) => slice.writes), [["*"], ["index.html", "ui.test.mjs"]]);
+  assert.equal(events.filter((event) => event.gate === "writes").length, 0);
+});
+
+test("a build turn that edits a file outside its writes fails its gates and the failure names the file", async () => {
+  const { result, events } = await declaredRun(true);
+  const failed = events.find((event) => event.type === "gate.failed" && event.gate === "writes");
+  assert.match(failed?.message ?? "", /Feature SLICE-UI changed files outside its declared writes: stray\.mjs/);
+  assert.equal(result.state, "failed");
+  assert.equal(result.error.details?.gate, "writes");
+  assert.match(result.error.message, /stray\.mjs/);
+});

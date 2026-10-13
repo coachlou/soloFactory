@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./process.mjs";
 import { buildPrompt, continuationPrompt, featureBuildPrompt, featurePlanPrompt, featureReviewPrompt, planAuditPrompt, planCorrectionPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
-import { PLAN_SCHEMA_FIXES, assertConsolidation, caseResults, featureProofs, orderSlices, integrationProofs, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
+import { PLAN_SCHEMA_FIXES, assertConsolidation, caseResults, featureProofs, orderSlices, integrationProofs, outsideWrites, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
 export { pendingProofFailure };
 import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
@@ -1115,7 +1115,7 @@ export class SoloFactory {
     let first = null;
     for (;;) {
       current = await this.stage(current, "verifying", "Running deterministic quality gates");
-      const failure = await this.verify(current, manifest, signal, { includeInstall, proofs, first, skipTest: Boolean(slice && proofs.length) });
+      const failure = (slice?.writes && await this.writesFailure(current, slice)) || await this.verify(current, manifest, signal, { includeInstall, proofs, first, skipTest: Boolean(slice && proofs.length) });
       if (!failure) {
         if (!slice) {
           const candidate = await sourceBaseline(this.store, { head: false });
@@ -1141,6 +1141,17 @@ export class SoloFactory {
       // The gate that just failed is the likeliest to fail again, so the next pass learns that first.
       first = failure.details?.command ?? null;
     }
+  }
+
+  // A feature may change only the files it declared; impact selection later trusts these lists. The tree
+  // holds just this feature's work: every passed gate commits, so earlier features are already in HEAD.
+  async writesFailure(job, slice) {
+    const changed = [...new Set((await this.store.git("ls-files", "-z", "-m", "-o", "-d", "--exclude-standard")).split("\0").filter(Boolean))];
+    const outside = outsideWrites(changed, slice.writes);
+    if (!outside.length) return null;
+    const message = `Feature ${slice.id} changed files outside its declared writes: ${outside.join(", ")}.`;
+    await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "writes", feature: slice.id, message });
+    return new FactoryError("quality_gate_failed", message, { gate: "writes", output: `${message}\nDeclared writes: ${slice.writes.join(", ")}\nMove the change into a declared file or revert it; the plan's file lists are fixed during a build.` });
   }
 
   // One repair turn against a recorded failure. Throws the failure itself once the budget is spent.
