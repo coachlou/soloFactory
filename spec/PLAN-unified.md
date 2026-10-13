@@ -148,6 +148,12 @@ with no findings. Permission denials: 24 (smoke 11: 46). All are compound shell 
 pipes, `for` loops, heredoc writes, python edits) that a prefix allow-list cannot match. Not exercised: repairs,
 bug items, set-aside (nothing failed), and step 4's one-job-vs-follow-ons measurement.
 
+## Smoke 14 (2026-10-13, run 2026-10-13-e6062e35, HEAD 0081f85)
+
+Same brief, with the shell rule appended to every Claude turn. Completed with no repairs and no failed gates:
+865 s wall, feature builds plus reviews 519 s, $6.72, only `claude-opus-5-5`. Permission denials: 0 (smoke 13: 24).
+Final review passed with no findings. Not exercised: the same items as smoke 13.
+
 ## Open questions (decided 2026-10-12, Lou delegated)
 
 - Trigger: release QA stays once per run, before deploy. Every-N-features waits for step 8's record.
