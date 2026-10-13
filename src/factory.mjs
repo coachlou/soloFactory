@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
@@ -22,6 +22,10 @@ const CASE_REPORTER = fileURLToPath(new URL("./case-reporter.mjs", import.meta.u
 const HARNESS = {
   version: JSON.parse(await readFile(path.join(harnessRoot, "package.json"), "utf8")).version,
   commit: (() => {
+    // An installed copy sits inside the owner's project repo, whose HEAD is not the factory's: the distro's
+    // VERSION stamp ("solofactory 0.9.7 (dcc9d2d) synced ...") names the real build.
+    const stamped = existsSync(path.join(harnessRoot, "VERSION")) && readFileSync(path.join(harnessRoot, "VERSION"), "utf8").match(/\(([0-9a-f]{7,})\)/)?.[1];
+    if (stamped) return stamped;
     try {
       const sha = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: harnessRoot, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
       const dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { cwd: harnessRoot, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
