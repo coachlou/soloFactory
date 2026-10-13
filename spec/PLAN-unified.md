@@ -119,8 +119,8 @@ verified at" commit; add it with step 8's record if final integration time shows
 findings, gives each to the latest feature whose `writes` cover those files, runs the test (it must fail, or
 the finding falls back to the unscoped repair), and repairs under that feature's writes gate, so the repair
 cannot edit the finding's test. Findings no feature owns keep the unscoped repair. Ceilings:
-- a fixed bug's test reruns at every later final integration in the run, but not in later releases unless the
-  app's test command discovers `qa/`;
+- every `qa/*.test.*` in the tree reruns at final integration, in this run and later releases (a test file the
+  reviewer puts elsewhere reruns only in this run);
 - an unowned finding's unscoped repair has no writes gate, so only the prompt keeps it off the finding's test;
 - non-feature (v1) runs are unchanged.
 

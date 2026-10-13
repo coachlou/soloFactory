@@ -1173,7 +1173,7 @@ export class SoloFactory {
     if (!slice) {
       for (const entry of integrationProofs(job)) { entry.status = "pending"; delete entry.candidate; delete entry.verifiedAt; delete entry.proofCandidate; }
       await this.store.writeState(job);
-      proofs = [...proofs, ...featureProofs(job), ...(job.bugProofs ?? []), ...integrationProofs(job).map(entry => ({ id: entry.gate.slice("proof-".length), key: entry.key, proof: entry.obligation.proof, cases: entry.obligation.cases }))];
+      proofs = [...proofs, ...featureProofs(job), ...(job.bugProofs ?? []), ...await this.releaseQaProofs(job), ...integrationProofs(job).map(entry => ({ id: entry.gate.slice("proof-".length), key: entry.key, proof: entry.obligation.proof, cases: entry.obligation.cases }))];
     }
     let current = job;
     let first = null;
@@ -1205,6 +1205,15 @@ export class SoloFactory {
       // The gate that just failed is the likeliest to fail again, so the next pass learns that first.
       first = failure.details?.command ?? null;
     }
+  }
+
+  // Findings from earlier releases stay fixed: every qa/ test in the tree reruns at final integration.
+  async releaseQaProofs(job) {
+    if (job.planVersion !== 2) return [];
+    const known = new Set((job.bugProofs ?? []).map((bug) => bug.proof.command.at(-1)));
+    const files = await readdir(path.join(this.store.appDir(job.id), "qa")).catch(() => []);
+    return files.filter((file) => /\.test\.[cm]?js$/.test(file) && !known.has(`qa/${file}`))
+      .map((file) => ({ id: `QA-${file.replace(/\.test\.[cm]?js$/, "")}`, proof: { command: ["node", "--test", `qa/${file}`] } }));
   }
 
   // A feature may change only the files it declared; impact selection later trusts these lists. The tree

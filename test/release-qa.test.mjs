@@ -12,9 +12,14 @@ import { createFixtureProvider } from "../src/fixture-provider.mjs";
 const brief = { workingName: "Pocket Pulse", acceptanceScenarios: ["A user records a score."] };
 const transcript = [{ role: "user", content: "A daily tracker with clear acceptance behavior." }];
 
-async function qaRun({ files, strayInRepair = false }) {
+async function qaRun({ files, strayInRepair = false, earlierRelease = false }) {
   const store = new JobStore(await mkdtemp(path.join(os.tmpdir(), "solo-factory-release-qa-")));
   await store.init();
+  if (earlierRelease) {
+    await mkdir(path.join(store.project, "qa"), { recursive: true });
+    await writeFile(path.join(store.project, "qa/BUG-OLD.test.mjs"), "import test from 'node:test';\ntest('an earlier fix holds', () => {});\n");
+    await store.commit("earlier release");
+  }
   const job = await store.create({ brief, transcript, provider: "fixture" });
   const fixture = createFixtureProvider();
   const prompts = [];
@@ -79,4 +84,11 @@ test("a finding no feature owns takes the unscoped repair", async () => {
   assert.equal(result.state, "completed", result.error?.message);
   assert.equal(events.filter((event) => event.type === "review.bug").length, 0);
   assert.doesNotMatch(prompts[0], /inside slice/);
+});
+
+test("a finding fixed in an earlier release reruns at final integration", async () => {
+  const { result, events } = await qaRun({ files: ["index.html"], earlierRelease: true });
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.ok(events.some((event) => event.type === "gate.started" && event.gate === "proof-QA-BUG-OLD"));
+  assert.ok(!events.some((event) => event.gate === "proof-QA-BUG-1"), "this run's findings run once, under their BUG id");
 });
