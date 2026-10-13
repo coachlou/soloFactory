@@ -120,6 +120,7 @@ findings, gives each to the latest feature whose `writes` cover those files, run
 the finding falls back to the unscoped repair), and repairs under that feature's writes gate, so the repair
 cannot edit the finding's test. Findings no feature owns keep the unscoped repair. Ceilings:
 - a fixed bug's test reruns later only if the app's test command discovers `qa/`;
+- the repairer sees a finding's description only through the failing test's name in the gate output;
 - non-feature (v1) runs are unchanged.
 
 ## Open questions (decided 2026-10-12, Lou delegated)

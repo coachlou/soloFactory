@@ -62,7 +62,8 @@ test("a release finding goes to the feature owning the failing file, and its rep
 });
 
 test("a bug repair that edits the finding's test fails the writes gate", async () => {
-  const { events } = await qaRun({ files: ["index.html"], strayInRepair: true });
+  const { result, events } = await qaRun({ files: ["index.html"], strayInRepair: true });
+  assert.equal(result.state, "failed");
   const failed = events.find((event) => event.type === "gate.failed" && event.gate === "writes");
   assert.match(failed?.message ?? "", /SLICE-UI changed files outside its declared writes: qa\/BUG-1\.test\.mjs/);
 });

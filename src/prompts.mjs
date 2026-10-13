@@ -274,8 +274,8 @@ the source files at fault. The controller hands each bug to the feature owning t
 export function reviewPrompt({ featureReviewed = false } = {}) {
   return `You are the final implementation reviewer. Audit the current app against every
 requirement in .factory/PRD.md and every scenario in .factory/ACCEPTANCE.md. Inspect the real
-code and tests.${featureReviewed ? FEATURE_REVIEWED_SCOPE + "\n" : " "}Fix concrete correctness, wiring, error-handling, accessibility, privacy, or
-operator-documentation gaps you find. Keep the scope small. Do not deploy and do not claim a
+code and tests.${featureReviewed ? FEATURE_REVIEWED_SCOPE + "\n" : ` Fix concrete correctness, wiring, error-handling, accessibility, privacy, or
+operator-documentation gaps you find. Keep the scope small.`} Do not deploy and do not claim a
 gate passed; the controller will rerun tests, build, health, and telemetry checks afterward.
 Write a concise review record to .factory/REVIEW.md. Also read .factory/review-request.json
 and write .factory/review-result.json with version:1, jobId, token and contractDigest copied
