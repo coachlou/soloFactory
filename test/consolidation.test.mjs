@@ -6,7 +6,7 @@ import path from 'node:path';
 import { JobStore } from '../src/store.mjs';
 import { SoloFactory } from '../src/factory.mjs';
 import { assertConsolidation, caseResults, validateFeaturePlan } from '../src/wbs.mjs';
-import { featureBuildPrompt } from '../src/prompts.mjs';
+import { featureBuildPrompt, featureReviewPrompt } from '../src/prompts.mjs';
 
 // Consolidating overlapping obligations into one requirement with explicit cases, shared by new-run and
 // repair planning. The cases keep every distinct field, action, boundary, failure condition and surface,
@@ -206,4 +206,14 @@ test('the feature builder sees each shared proof command once, and every require
   assert.equal((prompt.match(/"command": "C1"/g) ?? []).length, 3); assert.equal((prompt.match(/"command": "C2"/g) ?? []).length, 1);
   for (const id of ['UPLOAD-LIMITS', 'R2', 'R3', 'R4', ...cases().map(entry => entry.id)]) assert.match(prompt, new RegExp(`"${id}"`));
   assert.equal(slice.acceptance[0].proof.command, long.command, 'the plan itself is unchanged');
+});
+
+// Seen live: a 52-case feature made 210K-character build and review prompts, over the 200K cap.
+test('an oversized feature is read from its file instead of being inlined in either prompt', () => {
+  const slice = plan([requirement({ behavior: 'x'.repeat(70_000) })]).slices[0];
+  for (const prompt of [featureBuildPrompt(slice, { owned: [], planDigest: 'digest' }), featureReviewPrompt(slice)]) {
+    assert.ok(prompt.length < 20_000, String(prompt.length));
+    assert.match(prompt, /read \.factory\/logs\/feature\.json/);
+  }
+  assert.match(featureBuildPrompt(plan([requirement()]).slices[0], { owned: [], planDigest: 'digest' }), /"UPLOAD-LIMITS"/);
 });

@@ -795,6 +795,9 @@ export class SoloFactory {
     const owned = checks.filter((check) => slice.closes.includes(check.id) && !pending.includes(check.id));
     const runnable = slice.acceptance.filter((item) => !item.proof?.pending);
     const reviewChecks = [...owned, ...runnable.map(obligationCheck)];
+    // Oversized features are read from this file instead of the prompt; .factory/logs is gitignored, so no write-scope check sees it.
+    await mkdir(path.join(appDir, ".factory/logs"), { recursive: true });
+    await writeFile(path.join(appDir, ".factory/logs/feature.json"), JSON.stringify(slice, null, 2));
     for (;;) {
       // Parked by a Pause after a blocking review: repair the recorded blockers, not another review turn.
       if (cursor.substage === "repairing") {

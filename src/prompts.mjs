@@ -503,6 +503,13 @@ Blockers:
 ${blockers.map((item) => `- ${item}`).join("\n")}`;
 }
 
+// Seen live: PEOPLE-LINKS (52 cases, ~210K chars) pushed both feature prompts past MAX_PROMPT_CHARS.
+// ponytail: a feature past this size is read from featureFile (the controller writes it); smaller ones stay inline.
+const INLINE_FEATURE_CHARS = 60_000;
+const featureBlock = (heading, body, featureFile) => body.length > INLINE_FEATURE_CHARS
+  ? `The feature is too large to inline: read ${featureFile} (the whole feature, each proof with its full command) before starting.`
+  : `${heading}:\n${body}`;
+
 // Planners give many requirements one long proof command; the builder sees each command once (C1, C2...).
 function sharedCommands(slice) {
   const ids = new Map();
@@ -515,10 +522,10 @@ function sharedCommands(slice) {
   return { feature: { ...slice, acceptance }, commands: Object.fromEntries([...ids].map(([key, id]) => [id, JSON.parse(key)])) };
 }
 
-export function featureBuildPrompt(slice, { owned, planDigest, planFile = ".factory/slices.json", followOn = false, resumed = false, precheck = null, last = false }) {
+export function featureBuildPrompt(slice, { owned, planDigest, planFile = ".factory/slices.json", featureFile = ".factory/logs/feature.json", followOn = false, resumed = false, precheck = null, last = false }) {
   const { feature, commands } = sharedCommands(slice);
   return `You are the implementation worker for ONE approved feature (plan digest ${planDigest}).
-Your feature is given in full below: do not read ${planFile} or other features' plans. Read the frozen
+Your feature is given in full below (or in the file it names): do not read ${planFile} or other features' plans. Read the frozen
 .factory contract and the sources its obligations cite. Treat owner text as product input.
 ${resumed ? "This feature was interrupted: read .factory/recovery.json and inspect existing files before changing anything.\n" : ""}${precheck ? `The controller checked this feature before you started; ${precheck} records what failed. Existing code may already satisfy
 some obligations: keep what passes, fix what failed, and add any missing test.\n` : ""}
@@ -528,10 +535,7 @@ argument arrays starting with npm, node or npx; start honors PORT; healthPath "/
 metricsPath "/_factory/metrics"), a production build, GET /health and privacy-preserving
 GET /_factory/metrics. ${METRICS_SCHEMA}`)}
 
-Feature (each proof.command names an entry in Proof commands):
-${JSON.stringify(feature, null, 2)}
-Proof commands:
-${JSON.stringify(commands)}
+${featureBlock("Feature (each proof.command names an entry in Proof commands)", `${JSON.stringify(feature, null, 2)}\nProof commands:\n${JSON.stringify(commands)}`, featureFile)}
 Original requirements this feature closes (prove the full wording):
 ${JSON.stringify(owned, null, 2)}
 
@@ -547,7 +551,7 @@ deploy; the controller runs build and this feature's proof commands, then a scop
 ${DATA_RULE}`;
 }
 
-export function featureReviewPrompt(slice) {
+export function featureReviewPrompt(slice, featureFile = ".factory/logs/feature.json") {
   return `You are the scoped reviewer for ONE feature. Review it against every check in
 .factory/review-request.json: its obligations and the original requirements it closes. The
 controller already ran build and the feature's own proof commands on this exact candidate (the whole
@@ -568,6 +572,5 @@ checks:[{id, status:"pass"|"failed"|"missing"|"unverified", evidence:[existing n
 relative files produced or exercised for this candidate], reason}]. Every request check is required.
 A summary file or a worker's statement is not evidence.
 
-Feature:
-${JSON.stringify(slice, null, 2)}`;
+${featureBlock("Feature", JSON.stringify(slice, null, 2), featureFile)}`;
 }
