@@ -101,7 +101,7 @@ export function createFixtureProvider() {
             id: `RECOVERY-${index + 1}`, title: check.text, objective: `Recover ${check.id}`, closes: [check.id],
             acceptance: [{ id: `RECOVERY-${index + 1}-1`, behavior: `Executes server.test.mjs to verify ${check.text}`, refs: [check.id],
               sources: [{ path: source, locator: check.id }], proof: { command: ["npm", "test"], expect: "server.test.mjs passes" } }],
-            dependsOn: index ? [`RECOVERY-${index}`] : [], demo: "Run the executable fixture behavior checks.",
+            dependsOn: index ? [`RECOVERY-${index}`] : [], writes: ["server.mjs", "server.test.mjs"], demo: "Run the executable fixture behavior checks.",
           })),
         }));
       } else if (context.stage.startsWith("specification")) {

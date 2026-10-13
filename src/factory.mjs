@@ -1656,7 +1656,7 @@ export async function assertPlanAmendable(store, job, { phaseId, plan } = {}, { 
   if (!plan || typeof plan !== "object" || Array.isArray(plan) || plan.version !== 2) throw refuse("amendment_invalid", "The corrected plan must be a version 2 repair plan (a JSON object).", 400);
   if (Buffer.byteLength(JSON.stringify(plan)) > MAX_AMENDED_PLAN_BYTES) throw refuse("amendment_too_large", `The corrected plan exceeds ${MAX_AMENDED_PLAN_BYTES} bytes.`, 413);
   let valid;
-  try { valid = validateRecoveryPlan(plan, prior.request); }
+  try { valid = validateRecoveryPlan(plan, prior.request, { fresh: true }); }
   catch (error) { throw refuse("amendment_invalid", `The corrected plan is not valid for this request: ${error.message}`, 400); }
   // Replacing a reviewed plan must map every obligation it held; a blocked plan's obligations were never accepted.
   const base = consolidationBase(job, prior);

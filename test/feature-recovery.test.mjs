@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { JobStore } from '../src/store.mjs';
@@ -40,6 +40,15 @@ for (const [name, mutate] of Object.entries({
   'omitted gap': p => { p.slices.pop(); },
   'other request': p => p.requestId = 'other',
 })) test(`rejects v2 repair plan with ${name}`, () => { const p = v2Plan(); mutate(p); assert.throws(() => validateRecoveryPlan(p, v2Request)); });
+// A saved plan from an earlier release still loads, but a newly drafted or submitted one must declare
+// writes: without them the writes gate and impact-scoped reruns silently skip the feature.
+test('a fresh repair plan must be a v2 plan with writes on every feature', () => {
+  assert.throws(() => validateRecoveryPlan(v2Plan(), v2Request, { fresh: true }), /BROWSE, RESTART need writes/);
+  assert.throws(() => validateRecoveryPlan(plan(), request, { fresh: true }), /version 2/);
+  const p = v2Plan(); p.slices[0].writes = ['src/browse.js']; p.slices[1].writes = ['src/restart.js'];
+  assert.deepEqual(validateRecoveryPlan(p, v2Request, { fresh: true }).slices.map(s => s.writes), [['src/browse.js'], ['src/restart.js']]);
+  assert.equal(validateRecoveryPlan(v2Plan(), v2Request).slices[0].writes, undefined);
+});
 // Seen on a real Claude repair plan: the fix feature depended on a feature the original plan already built.
 test('v2 repair plans may depend on already completed features but not on unknown ones', () => {
   const p = v2Plan(); p.slices[0].dependsOn = ['MONTHLY-SUMMARY'];
@@ -439,7 +448,7 @@ test('prerequisite-only features can precede the owners of full original checks'
 test('a recovery reviewer that edits the candidate voids its verdict and forces a fresh review', async t => {
   let edited = false;
   const env = await setup(t, async args => {
-    if (!edited && /^recovery-.*-RECOVERY-1-review-1$/.test(args.context.stage)) { edited = true; await writeFile(path.join(args.cwd, 'reviewer-edit.js'), 'export const x = 1;\n'); }
+    if (!edited && /^recovery-.*-RECOVERY-1-review-1$/.test(args.context.stage)) { edited = true; await appendFile(path.join(args.cwd, 'server.mjs'), '\nexport const reviewerEdit = 1;\n'); }
   });
   const ready = await env.factory.planRecovery(env.failed.id);
   const result = await env.factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);

@@ -28,8 +28,15 @@ export async function sourceBaseline(store, { head = true } = {}) {
   return hash.digest('hex');
 }
 
-export function validateRecoveryPlan(raw, request) {
+// fresh: a plan drafted or submitted now, not one saved by an earlier release. It must be a feature plan
+// with declared writes, since the writes gate and impact selection are skipped for features without them.
+export function validateRecoveryPlan(raw, request, { fresh = false } = {}) {
+  if (fresh && raw?.version !== 2) throw new Error('A new repair plan must be a version 2 feature plan.');
   if (raw?.version === 2) {
+    if (fresh) {
+      const bare = (Array.isArray(raw.slices) ? raw.slices : []).filter(slice => slice?.writes === undefined).map(slice => slice?.id);
+      if (bare.length) throw new Error(`Repair features ${bare.join(', ')} need writes: the paths, directories or globs each creates or edits, tests included.`);
+    }
     if (raw.requestId !== request.id) throw new Error('Repair plan does not match its request.');
     // A dependency on an already built feature is satisfied; only ids in this plan are validated.
     const built = new Set(request.completed ?? []);
@@ -68,7 +75,7 @@ export async function archiveReview(factory, job, label) {
   }
 }
 
-const PLAN_SCHEMA = `{version:2,jobId,requestId,contractDigest (copied from the request),compatibility:[{subject,status:"verified",evidence}],slices:[{id (uppercase letters/digits/hyphens),title,objective,demo,dependsOn:[earlier feature ids],closes:[unfinished check ids this feature fully closes],acceptance:[{id,behavior (one concrete observable behavior),refs:[check ids],sources:[{path (one of request.sources),locator (section, heading, line or element)}],proof:{command:["npm"|"node"|"npx",...args],expect,pending?:"integration"},cases?:[{id (unique across the plan),surface:"api"|"browser"|"cli"|"unit"|"integration",action,field?,boundary?,expect (result or failure condition),refs:[subset of the requirement refs],sources:[subset of the requirement sources],supersedes?:[ids of a reviewed plan\'s obligations this case replaces]}]}]}]}`;
+const PLAN_SCHEMA = `{version:2,jobId,requestId,contractDigest (copied from the request),compatibility:[{subject,status:"verified",evidence}],slices:[{id (uppercase letters/digits/hyphens),title,objective,demo,dependsOn:[earlier feature ids],writes:[app-relative paths, directories or globs this feature creates or edits, its tests included],closes:[unfinished check ids this feature fully closes],acceptance:[{id,behavior (one concrete observable behavior),refs:[check ids],sources:[{path (one of request.sources),locator (section, heading, line or element)}],proof:{command:["npm"|"node"|"npx",...args],expect,pending?:"integration"},cases?:[{id (unique across the plan),surface:"api"|"browser"|"cli"|"unit"|"integration",action,field?,boundary?,expect (result or failure condition),refs:[subset of the requirement refs],sources:[subset of the requirement sources],supersedes?:[ids of a reviewed plan\'s obligations this case replaces]}]}]}]}`;
 
 // The request is referenced, never inlined: a prior case-table plan alone can exceed the provider's input limit.
 function repairPlanPrompt(planFile, requestFile) {
@@ -326,7 +333,7 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
     const base = consolidationBase(job, phase);
     const readPlan = async () => {
       try {
-        const plan = validateRecoveryPlan(JSON.parse(await readFile(path.join(appDir, planFile), 'utf8')), request);
+        const plan = validateRecoveryPlan(JSON.parse(await readFile(path.join(appDir, planFile), 'utf8')), request, { fresh: true });
         if (base) assertConsolidation(plan, base);
         return plan;
       } catch (error) { return error; }
