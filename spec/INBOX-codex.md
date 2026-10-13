@@ -174,3 +174,96 @@ Not measured: Commands workers run inside their own turns are not observed; only
 Not measured: Some gate runs predate candidate recording, so unchanged-candidate repeats are a lower bound.
 Not measured: Some agent turns reported no token usage (interrupted, or the provider gave none).
 
+
+
+## Corrected legacy measurement rerun — 2026-10-12
+- Status: observation delivered; ran committed 3fa33dadd0980a5ba7dea48de05adf1b29e1a2e0 script on the same SHA256-bound snapshot, read-only. No live-run changes.
+- Evidence: `/Users/loudalo/Documents/photo-library-prototype/spec/repair-efficiency-pilot/measurement/report-corrected-oct12.md`.
+
+Wall 353082.6s · parked 290870.3s · agent 38577.1s · controller gates 2675.2s · other 20960.0s
+Tokens: 279515185 in (268934912 cached) / 1306419 out
+
+| Phase | Agent turns | Implement | Review | Repair | Planning | Gate runs | Gate time | Failed | Timed out | Repeats | Unchanged-candidate repeats | Reusable after pass | Tokens |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| planning | 12 (2 interrupted) | 0.0s | 0.0s | 0.0s | 3991.1s | 0 | 0.0s | 0 | 0 | 0 | 0 | 0 | 31161875 in (29236096 cached) / 132720 out |
+| integration | 18 (2 interrupted) | 227.7s | 3831.5s | 2426.0s | 0.0s | 36 | 20.8s | 5 | 0 | 28 | 0 | 0 | 49942540 in (48027776 cached) / 239222 out |
+| COMPATIBILITY-GATE | 4 | 227.5s | 363.5s | 484.1s | 0.0s | 8 | 3.7s | 0 | 0 | 8 | 0 | 0 | 9072520 in (8717184 cached) / 53807 out |
+| PERSISTENT-JOB-FOUNDATION | 4 | 294.1s | 208.4s | 240.6s | 0.0s | 8 | 3.5s | 0 | 0 | 8 | 0 | 0 | 4127390 in (3909760 cached) / 31644 out |
+| METADATA-DERIVATIVES | 6 (2 interrupted) | 182.8s | 220.2s | 92.5s | 0.0s | 8 | 5.1s | 0 | 0 | 8 | 0 | 0 | 4771772 in (4477568 cached) / 30988 out |
+| TYPED-SEARCH | 4 | 731.7s | 302.7s | 123.5s | 0.0s | 8 | 5.8s | 0 | 0 | 8 | 0 | 0 | 10617263 in (10246656 cached) / 60003 out |
+| PEOPLE-CORRECTIONS | 2 | 517.8s | 168.3s | 0.0s | 0.0s | 5 | 4.3s | 0 | 0 | 5 | 0 | 0 | 7147124 in (6924928 cached) / 37915 out |
+| SMART-ALBUM-FOUNDATION | 3 (1 interrupted) | 96.4s | 110.9s | 0.0s | 0.0s | 5 | 4.0s | 0 | 0 | 5 | 0 | 0 | 2265463 in (2087808 cached) / 12215 out |
+| ORGANIZATION-BROWSER | 4 | 210.3s | 207.5s | 73.4s | 0.0s | 8 | 6.1s | 0 | 0 | 8 | 0 | 0 | 4484510 in (4179968 cached) / 34627 out |
+| FACE-INFERENCE-PROVIDER | 2 | 316.9s | 119.4s | 0.0s | 0.0s | 5 | 4.5s | 0 | 0 | 5 | 0 | 0 | 5889779 in (5719808 cached) / 30587 out |
+| VISUAL-INFERENCE-PROVIDER | 4 | 66.4s | 229.2s | 375.2s | 0.0s | 8 | 7.1s | 0 | 0 | 8 | 0 | 0 | 9223635 in (8864000 cached) / 47694 out |
+| VIDEO-FRAME-INDEXING | 2 | 167.6s | 96.7s | 0.0s | 0.0s | 5 | 4.4s | 0 | 0 | 5 | 0 | 0 | 2688731 in (2549120 cached) / 20264 out |
+| LOCAL-INTELLIGENCE-INTEGRATION | 6 (1 interrupted) | 1075.8s | 329.6s | 145.0s | 0.0s | 11 | 9.2s | 0 | 0 | 11 | 0 | 0 | 16370373 in (15823872 cached) / 63411 out |
+| SMART-ALBUM-INTEGRATION | 4 | 403.0s | 369.4s | 377.5s | 0.0s | 8 | 6.4s | 0 | 0 | 8 | 0 | 0 | 5945322 in (5577984 cached) / 38041 out |
+| WORKER-PIPELINE-INTEGRATION | 3 | 882.6s | 263.8s | 0.0s | 0.0s | 8 | 6.3s | 0 | 0 | 8 | 0 | 0 | 7393297 in (7071232 cached) / 34059 out |
+| OPERATIONS-RECOVERY | 4 | 1100.2s | 612.7s | 329.9s | 0.0s | 8 | 6.2s | 0 | 0 | 8 | 0 | 0 | 7122707 in (6735872 cached) / 54312 out |
+| PRODUCTION-UI-EVIDENCE | 5 | 2649.4s | 1048.7s | 1448.1s | 0.0s | 11 | 8.6s | 0 | 0 | 11 | 0 | 0 | 28967895 in (28260992 cached) / 126278 out |
+| TARGET-COMPAT | 5 | 1561.4s | 980.2s | 1636.9s | 0.0s | 18 | 1049.7s | 1 | 0 | 16 | 0 | 0 | 27570198 in (26934656 cached) / 93094 out |
+| MODEL-ROOT | 3 | 968.4s | 376.5s | 392.9s | 0.0s | 10 | 571.1s | 1 | 0 | 9 | 0 | 0 | 12257387 in (11895296 cached) / 39179 out |
+| IMPORT-ADMISSION | 2 | 912.0s | 467.5s | 0.0s | 0.0s | 5 | 282.0s | 0 | 0 | 4 | 0 | 0 | 8056121 in (7804288 cached) / 29325 out |
+| IMPORT-BATCH | 2 | 1315.3s | 442.3s | 0.0s | 0.0s | 5 | 328.3s | 0 | 0 | 4 | 0 | 0 | 10956792 in (10653952 cached) / 45325 out |
+| METADATA-FACTS | 2 (1 interrupted) | 1784.1s | 0.0s | 0.0s | 0.0s | 5 | 338.0s | 0 | 0 | 4 | 0 | 0 | 13482491 in (13236096 cached) / 51709 out |
+
+Costliest gates per phase:
+- integration: test 15.1s ×12, install 3.7s ×7, build 1.7s ×12
+- COMPATIBILITY-GATE: test 2.5s ×3, install 0.8s ×2, build 0.4s ×3
+- PERSISTENT-JOB-FOUNDATION: test 2.4s ×3, install 0.8s ×2, build 0.3s ×3
+- METADATA-DERIVATIVES: test 3.9s ×3, install 0.9s ×2, build 0.3s ×3
+- TYPED-SEARCH: test 4.6s ×3, install 0.9s ×2, build 0.4s ×3
+- PEOPLE-CORRECTIONS: test 3.5s ×2, install 0.6s ×1, build 0.3s ×2
+- SMART-ALBUM-FOUNDATION: test 3.3s ×2, install 0.4s ×1, build 0.3s ×2
+- ORGANIZATION-BROWSER: test 4.9s ×3, install 0.8s ×2, build 0.4s ×3
+- FACE-INFERENCE-PROVIDER: test 3.7s ×2, install 0.5s ×1, build 0.3s ×2
+- VISUAL-INFERENCE-PROVIDER: test 5.7s ×3, install 1.0s ×2, build 0.4s ×3
+- VIDEO-FRAME-INDEXING: test 3.7s ×2, install 0.4s ×1, build 0.3s ×2
+- LOCAL-INTELLIGENCE-INTEGRATION: test 7.2s ×4, install 1.4s ×3, build 0.6s ×4
+- SMART-ALBUM-INTEGRATION: test 5.0s ×3, install 1.0s ×2, build 0.4s ×3
+- WORKER-PIPELINE-INTEGRATION: test 5.1s ×3, install 0.9s ×2, build 0.4s ×3
+- OPERATIONS-RECOVERY: test 5.0s ×3, install 0.9s ×2, build 0.4s ×3
+- PRODUCTION-UI-EVIDENCE: test 6.6s ×4, install 1.5s ×3, build 0.5s ×4
+- TARGET-COMPAT: proof-TARGET-COMPAT-REGRESSION 808.0s ×3, proof-TARGET-COMPAT-001 187.5s ×3, proof-RECOVERY-022 48.6s ×3
+- MODEL-ROOT: proof-MODEL-ROOT-REGRESSION 554.7s ×2, proof-MODEL-ROOT-CASES-001 12.5s ×2, test 2.5s ×2
+- IMPORT-ADMISSION: proof-IMPORT-ADMISSION-REGRESSION 273.9s ×1, proof-IMPORT-ADMISSION-CASES-001 5.9s ×1, test 1.4s ×1
+- IMPORT-BATCH: proof-IMPORT-BATCH-REGRESSION 301.9s ×1, proof-IMPORT-BATCH-001 24.7s ×1, test 1.1s ×1
+- METADATA-FACTS: proof-METADATA-FACTS-REGRESSION 324.2s ×1, proof-METADATA-FACTS-CASES-001 11.7s ×1, test 1.4s ×1
+
+Not measured: Commands workers run inside their own turns are not observed; only controller gates are counted.
+Not measured: Some gate runs predate candidate recording, so unchanged-candidate repeats are a lower bound.
+Not measured: Some agent turns reported no token usage (interrupted, or the provider gave none).
+
+
+
+## Approved-plan audit: nested regression replay and final candidate composition
+- Status: open — read-only audit findings; no live plan or source patch.
+- Seen in: photo-library run2026-10-07-4f2dd1cf, current17-feature approved plan, five features verified.
+- Repro: Read `/Users/loudalo/Documents/photo-library-prototype/spec/repair-plan-audit/AUDIT.md` and `inventory.json`. Inspect generated-app `test/support/target-compat.mjs:159-198` and `test/acceptance/release-candidate.test.mjs:22-34`; installed controller `src/wbs.mjs:213-222`. Use a synthetic argv/inventory fixture, not costly live proof execution, to trace nested commands.
+- Expected: Final verification covers all required cases and surfaces without candidate recursion or repeatedly invoking cumulative overlapping aggregates. Counts distinguish obligations, cases, unique commands and observed defects.
+- Actual: Each feature aggregate reruns its owning/prior proofs; final featureProofs returns distinct aggregate wrappers which top-level argv dedup cannot collapse internally. Planned preservation candidate command conflicts with the generic helper's candidate prohibition if that helper is extended to the last feature. Candidate discovery includes aggregate test files while its current whitelist omits the current plan/requirements used by those tests. These final-stage paths are still to be implemented; they are latent composition hazards, not a current feature failure.
+- Evidence: Private audit paths above; frozen snapshot and counts preserved there. No private plan contents copied here.
+- Suspect: Generated app proof helper/candidate composition, plus final proof inventory in SoloFactory; plan's explicit cumulative regression obligations.
+- Suggested fix: Test a nonrecursive atomic proof inventory, preserving every required assertion and clean-install surface. Compose final candidate once instead of nesting all prefix aggregates. Do not remove proofs, change plan timing or manually edit the approved plan; any timing change requires supported independently reviewed amendment preserving completion/budgets. Improve UI distinctions between unmet behavior, preservation checks and delivery evidence. Coordinate application helper changes through its governed run; do not edit an active app writer.
+
+
+## Audit scope clarification: SoloFactory source work only
+- Status: open — owner confirmed scope separation. This narrows the preceding audit entry; do not treat its generated-app fixes as tasks to edit the photo-library workspace from this source checkout.
+- Seen in: approved photo-library recovery plan, five verified features; installed SoloFactory3fa33da.
+- Repro: Inspect `src/wbs.mjs` featureProofs and final verification dispatch with synthetic commands whose different argv invoke overlapping child proof inventories. Inspect dashboard verification-check rendering and planning prompts. Private audit evidence remains `/Users/loudalo/Documents/photo-library-prototype/spec/repair-plan-audit/AUDIT.md`.
+- Expected: SoloFactory produces executable, nonrecursive proof contracts and clearly separates app defects, preservation checks and delivery evidence. Factory-source defects remain outside generated app repair plans.
+- Actual: Final proof collection deduplicates argv only, which cannot detect overlapping subprocess aggregates. This is an observed composition limitation, not evidence that arbitrary differing commands may safely be removed. Flat obligation rendering obscures scope and costs.
+- Suggested fix: Validate or explicitly model supported proof composition, and improve generation/review guidance against nested candidate or prefix-regression orchestration. Use generic synthetic tests, preserve required assertions and existing-plan compatibility. Do not infer equivalence from names or blindly omit existing proofs. Separate app repair tasks from factory-source findings in owner-facing reports.
+- Photo-library responsibility: its test helper recursion/whitelist issues belong to governed photo-library work in this running factory. They are not source changes Claude should make in SoloFactory's worktree. Codex will continue the preserved approved plan; no issue reset, replacement plan, completion reset or budget renewal authorized by this clarification. If plan semantics require change, use supported reviewed amendment rather than editing stored state.
+
+
+## Recovery planner prompt exceeds Codex turn input limit
+- Status: fixed in source (Claude, 2026-10-13), not yet installed — the planner prompt now references `.factory/recovery-request-<id>.json` instead of inlining the request; every Codex and Claude prompt over 200,000 chars is refused before spawning (`prompt_too_large`, owner policy); `agent.started` events now carry `promptChars`; Codex's `input_too_large` output now gets its own diagnostic (the dashboard button still reads Retry; only the error text changed). Also fixed: retrying a failed preparation used to drop the request's prior plan and completed features (now carried from the failed phase's request). Install through the normal distro at an idle boundary, then Retry repair-plan preparation.
+- Seen in: preserved run2026-10-07-4f2dd1cf; installedc5c5114; new recoveryphase7811eb96-e1fc-4f28-86b6-46fce364210d after PEOPLE-LINKS review exhaustion.
+- Repro: POST `/api/jobs/2026-10-07-4f2dd1cf/recovery-plan` with guidance saved at `/Users/loudalo/Documents/photo-library-prototype/spec/people-links-followup/planning-guidance.md`. Already performed once; do not repeat against live run merely to reproduce. In a synthetic fixture generate a large prior case-table plan and verbose review failure, then capture the final Codex prompt before spawning.
+- Expected: Bounded planner input with complete authoritative data accessible by file references; preserve every obligation, completed feature, correction ledger and review finding.
+- Actual: Codex exits1 in1132ms before inference. `turn/start failed: Input exceeds the maximum length of1048576characters`; input_error_code=input_too_large,max_chars1048576,actual_chars2823622. Factory presents provider_failed/retry-plan although identical retry cannot fit.
+- Evidence: `/Users/loudalo/Documents/photo-library-prototype/projects/medialibrary/.factory/logs/recovery-plan-7811eb96-e1fc-4f28-86b6-46fce364210d.log`; preserved preceding blocked snapshot in `spec/people-links-followup/blocked-job-snapshot.json` at hostroot. No private plan contents pasted here.
+- Suspect: Recovery request/planner prompt composition in src/feature-recovery.mjs and src/prompts.mjs; repeated review requirement/proof strings and prior plan may be embedded. Verify exact contributions, not assumed.
+- Suggested fix: Test measured prompt size first, then compact repeated text and reference controller-owned request/prior-plan/source files rather than inline enormous copies. Preserve all cases/locators and independent review access. Validate bounded provider input before launching; classify input_too_large as actionable planning infrastructure failure rather than urging identical retry. No truncation of obligations, manual live state edits, fake input changes, correction reset or source edits in generated app. Install source fix through normal committed distro at idle boundary.
