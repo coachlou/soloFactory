@@ -111,6 +111,26 @@ for (const changed of ['source', 'review', 'contract', 'plan', 'specs', 'reviewe
   assert.equal(env.deployments(), 0);
 });
 
+// Seen live: the inlined request (a 2.4M-character prior case-table plan) exceeded Codex's 1,048,576-character input.
+test('the repair planner reads its request from a file, so prompt size does not grow with the prior plan', async t => {
+  const env = await setup(t, undefined, { uploads: { 'SPEC.md': 'v1' } });
+  const ready = await env.factory.planRecovery(env.failed.id, 'owner hint');
+  const stage = env.stages.find(item => /^recovery-plan-(?!review)/.test(item));
+  const prompt = env.prompts[stage];
+  const file = prompt.match(/\.factory\/recovery-request-[\w-]+\.json/)?.[0];
+  assert.ok(file, prompt);
+  assert.deepEqual(JSON.parse(await readFile(path.join(env.root, file), 'utf8')), JSON.parse(JSON.stringify(ready.recoveryPhase.request)));
+  assert.ok(!prompt.includes(ready.recoveryPhase.request.baseline), 'request contents are not inlined');
+  assert.ok(prompt.length < 20_000, `${prompt.length}`);
+});
+
+test('an oversized prompt is refused before any agent starts, with an actionable code', async t => {
+  const env = await setup(t);
+  const before = env.stages.length;
+  await assert.rejects(env.factory.invoke(env.failed, 'oversized', 'x'.repeat(1_000_001)), error => error.code === 'prompt_too_large' && /cannot fit/.test(error.message));
+  assert.equal(env.stages.length, before);
+});
+
 test('planning that changes code is rejected without resetting or discarding it', async t => {
   const env = await setup(t, async args => { if (args.context.stage.startsWith('recovery-plan-')) await writeFile(path.join(args.cwd, 'unexpected.js'), 'unexpected change'); });
   const result = await env.factory.planRecovery(env.failed.id);

@@ -85,6 +85,8 @@ test("provider diagnostics distinguish limits from recoverable local blockers", 
     item: { type: "command_execution", status: "completed", exit_code: 0, aggregated_output: "Camera permission denied is an acceptance scenario." },
   });
   assert.deepEqual(detectProviderDiagnostics(successfulSpecOutput), []);
+  // The line Codex printed when a repair-plan prompt inlined a 2.4M-character prior plan.
+  assert.deepEqual(detectProviderDiagnostics("turn/start failed: Input exceeds the maximum length of 1048576 characters").map((item) => item.code), ["input_too_large"]);
 });
 
 test("Codex makes one same-session retry after silence and does not retry a concrete blocker", async () => {

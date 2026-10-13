@@ -359,6 +359,12 @@ export function detectProviderDiagnostics(output = "") {
       action: "Wait for the subscription limit to reset or select another signed-in subscription provider. No automatic retry was attempted.",
     },
     {
+      code: "input_too_large",
+      pattern: /input_too_large|Input exceeds the maximum length/i,
+      title: "The prompt exceeded the provider's input limit",
+      action: "This is a factory defect: retrying the same input cannot fit. Report it with this log; no inference ran.",
+    },
+    {
       code: "authentication",
       pattern: /not logged in|authentication failed|unauthorized|invalid.*(?:token|credential)/i,
       title: "The coding agent needs sign-in",

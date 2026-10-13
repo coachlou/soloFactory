@@ -70,16 +70,15 @@ export async function archiveReview(factory, job, label) {
 
 const PLAN_SCHEMA = `{version:2,jobId,requestId,contractDigest (copied from the request),compatibility:[{subject,status:"verified",evidence}],slices:[{id (uppercase letters/digits/hyphens),title,objective,demo,dependsOn:[earlier feature ids],closes:[unfinished check ids this feature fully closes],acceptance:[{id,behavior (one concrete observable behavior),refs:[check ids],sources:[{path (one of request.sources),locator (section, heading, line or element)}],proof:{command:["npm"|"node"|"npx",...args],expect,pending?:"integration"},cases?:[{id (unique across the plan),surface:"api"|"browser"|"cli"|"unit"|"integration",action,field?,boundary?,expect (result or failure condition),refs:[subset of the requirement refs],sources:[subset of the requirement sources],supersedes?:[ids of a reviewed plan\'s obligations this case replaces]}]}]}]}`;
 
-function repairPlanPrompt(planFile, request) {
-  return `Prepare a repair plan ONLY. Do not implement, reset, narrow scope, install, or deploy. Preserve all source, user data, the frozen contract and previous evidence. Read .factory/REVIEW.md, the existing app and tests, and EVERY file in request.sources (frozen contract plus attached specs, mockups and prototype handoffs). Investigate model/tool compatibility read-only if needed.
+// The request is referenced, never inlined: a prior case-table plan alone can exceed the provider's input limit.
+function repairPlanPrompt(planFile, requestFile) {
+  return `Prepare a repair plan ONLY. Do not implement, reset, narrow scope, install, or deploy. Preserve all source, user data, the frozen contract and previous evidence. Read ALL of ${requestFile}, the authoritative request (unfinished checks, blockers, owner guidance, review, sources, prior plan, completed features), then .factory/REVIEW.md, the existing app and tests, and EVERY file in its sources (frozen contract plus attached specs, mockups and prototype handoffs). Investigate model/tool compatibility read-only if needed.
 Write ONLY ${planFile} as JSON: ${PLAN_SCHEMA}.
 Every unfinished check has exactly one closing feature. A broad MH/SC summary is not enough: carry each detailed obligation the sources state for that gap (fields, states, limits, error cases, layout, copy) as its own acceptance item citing the source path and locator. Each proof is an executable test of real behavior.
 ${CONSOLIDATION_RULES}
 Preserve already passing behavior and completed features; no new walking skeleton. Use small dependency-ordered features. The plan is reviewed against the sources and this checklist before execution; check it yourself first:
 ${PLAN_CHECKLIST}
-${CONTROLLER_FACTS}
-Request:
-${JSON.stringify(request, null, 2)}`;
+${CONTROLLER_FACTS}`;
 }
 
 function repairPlanAuditPrompt(planFile, priorBlockers = null, consolidated = false) {
@@ -309,7 +308,11 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
         return plan;
       } catch (error) { return error; }
     };
-    if (!amendment) await factory.invoke(job, `recovery-plan-${request.id}`, repairPlanPrompt(planFile, request), signal);
+    if (!amendment) {
+      const requestFile = `.factory/recovery-request-${request.id}.json`;
+      await writeFile(path.join(appDir, requestFile), JSON.stringify(request, null, 2));
+      await factory.invoke(job, `recovery-plan-${request.id}`, repairPlanPrompt(planFile, requestFile), signal);
+    }
     await guard();
     let plan = await readPlan();
     // Same structured gate as feature planning: a separate reviewer approves this exact plan, or it is corrected.
