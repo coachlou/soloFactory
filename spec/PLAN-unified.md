@@ -112,7 +112,23 @@ controller now does that job. Ceilings:
 *Not done:* final integration still reruns every feature proof once. Selecting there needs a per-feature "last
 verified at" commit; add it with step 8's record if final integration time shows up in release QA.
 
-## Open questions (from the PRD, decide by step 7)
+## Step 7 (in progress)
+
+*Bug items, done:* in feature mode the final review is release QA. It reports each defect as a failing
+`qa/*.test.mjs` plus the source files at fault (`bugs` in review-result.json). The controller commits the
+findings, gives each to the latest feature whose `writes` cover those files, runs the test (it must fail, or
+the finding falls back to the unscoped repair), and repairs under that feature's writes gate, so the repair
+cannot edit the finding's test. Findings no feature owns keep the unscoped repair. Ceilings:
+- a fixed bug's test reruns later only if the app's test command discovers `qa/`;
+- non-feature (v1) runs are unchanged.
+
+## Open questions (decided 2026-10-12, Lou delegated)
+
+- Trigger: release QA stays once per run, before deploy. Every-N-features waits for step 8's record.
+- Blocking: yes, findings block this release (current behavior).
+- Budget: bug items share the final-stage budget; a per-feature budget needs step 8's record.
+
+## Open questions (from the PRD, as asked)
 
 - What triggers release QA: every N merged features, a milestone, or on request?
 - Is "blocks this release" the default for findings in a feature's own declared checks?

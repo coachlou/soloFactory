@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./process.mjs";
 import { buildPrompt, continuationPrompt, featureBuildPrompt, featurePlanPrompt, featureReviewPrompt, planAuditPrompt, planCorrectionPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
-import { PLAN_SCHEMA_FIXES, assertConsolidation, caseResults, featureProofs, impactedFeatures, proofsOf, orderSlices, integrationProofs, outsideWrites, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
+import { PLAN_SCHEMA_FIXES, assertConsolidation, caseResults, featureProofs, impactedFeatures, proofsOf, orderSlices, integrationProofs, outsideWrites, writesCover, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
 export { pendingProofFailure };
 import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
@@ -413,7 +413,7 @@ export class SoloFactory {
         await this.assertInputs(job);
         const { code, message, details } = job.reviewFailure;
         delete job.reviewFailure;
-        job = await this.repair(job, new FactoryError(code, message, details), signal);
+        job = await this.repairFindings(job, new FactoryError(code, message, details), signal);
         job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: false });
         continue;
       }
@@ -441,7 +441,7 @@ export class SoloFactory {
           await this.store.writeState(job);
           throw new FactoryError("paused", "Paused before repairing", { before: "reviewing" });
         }
-        job = await this.repair(job, failure, signal);
+        job = await this.repairFindings(job, failure, signal);
         job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: false });
         continue;
       }
@@ -1173,6 +1173,27 @@ export class SoloFactory {
     if (ids.length) await this.emit(job.id, { type: "slice.impact", state: job.state, slice: slice.id, impacted: ids, message: `Feature ${slice.id} changed files of ${ids.join(", ")}; rerunning their proofs` });
     const built = slices.filter((item) => done.includes(item.id) || item.id === slice.id);
     return proofsOf(built.filter((item) => ids.includes(item.id)), built);
+  }
+
+  // Release QA: a finding with a failing test is a bug item of the latest feature whose writes cover its files,
+  // repaired under that feature's writes gate, so the committed finding test cannot be edited away. Findings no
+  // feature owns, or whose tests already pass, get the unscoped repair. Bug items share the final-stage budget.
+  async repairFindings(job, failure, signal) {
+    const slices = job.planVersion === 2 ? job.approvedPlan?.plan?.slices ?? [] : [];
+    const owned = new Map();
+    for (const [index, bug] of (failure.details?.bugs ?? []).entries()) {
+      const owner = slices.findLast((slice) => slice.writes && bug.files.some((file) => writesCover(slice.writes, file)));
+      if (owner) (owned.get(owner) ?? owned.set(owner, []).get(owner)).push({ id: `BUG-${index + 1}`, proof: { command: ["node", "--test", bug.test] }, description: bug.description });
+    }
+    if (!owned.size) return this.repair(job, failure, signal);
+    const attempt = job.attempt;
+    await this.commit(job, "factory: release QA findings recorded");
+    const manifest = await this.readManifest(this.store.appDir(job.id));
+    for (const [owner, proofs] of owned) {
+      for (const bug of proofs) await this.emit(job.id, { type: "review.bug", state: job.state, feature: owner.id, bug: bug.id, message: `${bug.id} assigned to ${owner.id}: ${bug.description}` });
+      job = await this.verifyWithRepairs(job, manifest, signal, { includeInstall: false, slice: owner, proofs });
+    }
+    return job.attempt === attempt ? this.repair(job, failure, signal) : job;
   }
 
   // One repair turn against a recorded failure. Throws the failure itself once the budget is spent.

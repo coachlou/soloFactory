@@ -265,7 +265,11 @@ interactions, shared state such as storage, config and middleware, and API consi
 error shapes and status codes across features) and deploy readiness (the health endpoint, the
 metrics endpoint, and startup behavior: PORT, first run with missing data directories or files).
 For a check a feature review already covered, confirm its cited test still exists and cite it as
-evidence; reopen it only when the integration or deploy audit shows it no longer holds.`;
+evidence; reopen it only when the integration or deploy audit shows it no longer holds.
+This is release QA: report defects rather than fixing feature code. For each defect, write one
+node:test file under qa/ that fails because of it (the test name states the expected behavior), and
+add {test, files, description} to a bugs array in review-result.json: test is that file, files are
+the source files at fault. The controller hands each bug to the feature owning those files.`;
 
 export function reviewPrompt({ featureReviewed = false } = {}) {
   return `You are the final implementation reviewer. Audit the current app against every

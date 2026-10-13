@@ -64,6 +64,14 @@ export async function validateReview(appDir, request) {
   if (!["pass", "blocked"].includes(report.verdict) || !Array.isArray(report.blockers) || report.blockers.some(x => typeof x !== "string" || !x.trim())) {
     throw new Error("Review verdict/blockers are invalid.");
   }
+  // Release QA findings: each names a failing test it wrote and the source files at fault, so the controller can
+  // hand it to the feature that owns them.
+  const bugs = report.bugs ?? [];
+  const relative = (file) => typeof file === "string" && file.trim() && !path.isAbsolute(file) && !path.normalize(file).startsWith("..");
+  if (!Array.isArray(bugs) || bugs.some((bug) => !relative(bug?.test) || !Array.isArray(bug.files) || !bug.files.length || !bug.files.every(relative) || typeof bug.description !== "string" || !bug.description.trim())) {
+    throw new Error("Review bugs are invalid: each needs test, files and description.");
+  }
+  for (const bug of bugs) await realpath(path.join(appDir, bug.test)).catch(() => { throw new Error(`Review bug test ${bug.test} does not exist.`); });
   if (!Array.isArray(report.checks) || report.checks.length !== request.checks.length) throw new Error("Review does not cover every intake requirement and acceptance scenario.");
   const expected = new Set(request.checks.map(x => x.id));
   const seen = new Set();
@@ -81,12 +89,13 @@ export async function validateReview(appDir, request) {
     const message = first ? `Review blocked: ${first.id} — ${first.text} (${first.status}).` : "Review blocked: unresolved reviewer findings.";
     const output = [message, "", "All unfinished checks:",
       ...failedChecks.map(check => `- ${check.id} (${check.status}): ${check.text}${check.reason ? ` — ${check.reason}` : ""}`),
-      "", "Reviewer blockers:", ...report.blockers.map(item => `- ${item}`), "",
+      "", "Reviewer blockers:", ...report.blockers.map(item => `- ${item}`),
+      ...(bugs.length ? ["", "Findings with failing tests (never edit these tests):", ...bugs.map(bug => `- ${bug.test}: ${bug.description}`)] : []), "",
       "Read .factory/review-request.json, .factory/review-result.json and .factory/REVIEW.md for requirement and test details.",
       "Implement missing behavior and execute the absent checks. Do not waive scope or change statuses merely to pass review.",
     ].join("\n");
     const error = new Error(message);
-    error.details = { failedChecks, blockers: report.blockers, output, logPath: ".factory/REVIEW.md" };
+    error.details = { failedChecks, blockers: report.blockers, bugs, output, logPath: ".factory/REVIEW.md" };
     throw error;
   }
   seen.clear();
