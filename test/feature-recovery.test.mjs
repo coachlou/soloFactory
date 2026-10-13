@@ -652,3 +652,28 @@ test('a repair-plan request with no matching review is refused and leaves the pa
   assert.deepEqual(after.error, before.error);
   assert.equal(after.recoveryPhase, before.recoveryPhase);
 });
+
+test('a repair-plan correction patches only what blockers name, and the re-review judges only prior blockers', async t => {
+  // Same two fixes main planning got (planCorrectionPrompt, REREVIEW): smoke 8's recovery spent ~$14 without approval.
+  let reviews = 0; const requests = [];
+  const env = await setup(t, async args => {
+    if (/^recovery-plan-review-/.test(args.context.stage)) {
+      reviews += 1;
+      requests.push(JSON.parse(await readFile(path.join(args.cwd, '.factory/plan-review-request.json'), 'utf8')));
+      if (reviews === 1) {
+        const file = path.join(args.cwd, '.factory/plan-review-result.json'); const r = JSON.parse(await readFile(file, 'utf8'));
+        r.verdict = 'blocked'; r.blockers = ['SC-1 has no executable proof']; await writeFile(file, JSON.stringify(r));
+      }
+    }
+  });
+  const ready = await env.factory.planRecovery(env.failed.id);
+  assert.equal(ready.recoveryPhase.status, 'ready', ready.error?.message);
+  const id = ready.recoveryPhase.id; const reqId = env.stages.find(s => s.startsWith('recovery-correction-')).slice('recovery-correction-'.length, -2);
+  assert.doesNotMatch(env.prompts[`recovery-plan-review-${id}-1`], /later review round/);
+  assert.equal(requests[0].priorBlockers, undefined);
+  assert.match(env.prompts[`recovery-plan-review-${id}-2`], /later review round/);
+  assert.deepEqual(requests[1].priorBlockers, ['SC-1 has no executable proof']);
+  const correction = env.prompts[`recovery-correction-${reqId}-1`];
+  assert.match(correction, /byte for byte/);
+  assert.doesNotMatch(correction, /every source it lists/);
+});

@@ -876,3 +876,20 @@ with Opus reasoning. Completed and deployed. Baseline: smoke 9 (07631040, Fable 
 - Caveat: Opus vs Fable confounds the planning and review timings. Smoke 10 (Fable) hit the subscription limit after 9 m / $6.48;
   c4a7c0e makes Opus the reasoning default.
 - Next cost centre: feature builds, ~1120 s of 2100 s (F1 516 s + repair).
+
+## Pipeline efficiency audit (2026-10-13, wip/feature-slice-recovery)
+
+Smokes 13 and 14 (all Opus, reasoning effort low): ~15 min and ~$6.70 list per run. Shares in smoke 14: planning
+5 turns 34%, feature builds 42%, feature reviews 18%, final review 7%. About 56% of spend is cache writes (files and
+tool output entering a turn), 14% cache reads, so inlining files into prompts would not help.
+
+- **≤4 planning turns: retired (Lou, 2026-10-13).** Smokes 11-14 all ran spec → plan → review-1 blocks on one real
+  semantic defect (date injection, persistence path, route key, unmark semantics) → patch → review-2 approves. The
+  checklist was already given to the planner, so these are fresh-reader catches; review-2 (~$0.29, 4 tool calls) is
+  the cheapest turn and the one that validates the fix. Five planning turns is the expected shape.
+- **Repair planning got main planning's two fixes:** `repairCorrectionPrompt` now patches only what blockers name
+  (was: re-read every source, rewrite the whole plan), and automatic repair-plan re-reviews get `REREVIEW` scoping with
+  the phase's `blockerHistory` as `priorBlockers` (was: full re-audit each round). Smoke 8's recovery spent ~$14 on a
+  plan and two reviews without approval. Owner amendments keep their existing prompt. Not yet exercised on a real run.
+- Not changed: feature reviews (0 blocks in the last 9, but run 8's caught a real defect; a Sonnet trial needs a
+  per-stage model override first), final review scope, compact planner inputs (still waits on its trigger).

@@ -462,7 +462,7 @@ the planner fixes them all in one correction, so a blocker held back costs a ful
 
 // Smoke 90b8b32e and 29924815: every later round found new nits in parts no correction touched, so
 // corrections ran out on reviewer variance. Feature reviews and gates still judge what gets built.
-const REREVIEW = `This is a later review round: plan-review-request.json lists the priorBlockers earlier rounds
+export const REREVIEW = `This is a later review round: plan-review-request.json lists the priorBlockers earlier rounds
 raised. Check each one is resolved. Elsewhere, block only on a regression the corrections introduced or a
 proof that cannot run as written; do not raise new findings about parts earlier rounds accepted.`;
 

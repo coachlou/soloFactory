@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile, writeFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { contractDigest, originalChecks, preparePlanReview, runInputs, sourceSet, validatePlanReview, validateReview } from './review.mjs';
-import { ALL_BLOCKERS, CONSOLIDATION_RULES, CONTROLLER_FACTS, PLAN_CHECKLIST } from './prompts.mjs';
+import { ALL_BLOCKERS, CONSOLIDATION_RULES, CONTROLLER_FACTS, PLAN_CHECKLIST, REREVIEW } from './prompts.mjs';
 import { PLAN_SCHEMA_FIXES, assertConsolidation, failedIntegrationProofs, pendingProofFailure, validateFeaturePlan, validateSlicePlan } from './wbs.mjs';
 
 export const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -81,7 +81,7 @@ ${PLAN_CHECKLIST}
 ${CONTROLLER_FACTS}`;
 }
 
-function repairPlanAuditPrompt(planFile, priorBlockers = null, consolidated = false) {
+function repairPlanAuditPrompt(planFile, priorBlockers = null, consolidated = false, rereview = false) {
   const amended = priorBlockers && !priorBlockers.length ? '\nThis plan is an owner-submitted replacement for a plan that had passed review. Judge it independently on its merits; the earlier approval does not carry over.'
     : priorBlockers ? `\nThis plan is an owner-submitted correction after automatic corrections ran out. Its previous review blocked it for:\n${priorBlockers.map(item => `- ${item}`).join('\n')}\nAssess each of those blockers explicitly, then judge the whole plan on its merits.` : '';
   const mapped = consolidated ? '\nplan-review-request.json "base" lists every obligation of the reviewed plan this replaces; each is kept under its id or superseded by exactly one case (supersedes). Block when a kept requirement or superseding case asserts less than its base obligation: a lost field, action, boundary, failure condition or API/browser surface, a weaker expected result, or a case whose wording no longer matches the behavior it replaces.' : '';
@@ -91,11 +91,13 @@ Do NOT modify ${planFile} or any file except .factory/plan-review-result.json. E
 Block when a review finding is not addressed, or when (judged for the unfinished checks):
 ${PLAN_CHECKLIST}
 ${CONTROLLER_FACTS}
-${ALL_BLOCKERS} Approve only a plan you would execute as written.`;
+${ALL_BLOCKERS}${rereview ? `\n${REREVIEW}` : ''} Approve only a plan you would execute as written.`;
 }
 
+// Patch, not re-plan, as planCorrectionPrompt: a full rewrite re-read every source and let the next
+// review find new nits in untouched entries, so corrections ran out (smoke 8's recovery, ~$14, never approved).
 function repairCorrectionPrompt(planFile, blockers) {
-  return `You are correcting the repair plan after a blocked review. Read the request in .factory/plan-review-request.json, every source it lists and ${planFile}. Rewrite ONLY ${planFile} (same schema, jobId, requestId and contractDigest) to resolve every blocker without narrowing, waiving or dropping a requirement. Do not write code. Then check the whole corrected plan against the reviewer's checklist, so the next review finds nothing new:
+  return `You are correcting the repair plan after a blocked review. Patch ${planFile}: change ONLY the features, acceptance items and proofs the blockers below name (adding an item or feature only where a blocker requires it) and leave every other entry exactly as it is, byte for byte. Read ${planFile} and .factory/plan-review-request.json; open a source or the existing app only where a blocker cites it or resolving it needs it. Keep the same schema, jobId, requestId and contractDigest. Resolve every blocker without narrowing, waiving or dropping a requirement. Do not write code. Then check the entries you changed (and anything that references them) against the reviewer's checklist:
 ${PLAN_CHECKLIST}
 ${CONTROLLER_FACTS}
 Blockers:
@@ -326,10 +328,12 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
         const planDigest = digest(plan);
         const key = planKey(plan);
         if (!phase.reviewedPlans.includes(key)) phase.reviewedPlans.push(key);
-        const review = await preparePlanReview(appDir, job, planDigest, { kind: 'repair', requestId: request.id, planFile, checks, findings: blockers, sources, ...(phase.amendment && { amendment: true, priorBlockers: phase.amendment.priorBlockers }), ...(base && { base: base.slices.flatMap(slice => slice.acceptance.map(item => ({ feature: slice.id, ...item }))) }) });
+        // Automatic later rounds judge only earlier blockers and regressions, as main planning does (REREVIEW).
+        const rereview = !phase.amendment && (phase.blockerHistory ?? []).length > 0;
+        const review = await preparePlanReview(appDir, job, planDigest, { kind: 'repair', requestId: request.id, planFile, checks, findings: blockers, sources, ...(phase.amendment ? { amendment: true, priorBlockers: phase.amendment.priorBlockers } : rereview && { priorBlockers: phase.blockerHistory }), ...(base && { base: base.slices.flatMap(slice => slice.acceptance.map(item => ({ feature: slice.id, ...item }))) }) });
         phase.reviews += 1;
         await factory.store.writeState(job);
-        await factory.invoke(job, `recovery-plan-review-${phaseId}-${phase.reviews}`, repairPlanAuditPrompt(planFile, phase.amendment?.priorBlockers, Boolean(base)), signal);
+        await factory.invoke(job, `recovery-plan-review-${phaseId}-${phase.reviews}`, repairPlanAuditPrompt(planFile, phase.amendment?.priorBlockers, Boolean(base), rereview), signal);
         await guard();
         const after = await readPlan();
         if (after instanceof Error || digest(after) !== planDigest) throw new Error('The repair plan reviewer changed the plan, so its verdict cannot approve it.');
@@ -340,6 +344,7 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
         } catch (error) {
           if (!error.details?.blockers) throw error;
           planBlockers = error.details.blockers.length ? error.details.blockers : [error.message];
+          phase.blockerHistory = [...new Set([...(phase.blockerHistory ?? []), ...planBlockers])];
         }
       }
       phase.planBlockers = planBlockers;
