@@ -62,6 +62,9 @@ test("a release finding goes to the feature owning the failing file, and its rep
   assert.match(prompts[0], /qa\/BUG-1\.test\.mjs: History drops the score after reload/, "the finding reaches the repairer");
   assert.match(prompts[0], /"writes": \[\s*"index.html"/, "the feature is inlined with its writes");
   assert.doesNotMatch(prompts[0], /contract and plan/);
+  const runs = events.filter((event) => event.type === "gate.started" && event.gate === "proof-BUG-1").map((event) => events.indexOf(event));
+  const scoped = events.findIndex((event) => event.type === "gate.passed" && event.gate === "proof-BUG-1");
+  assert.ok(runs.some((index) => index > scoped), "final integration reran the fixed bug's test");
 });
 
 test("a bug repair that edits the finding's test fails the writes gate", async () => {

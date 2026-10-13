@@ -119,9 +119,12 @@ verified at" commit; add it with step 8's record if final integration time shows
 findings, gives each to the latest feature whose `writes` cover those files, runs the test (it must fail, or
 the finding falls back to the unscoped repair), and repairs under that feature's writes gate, so the repair
 cannot edit the finding's test. Findings no feature owns keep the unscoped repair. Ceilings:
-- a fixed bug's test reruns later only if the app's test command discovers `qa/`;
-- the repairer sees a finding's description only through the failing test's name in the gate output;
+- a fixed bug's test reruns at every later final integration in the run, but not in later releases unless the
+  app's test command discovers `qa/`;
+- an unowned finding's unscoped repair has no writes gate, so only the prompt keeps it off the finding's test;
 - non-feature (v1) runs are unchanged.
+
+The repair prompt carries the feature inline (no `slices.json` read), its writes, and each finding's description.
 
 ## Step 8 (in progress)
 

@@ -132,7 +132,7 @@ export class SoloFactory {
         job.agentSessions = {};
         if (job.recoveryPhase) (job.recoveryPhaseHistory ??= []).push({ ...job.recoveryPhase, status: "discarded" });
         job.recoveryPhase = null;
-        if (job.planVersion === 2) Object.assign(job, { featureCursor: null, setAside: null, finalBudgetSet: false, repairBudgetLimit: null });
+        if (job.planVersion === 2) Object.assign(job, { featureCursor: null, setAside: null, bugProofs: null, finalBudgetSet: false, repairBudgetLimit: null });
         else job.repairBudgetLimit = job.attempt + this.maxRepairs;
         await this.store.writeState(job);
         await this.emit(job.id, { type: "job.restarted", state: job.state, message: `Restarting from slice ${sliceId} at ${base.slice(0, 7)}` });
@@ -1173,7 +1173,7 @@ export class SoloFactory {
     if (!slice) {
       for (const entry of integrationProofs(job)) { entry.status = "pending"; delete entry.candidate; delete entry.verifiedAt; delete entry.proofCandidate; }
       await this.store.writeState(job);
-      proofs = [...proofs, ...featureProofs(job), ...integrationProofs(job).map(entry => ({ id: entry.gate.slice("proof-".length), key: entry.key, proof: entry.obligation.proof, cases: entry.obligation.cases }))];
+      proofs = [...proofs, ...featureProofs(job), ...(job.bugProofs ?? []), ...integrationProofs(job).map(entry => ({ id: entry.gate.slice("proof-".length), key: entry.key, proof: entry.obligation.proof, cases: entry.obligation.cases }))];
     }
     let current = job;
     let first = null;
@@ -1240,10 +1240,15 @@ export class SoloFactory {
   async repairFindings(job, failure, signal) {
     const slices = job.planVersion === 2 ? job.approvedPlan?.plan?.slices ?? [] : [];
     const owned = new Map();
-    for (const [index, bug] of (failure.details?.bugs ?? []).entries()) {
+    // Every finding's test stays a proof for the rest of the run, so final integration reruns fixed bugs.
+    job.bugProofs ??= [];
+    for (const bug of failure.details?.bugs ?? []) {
+      const proof = { id: `BUG-${job.bugProofs.length + 1}`, proof: { command: ["node", "--test", bug.test] }, description: bug.description };
+      job.bugProofs.push(proof);
       const owner = slices.findLast((slice) => slice.writes && bug.files.some((file) => writesCover(slice.writes, file)));
-      if (owner) (owned.get(owner) ?? owned.set(owner, []).get(owner)).push({ id: `BUG-${index + 1}`, proof: { command: ["node", "--test", bug.test] }, description: bug.description });
+      if (owner) (owned.get(owner) ?? owned.set(owner, []).get(owner)).push(proof);
     }
+    await this.store.writeState(job);
     if (!owned.size) return this.repair(job, failure, signal);
     const attempt = job.attempt;
     await this.commit(job, "factory: release QA findings recorded");
