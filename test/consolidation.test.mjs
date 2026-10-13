@@ -131,7 +131,7 @@ test('each case passes only on its own passing test; a failure, skip or todo, or
 
 async function harness(t, commandRunner) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'solo factory cases-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const store = new JobStore(root); await store.init();
   const job = await store.create({ brief: { workingName: 'Cases', mustHaves: ['Upload photos'], acceptanceScenarios: ['Oversized uploads are refused'] }, transcript: [{ role: 'user', content: 'x' }], provider: 'fixture', sdlc: 'single' });
   const factory = new SoloFactory({ store, commandRunner });

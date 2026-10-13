@@ -19,7 +19,7 @@ const reviewer = stage => /^recovery-plan-review-/.test(stage);
 
 async function setup(t, { malformed = false, ready = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'solo-plan-amendment-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const store = new JobStore(root); await store.init();
   await mkdir(path.join(root, '.factory/uploads'), { recursive: true });
   await writeFile(path.join(root, '.factory/uploads/SPEC.md'), '§3 Group by capture day.\n');

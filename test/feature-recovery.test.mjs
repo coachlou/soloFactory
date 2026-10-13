@@ -58,7 +58,7 @@ test('v2 repair plans may depend on already completed features but not on unknow
 
 async function setup(t, mutate = async () => {}, { uploads = {}, alreadyPasses = false, autoStart = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'solo-feature-recovery-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const store = new JobStore(root); await store.init();
   // Supplied specs and prototype handoffs arrive at intake, before the run.
   for (const [name, body] of Object.entries(uploads)) { await mkdir(path.join(root, '.factory/uploads'), { recursive: true }); await writeFile(path.join(root, '.factory/uploads', name), body); }

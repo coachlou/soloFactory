@@ -9,7 +9,7 @@ import { createFixtureProvider } from '../src/fixture-provider.mjs';
 
 async function setup(t, mutate, { maxRepairs = 0, sdlc = 'single' } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'solo-review-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const store = new JobStore(root);
   await store.init();
   const job = await store.create({ brief: { workingName: 'Review regression', mustHaves: ['Live saved searches'], acceptanceScenarios: ['A new matching photo enters its saved album.'] }, transcript: [{ role: 'user', content: 'Build a real smart album.' }], provider: 'fixture', sdlc });
