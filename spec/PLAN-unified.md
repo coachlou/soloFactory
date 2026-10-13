@@ -97,6 +97,21 @@ dependency fails its gate by design: the plan must put the dependency in a found
 - `test/features.test.mjs` asserts on `featureCursor` and `attempt` in 21 places. To keep it unchanged, the record
   stays at `job.featureCursor`, with the new fields added, rather than being renamed.
 
+Deferred (decided 2026-10-12): the feature-record module and migration move to step 8. The data already exists in
+`featureCursor` + `repairBudgetLimit`; step 8 is the first consumer that needs per-feature state in a new shape.
+
+## Step 6 (in progress)
+
+*Merge check, done:* a feature's checks rerun the proofs of built features whose writes, or whose dependencies'
+writes, cover a file changed since the last verified feature (`impactedFeatures`, `reachedProofs`). Plans without
+writes keep the old scope. Planner and plan review are told not to write aggregate regression proofs, since the
+controller now does that job. Ceilings:
+- impact is computed once per check, so a repair that reaches further is caught at final integration;
+- reads are assumed to be own plus dependencies' files.
+
+*Not done:* final integration still reruns every feature proof once. Selecting there needs a per-feature "last
+verified at" commit; add it with step 8's record if final integration time shows up in release QA.
+
 ## Open questions (from the PRD, decide by step 7)
 
 - What triggers release QA: every N merged features, a milestone, or on request?

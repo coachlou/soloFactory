@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./process.mjs";
 import { buildPrompt, continuationPrompt, featureBuildPrompt, featurePlanPrompt, featureReviewPrompt, planAuditPrompt, planCorrectionPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
-import { PLAN_SCHEMA_FIXES, assertConsolidation, caseResults, featureProofs, orderSlices, integrationProofs, outsideWrites, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
+import { PLAN_SCHEMA_FIXES, assertConsolidation, caseResults, featureProofs, impactedFeatures, proofsOf, orderSlices, integrationProofs, outsideWrites, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
 export { pendingProofFailure };
 import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
@@ -773,9 +773,10 @@ export class SoloFactory {
         await save("checking");
       }
       if (cursor.substage === "checking") {
-        // Feature-scoped: build plus this feature's proofs, installing only when its dependencies changed.
-        // The whole suite first runs at final integration.
-        job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: await depsDigest(appDir) !== job.installedDeps, slice, proofs: runnable.filter((item) => item.proof) });
+        // Feature-scoped: build, this feature's proofs and the proofs of earlier features its changes can reach,
+        // installing only when its dependencies changed. The whole suite first runs at final integration.
+        const reached = scope.cursor ? [] : await this.reachedProofs(job, slice);
+        job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: await depsDigest(appDir) !== job.installedDeps, slice, proofs: [...runnable.filter((item) => item.proof), ...reached] });
         cursor.candidate = await candidate();
         await save("reviewing");
       }
@@ -1156,6 +1157,22 @@ export class SoloFactory {
     const message = `Feature ${slice.id} changed files outside its declared writes: ${outside.join(", ")}.`;
     await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "writes", feature: slice.id, message });
     return new FactoryError("quality_gate_failed", message, { gate: "writes", output: `${message}\nDeclared writes: ${slice.writes.join(", ")}\nMove the change into a declared file or revert it; the plan's file lists are fixed during a build.` });
+  }
+
+  // Merge check: proofs of built features whose files (or whose dependencies' files) this feature changed
+  // since the last verified feature. Plans need no cumulative regression proofs to protect earlier work.
+  // ponytail: computed once per check; a repair that reaches further is caught at final integration.
+  async reachedProofs(job, slice) {
+    const done = job.sliceDone ?? [];
+    const base = job.sliceStats?.[done.at(-1)]?.commit;
+    if (!base || !slice.writes) return [];
+    const files = async (...args) => (await this.store.git(...args)).split("\0").filter(Boolean);
+    const changed = [...new Set([...await files("diff", "--name-only", "-z", base), ...await files("ls-files", "-z", "-o", "--exclude-standard")])];
+    const slices = job.approvedPlan.plan.slices;
+    const ids = impactedFeatures(slices, done, changed) ?? [];
+    if (ids.length) await this.emit(job.id, { type: "slice.impact", state: job.state, slice: slice.id, impacted: ids, message: `Feature ${slice.id} changed files of ${ids.join(", ")}; rerunning their proofs` });
+    const built = slices.filter((item) => done.includes(item.id) || item.id === slice.id);
+    return proofsOf(built.filter((item) => ids.includes(item.id)), built);
   }
 
   // One repair turn against a recorded failure. Throws the failure itself once the budget is spent.

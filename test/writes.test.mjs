@@ -8,7 +8,7 @@ import os from "node:os";
 import { JobStore } from "../src/store.mjs";
 import { SoloFactory } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
-import { outsideWrites, validateFeaturePlan } from "../src/wbs.mjs";
+import { impactedFeatures, outsideWrites, validateFeaturePlan } from "../src/wbs.mjs";
 
 const checks = [{ id: "MH-1", text: "Record a score" }, { id: "MH-2", text: "See history" }];
 const opts = { jobId: "job", contractDigest: "contract", checks };
@@ -66,6 +66,8 @@ async function declaredRun(stray) {
       const file = path.join(options.cwd, ".factory/slices.json");
       const value = JSON.parse(await readFile(file, "utf8"));
       for (const slice of value.slices) slice.writes = slice.dependsOn.length ? ["index.html", "ui.test.mjs"] : ["*"];
+      // A distinct command, so the skeleton's proof is its own gate rather than deduplicated into npm test.
+      value.slices[0].acceptance[0].proof.command = ["node", "--test", "server.test.mjs"];
       await writeFile(file, JSON.stringify(value, null, 2));
     }
     if (stray && stage === "build-slice-SLICE-UI") await writeFile(path.join(options.cwd, "stray.mjs"), "export {};\n");
@@ -90,4 +92,23 @@ test("a build turn that edits a file outside its writes fails its gates and the 
   assert.equal(result.state, "failed");
   assert.equal(result.error.details?.gate, "writes");
   assert.match(result.error.message, /stray\.mjs/);
+});
+
+test("a change reaches the features that own the file and every built feature depending on them", () => {
+  const slices = [base(), feature("RECORD", { dependsOn: ["BASE"], writes: ["src/record/"] }), feature("HISTORY", { dependsOn: ["BASE"], writes: ["src/history/"] }), feature("EXPORT", { dependsOn: ["RECORD"], writes: ["src/export/", "src/record/format.js"] })];
+  const done = ["BASE", "RECORD", "HISTORY"];
+  assert.deepEqual(impactedFeatures(slices, done, ["src/record/format.js", "src/export/csv.js"]), ["RECORD"], "a sibling is out of reach");
+  assert.deepEqual(impactedFeatures(slices, done, ["server.mjs"]), ["BASE", "RECORD", "HISTORY"], "a foundation file reaches everything built on it");
+  assert.deepEqual(impactedFeatures(slices, done, ["src/export/csv.js"]), [], "new files reach nobody");
+  assert.equal(impactedFeatures([feature("OLD"), ...slices], ["OLD", ...done], ["x.js"]), null, "an older plan without writes keeps the old scope");
+});
+
+test("a later feature that edits an earlier feature's files reruns that feature's proofs in its own checks", async () => {
+  const { result, events } = await declaredRun(false);
+  assert.equal(result.state, "completed", result.error?.message);
+  const impact = events.find((event) => event.type === "slice.impact");
+  assert.equal(impact?.slice, "SLICE-UI");
+  assert.deepEqual(impact.impacted, ["SLICE-SKELETON"]);
+  const uiChecks = events.slice(events.indexOf(impact), events.findIndex((event) => event.type === "slice.completed" && event.slice === "SLICE-UI"));
+  assert.ok(uiChecks.some((event) => event.type === "gate.started" && /^proof-SLICE-SKELETON\./.test(event.gate)), "the skeleton's proofs ran inside SLICE-UI's checks");
 });

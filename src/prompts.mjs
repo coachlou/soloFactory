@@ -379,7 +379,8 @@ export const PLAN_CHECKLIST = `A plan is blocked when:
 - a proof marked "pending": "integration" could run when its feature is built;
 - a required model, native package, runtime or tool is unverified;
 - a feature's writes miss files its obligations plainly need, or are broad enough to serialize the plan
-  (a glob over a whole tree), or a dependsOn exists only to permit a shared file rather than real use.`;
+  (a glob over a whole tree), or a dependsOn exists only to permit a shared file rather than real use;
+- a proof reruns other features' proofs (a cumulative regression or aggregate suite) instead of only its own tests.`;
 
 export function featurePlanPrompt({ followOn = false } = {}) {
   return `You are the feature planner for a small software factory. Read .factory/plan-request.json,
@@ -413,6 +414,9 @@ Rules the controller enforces:
   them must write different files. package.json and factory.json belong to a foundation feature (one
   with no dependsOn), so put every dependency there. .factory/, package-lock.json, README.md and
   .gitignore are always writable.
+- Each proof runs only its own feature's tests. The controller reruns an earlier feature's proofs whenever
+  a later feature changes files that feature or its dependencies write, and every proof once at final
+  integration, so never add a regression or aggregate proof that reruns other features' proofs.
 - Proof commands are argument arrays starting with npm, node or npx — never shell strings. Name
   the test file and expected result; the file may not exist yet, it must exist and pass when the
   feature is verified. Include negative and failure cases the contract implies.

@@ -217,8 +217,13 @@ export function featureProofs(job) {
   const built = (plan?.slices ?? []).filter((slice) => done.includes(slice.id));
   // A stage obligation (e.g. "the seed script fails until the summary exists") is retired once a built
   // feature's case supersedes it; demanding its test at integration would be unrepairable.
+  return proofsOf(built);
+}
+
+// Runnable proofs of `selected`, minus stage obligations any built feature's case retired.
+export function proofsOf(selected, built = selected) {
   const retired = new Set(built.flatMap((slice) => (slice.acceptance ?? []).flatMap((item) => (item.cases ?? []).flatMap((entry) => entry.supersedes ?? []))));
-  return built.flatMap((slice) => (slice.acceptance ?? [])
+  return selected.flatMap((slice) => (slice.acceptance ?? [])
     .filter((item) => item?.proof?.command && !item.proof.pending && !retired.has(item.id))
     .map((item) => ({ id: `${slice.id}.${item.id}`, proof: item.proof, cases: item.cases })));
 }
@@ -469,6 +474,17 @@ const stem = (pattern) => { const head = pattern.split(GLOB_RE)[0]; return head.
 // A literal entry covers itself and, as a directory, everything under it.
 export const writesCover = (patterns, file) => patterns.some((pattern) => matchesGlob(file, pattern) || (!GLOB_RE.test(pattern) && (file === pattern || file.startsWith(dirOf(pattern)))));
 export const outsideWrites = (files, writes) => files.filter((file) => !writesCover([...writes, ...ALWAYS_WRITABLE], file));
+
+// Built features a change can break: those whose own or dependencies' writes cover a changed file.
+// null when any built feature has no writes list (an older plan), so callers keep their old scope.
+// ponytail: assumes a feature reads only its own and its dependencies' files; a declared reads list is the upgrade.
+export function impactedFeatures(slices, done, changed) {
+  const byId = new Map(slices.map((slice) => [slice.id, slice]));
+  const built = done.map((id) => byId.get(id)).filter(Boolean);
+  if (built.some((slice) => !slice.writes)) return null;
+  const reach = (slice) => [slice, ...slice.dependsOn.flatMap((id) => reach(byId.get(id)))];
+  return built.filter((slice) => changed.some((file) => reach(slice).some((owner) => writesCover(owner.writes, file)))).map((slice) => slice.id);
+}
 
 // ponytail: two globs overlap when one's literal directory contains the other's, so "src/*.js" and
 // "src/*.css" count as overlapping. Exact glob intersection if planners hit false rejections.
