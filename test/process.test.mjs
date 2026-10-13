@@ -66,6 +66,13 @@ test("continuous activity still respects the total safety cap", async () => {
   assert.equal(result.timeoutReason, "hard");
 });
 
+test("every provider refuses a prompt over 200K characters before spawning anything", async () => {
+  for (const id of ["codex", "claude"]) {
+    await assert.rejects(createProvider(id).run({ prompt: "x".repeat(200_001), context: { stage: "oversized" } }),
+      (error) => error.code === "prompt_too_large" && error.details.chars === 200_001 && /oversized/.test(error.message));
+  }
+});
+
 test("provider diagnostics distinguish limits from recoverable local blockers", () => {
   assert.deepEqual(detectProviderDiagnostics("usage limit exceeded").map((item) => item.code), ["usage_limit"]);
   // The final line Claude Code printed when a real smoke run hit the subscription limit.

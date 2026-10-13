@@ -32,8 +32,6 @@ const HARNESS = {
   })(),
 };
 
-// ponytail: one limit for every provider (Codex is the tightest known); per-provider limits if Claude's ever binds first.
-const MAX_PROMPT_CHARS = 1_000_000;
 const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted", "paused"]);
 const PARKED_STATES = new Set(["failed", "cancelled", "interrupted", "paused"]);
 // A pause lands only where the tree is green and committed: before a stage that follows a passed gate.
@@ -1068,11 +1066,9 @@ export class SoloFactory {
   }
 
   async invoke(job, label, prompt, signal, { resumeSessionId = null } = {}) {
-    // Codex refuses input over 1,048,576 characters before inference; an identical retry can never fit.
-    if (prompt.length > MAX_PROMPT_CHARS) throw new FactoryError("prompt_too_large", `The ${label} prompt is ${prompt.length} characters, over the ${MAX_PROMPT_CHARS} provider input limit. This is a factory defect: retrying the same input cannot fit. Report it; no agent was started.`, { label, chars: prompt.length, max: MAX_PROMPT_CHARS });
     const appDir = this.store.appDir(job.id);
     const logPath = path.join(appDir, ".factory", "logs", `${label}.log`);
-    await this.emit(job.id, { type: "agent.started", state: job.state, stage: label, feature: featureOf(job), message: `${this.provider.id} started ${label}` });
+    await this.emit(job.id, { type: "agent.started", state: job.state, stage: label, feature: featureOf(job), promptChars: prompt.length, message: `${this.provider.id} started ${label}` });
     const monitor = this.monitorOf(job);
     let spawned;
     let result;

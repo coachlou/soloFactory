@@ -139,13 +139,6 @@ test('retrying a failed repair-plan preparation keeps the prior plan and complet
   assert.deepEqual(retried.recoveryPhase.request.completed, ['BUILT-1']);
 });
 
-test('an oversized prompt is refused before any agent starts, with an actionable code', async t => {
-  const env = await setup(t);
-  const before = env.stages.length;
-  await assert.rejects(env.factory.invoke(env.failed, 'oversized', 'x'.repeat(1_000_001)), error => error.code === 'prompt_too_large' && /cannot fit/.test(error.message));
-  assert.equal(env.stages.length, before);
-});
-
 test('planning that changes code is rejected without resetting or discarding it', async t => {
   const env = await setup(t, async args => { if (args.context.stage.startsWith('recovery-plan-')) await writeFile(path.join(args.cwd, 'unexpected.js'), 'unexpected change'); });
   const result = await env.factory.planRecovery(env.failed.id);

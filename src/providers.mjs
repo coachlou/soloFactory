@@ -478,8 +478,19 @@ function humanizeAgentEvent(event) {
   return String(event.message ?? event.type ?? "Agent event").slice(0, 500);
 }
 
+// Owner policy: no prompt over 200K characters, whatever the provider accepts. Large inputs (plans,
+// requests, reviews, transcripts) belong in files the agent reads, never inline.
+export const MAX_PROMPT_CHARS = 200_000;
+
+export function assertPromptSize(prompt, label = "agent") {
+  if (prompt.length <= MAX_PROMPT_CHARS) return;
+  throw Object.assign(new Error(`The ${label} prompt is ${prompt.length} characters, over SoloFactory's ${MAX_PROMPT_CHARS}-character prompt limit. This is a factory defect: retrying the same input cannot fit. Report it; no agent was started.`),
+    { code: "prompt_too_large", details: { label, chars: prompt.length, max: MAX_PROMPT_CHARS } });
+}
+
 export function createProvider(id) {
-  if (id === "codex") return { id, run: codexRun };
-  if (id === "claude") return { id, run: claudeRun };
+  const guarded = (run) => async (args) => { assertPromptSize(args.prompt, args.context?.stage); return run(args); };
+  if (id === "codex") return { id, run: guarded(codexRun) };
+  if (id === "claude") return { id, run: guarded(claudeRun) };
   throw new Error(`Unknown provider '${id}'.`);
 }
