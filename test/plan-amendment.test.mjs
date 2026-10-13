@@ -77,7 +77,7 @@ const candidate = (job, n = 1) => {
   const r = job.recoveryPhase.request;
   return { version: 2, jobId: r.jobId, requestId: r.id, contractDigest: r.contractDigest, compatibility: [],
     slices: r.checks.map((c, i) => ({ id: `AMEND-${i + 1}`, title: `${c.text} v${n}`, objective: `Recover ${c.id}`, closes: [c.id], demo: 'Run the executable fixture behavior checks.', dependsOn: i ? [`AMEND-${i}`] : [], writes: ['server.mjs', 'server.test.mjs'],
-      acceptance: [{ id: `AMEND-${i + 1}-1`, behavior: `Executes server.test.mjs to verify ${c.text} (${n})`, refs: [c.id], sources: [{ path: r.sources[0].path, locator: `${c.id} §3` }], proof: { command: ['npm', 'test'], expect: 'server.test.mjs passes' } }] })) };
+      acceptance: [{ id: `AMEND-${i + 1}-1`, behavior: `Executes server.test.mjs to verify ${c.text}`, refs: [c.id], sources: [{ path: r.sources[0].path, locator: `${c.id} §3` }], proof: { command: ['npm', 'test'], expect: 'server.test.mjs passes' } }] })) };
 };
 // A replacement for a reviewed plan: each obligation it held is consolidated into a superseding case.
 const replacement = (job, n = 1) => {

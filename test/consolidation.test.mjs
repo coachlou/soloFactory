@@ -217,3 +217,13 @@ test('an oversized feature is read from its file instead of being inlined in eit
   }
   assert.match(featureBuildPrompt(plan([requirement()]).slices[0], { owned: [], planDigest: 'digest' }), /"UPLOAD-LIMITS"/);
 });
+
+// Keeping an id is a promise that the obligation still asserts the same thing; a rewrite must be a superseding case.
+test('a kept obligation keeps its behavior, expected result, proof command and cases', () => {
+  const base = plan([requirement()]);
+  assert.doesNotThrow(() => assertConsolidation(plan([requirement()]), base));
+  assert.throws(() => assertConsolidation(plan([requirement({ behavior: 'Uploads accept photos' })]), base), /kept UPLOAD-LIMITS changes its behavior; supersede it with a case instead/);
+  assert.throws(() => assertConsolidation(plan([requirement({ proof: { ...proof, command: ['node', '--test', 'test/smoke.test.mjs'], expect: 'passes' } })]), base), /changes its expected result, proof command/);
+  assert.throws(() => assertConsolidation(plan([requirement({ cases: cases().slice(0, 2) })]), base), /drops or changes cases UP-UI-BIG/);
+  assert.throws(() => assertConsolidation(plan([requirement({ cases: cases().map(c => c.id === 'UP-API-BIG' ? { ...c, expect: '400' } : c) })]), base), /drops or changes cases UP-API-BIG/);
+});

@@ -334,6 +334,16 @@ export function assertConsolidation(plan, base) {
     const lostSources = (old.sources ?? []).filter((ref) => !(target.sources ?? []).some((own) => sourceKey(own) === sourceKey(ref)));
     if (lostSources.length) problems.push(`${at} drops ${old.id}'s source ${lostSources.map((ref) => `${ref.path} ${ref.locator}`).join("; ")}`);
     if ((old.proof.pending ?? null) !== (owner.proof.pending ?? null)) problems.push(`${at} changes when ${old.id} is proved (${old.proof.pending ?? "at build"} → ${owner.proof.pending ?? "at build"})`);
+    // A kept id keeps its meaning; changing what it asserts goes through a superseding case the reviewer judges.
+    if (item) {
+      const changed = [["behavior", old.behavior, item.behavior], ["expected result", old.proof.expect, item.proof.expect], ["proof command", old.proof.command, item.proof.command]]
+        .filter(([, before, after]) => JSON.stringify(before) !== JSON.stringify(after)).map(([field]) => field);
+      const caseKey = (entry) => JSON.stringify([entry.surface, entry.action, entry.field ?? null, entry.boundary ?? null, entry.expect]);
+      const cases = new Map((item.cases ?? []).map((entry) => [entry.id, caseKey(entry)]));
+      const lostCases = (old.cases ?? []).filter((entry) => cases.get(entry.id) !== caseKey(entry)).map((entry) => entry.id);
+      if (changed.length) problems.push(`${at} changes its ${changed.join(", ")}; supersede it with a case instead`);
+      if (lostCases.length) problems.push(`${at} drops or changes cases ${lostCases.join(", ")}`);
+    }
   }
   for (const [id, { entry }] of claims) if (!baseIds.has(id)) problems.push(`case ${entry.id} supersedes ${id}, which the reviewed plan does not contain`);
   if (problems.length) throw new Error(`The consolidation does not preserve the reviewed plan (${problems.length} problem${problems.length > 1 ? "s" : ""}): ${problems.slice(0, 10).join("; ")}${problems.length > 10 ? "; …" : ""}.`);
