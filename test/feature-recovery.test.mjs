@@ -124,6 +124,21 @@ test('the repair planner reads its request from a file, so prompt size does not 
   assert.ok(prompt.length < 20_000, `${prompt.length}`);
 });
 
+// A planner that fails before writing a plan leaves a phase with no plan and done: []; its retry must
+// still see what the failed request carried (the executed plan and its built features).
+test('retrying a failed repair-plan preparation keeps the prior plan and completed features', async t => {
+  let first = true;
+  const env = await setup(t, async args => { if (first && /^recovery-plan-(?!review)/.test(args.context.stage)) { first = false; await writeFile(path.join(args.cwd, 'unexpected.js'), 'unexpected change'); } });
+  const failed = await env.factory.planRecovery(env.failed.id);
+  assert.equal(failed.recoveryPhase.status, 'plan_failed');
+  const saved = await env.store.read(failed.id);
+  Object.assign(saved.recoveryPhase.request, { priorPlan: { version: 2, marker: 'executed plan' }, completed: ['BUILT-1'] });
+  await env.store.writeState(saved);
+  const retried = await env.factory.planRecovery(failed.id);
+  assert.deepEqual(retried.recoveryPhase.request.priorPlan, { version: 2, marker: 'executed plan' });
+  assert.deepEqual(retried.recoveryPhase.request.completed, ['BUILT-1']);
+});
+
 test('an oversized prompt is refused before any agent starts, with an actionable code', async t => {
   const env = await setup(t);
   const before = env.stages.length;

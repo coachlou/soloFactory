@@ -185,7 +185,9 @@ export async function planFeatureRecovery(factory, id, signal, guidance = '') {
       blockers = [...findings.blockers, ...scoped];
     } else ({ failedChecks: checks, blockers } = findings);
     const sources = await sourceSet(appDir, runInputs(job));
-    const request = { id: randomUUID(), jobId: id, contractDigest: frozen, review: reviewRequest, reviewToken: reviewRequest.token, checks, blockers, sources, sourcesDigest: digest(sources), baseline: await sourceBaseline(factory.store), guidance, priorPlan: prior?.plan ?? featurePlan?.plan ?? null, completed: prior?.done ?? featurePlan?.done ?? [] };
+    const request = { id: randomUUID(), jobId: id, contractDigest: frozen, review: reviewRequest, reviewToken: reviewRequest.token, checks, blockers, sources, sourcesDigest: digest(sources), baseline: await sourceBaseline(factory.store), guidance,
+      // An unexecuted phase (planning, plan_failed, ready) has done: [] and may have no plan; its request still carries both.
+      priorPlan: prior?.plan ?? prior?.request.priorPlan ?? featurePlan?.plan ?? null, completed: (executed ? prior.done : prior?.request.completed) ?? featurePlan?.done ?? [] };
     return await draftRepairPlan(factory, job, signal, request, prior);
   } catch (error) { if (error.refused) throw error; return factory.fail(id, signal, error); }
 }
