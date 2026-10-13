@@ -651,10 +651,10 @@ function renderRecovery() {
   const next = state.job.nextAction;
   if (next?.action === "amend-plan" && phase) renderAmendment(features, next, phase, action);
   else if (next?.action === "retry-plan" || next?.action === "revise-inputs") action(next.label, "recovery-plan");
-  else if (next?.action === "prepare-plan" || (next?.action !== "none" && PARKED.includes(state.job.state) && !state.job.dismissed && (!phase || ["ready", "running", "built"].includes(phase.status)) && (state.job.reviewRequest || state.job.featureCursor?.reviewRequest || state.job.error?.code === "inputs_changed" || failedProof(state.job)))) action("Prepare repair plan", "recovery-plan");
+  else if (next?.action === "prepare-plan" || (!["none", "factory-fix"].includes(next?.action) && PARKED.includes(state.job.state) && !state.job.dismissed && (!phase || ["ready", "running", "built"].includes(phase.status)) && (state.job.reviewRequest || state.job.featureCursor?.reviewRequest || state.job.error?.code === "inputs_changed" || failedProof(state.job)))) action("Prepare repair plan", "recovery-plan");
   if (next?.action === "approve-plan" && phase && next.alternatives?.some((item) => item.action === "amend-plan")) renderAmendment(features, next, phase, action);
   // Owner-added specs join the run's inputs; the next plan, review or Resume sees them.
-  if (next && next.action !== "none") {
+  if (next && !["none", "factory-fix"].includes(next.action)) {
     const label = document.createElement("label"); label.htmlFor = "input-file"; label.textContent = "Add a spec or prototype file";
     const file = document.createElement("input"); file.type = "file"; file.id = "input-file";
     file.addEventListener("change", async () => {

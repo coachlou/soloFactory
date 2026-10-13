@@ -32,6 +32,9 @@ const HARNESS = {
   })(),
 };
 
+// An oversized prompt is rebuilt identically on this build, so its retry waits for a different factory build.
+const OVERSIZED_PROMPT = new Set(["prompt_too_large", "input_too_large"]);
+const BUILD_ID = `${HARNESS.version}+${HARNESS.commit}`;
 const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted", "paused"]);
 const PARKED_STATES = new Set(["failed", "cancelled", "interrupted", "paused"]);
 // A pause lands only where the tree is green and committed: before a stage that follows a passed gate.
@@ -107,6 +110,7 @@ export class SoloFactory {
     const job = await this.store.read(jobId);
     const next = continuationAction(job, { maxRepairs: this.maxRepairs });
     if (next.action === "none") throw new FactoryError("not_continuable", next.reason, { nextAction: next });
+    if (next.action === "factory-fix") throw new FactoryError("factory_fix_required", next.reason, { nextAction: next });
     return job;
   }
 
@@ -992,7 +996,7 @@ export class SoloFactory {
     job.error = interrupted ? { code: "process_restarted", message: "The factory stopped during this run. Its files are preserved and can be resumed.", details: {} } : {
       code: cancelled ? "cancelled" : error.code ?? "unexpected_error",
       message: cancelled ? "The owner cancelled this run." : error.message,
-      details: error.details ?? {},
+      details: OVERSIZED_PROMPT.has(error.code) ? { ...error.details, build: BUILD_ID } : error.details ?? {},
     };
     job.recovery = buildRecovery(job, this.store.appDir(jobId), undefined, { maxRepairs: this.maxRepairs });
     job.watch = { ...job.watch, observed: { ...this.supervision(jobId), status: "Action needed", monitoring: false } };
@@ -1665,6 +1669,7 @@ export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
   if (job.state === "cancelled") return next("none", null, null, "The owner cancelled this run; start over to build it again.");
   // Restart reconciliation: never a second writer while the old worker may still write.
   if (job.error?.code === "worker_unconfirmed" && workerAlive(job.error.details?.pid)) return next("stop-worker", `Stop worker ${job.error.details.pid}`, null, `A ${job.error.details.kind ?? "worker"} from before the restart (pid ${job.error.details.pid}, ${job.error.details.label}) is still running and may write to the workspace. Stop that process; Resume becomes available once it has exited.`);
+  if (OVERSIZED_PROMPT.has(job.error?.code) && job.error.details?.build === BUILD_ID) return next("factory-fix", null, null, "SoloFactory built a prompt over its size limit. This factory build would build the same prompt again, so retrying cannot help. Install a SoloFactory fix; the retry returns once a different build is running.");
   if (planBlockedOut(job)) return { ...next("amend-plan", "Submit corrected plan for review", "recovery-review", "Automatic plan corrections are exhausted. The plan still has review blockers. Correct the plan and submit it for review. Change the requirements only if the inputs themselves are wrong."),
     alternatives: [next("revise-inputs", "Revise inputs and prepare a new plan", "recovery-plan", "Use this only if the specs or prototype inputs themselves are wrong or ambiguous; it prepares a new plan with a fresh correction budget.")] };
   if (job.recoveryPhase?.amendment && (phase === "planning" || phase === "plan_failed")) return next("retry-plan", "Resume plan review", "recovery-plan", "The review of the submitted corrected plan stopped before it finished. Resume plan review: it only reviews that plan again; it does not start the planner or renew plan corrections.");

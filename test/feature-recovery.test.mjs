@@ -139,6 +139,27 @@ test('retrying a failed repair-plan preparation keeps the prior plan and complet
   assert.deepEqual(retried.recoveryPhase.request.completed, ['BUILT-1']);
 });
 
+// The same build rebuilds the same oversized prompt, so it offers no retry; installing a fix brings Retry back.
+test('an oversized prompt parks without Retry until a different factory build is running', async t => {
+  let oversized = true;
+  const env = await setup(t, async args => {
+    if (oversized && /^recovery-plan-(?!review)/.test(args.context.stage)) { oversized = false; throw Object.assign(new Error('prompt over limit'), { code: 'prompt_too_large', details: { chars: 200_001 } }); }
+  });
+  const failed = await env.factory.planRecovery(env.failed.id);
+  assert.equal(failed.error.code, 'prompt_too_large'); assert.ok(failed.error.details.build);
+  const next = continuationAction(failed);
+  assert.equal(next.action, 'factory-fix'); assert.equal(next.label, null); assert.match(next.reason, /Install a SoloFactory fix/);
+  assert.equal(withContinuation(failed).nextAction.action, 'factory-fix');
+  const before = env.stages.length;
+  await assert.rejects(env.factory.planRecovery(failed.id), error => error.code === 'factory_fix_required');
+  await assert.rejects(env.factory.resume(failed.id), error => error.code === 'factory_fix_required');
+  assert.equal(env.stages.length, before, 'no agent ran');
+  const saved = await env.store.read(failed.id); saved.error.details.build = '0.0.0+older'; await env.store.writeState(saved);
+  assert.equal(continuationAction(saved).action, 'retry-plan');
+  const retried = await env.factory.planRecovery(failed.id);
+  assert.equal(retried.recoveryPhase.status, 'ready', retried.error?.message);
+});
+
 test('planning that changes code is rejected without resetting or discarding it', async t => {
   const env = await setup(t, async args => { if (args.context.stage.startsWith('recovery-plan-')) await writeFile(path.join(args.cwd, 'unexpected.js'), 'unexpected change'); });
   const result = await env.factory.planRecovery(env.failed.id);
