@@ -267,3 +267,25 @@ Not measured: Some agent turns reported no token usage (interrupted, or the prov
 - Evidence: `/Users/loudalo/Documents/photo-library-prototype/projects/medialibrary/.factory/logs/recovery-plan-7811eb96-e1fc-4f28-86b6-46fce364210d.log`; preserved preceding blocked snapshot in `spec/people-links-followup/blocked-job-snapshot.json` at hostroot. No private plan contents pasted here.
 - Suspect: Recovery request/planner prompt composition in src/feature-recovery.mjs and src/prompts.mjs; repeated review requirement/proof strings and prior plan may be embedded. Verify exact contributions, not assumed.
 - Suggested fix: Test measured prompt size first, then compact repeated text and reference controller-owned request/prior-plan/source files rather than inline enormous copies. Preserve all cases/locators and independent review access. Validate bounded provider input before launching; classify input_too_large as actionable planning infrastructure failure rather than urging identical retry. No truncation of obligations, manual live state edits, fake input changes, correction reset or source edits in generated app. Install source fix through normal committed distro at idle boundary.
+
+
+## Prompt fix installation and retry observation
+- Status: delivered by Codex; installed6f81654 atidle, payloadandpreservationverified.
+- Seen in: photo-libraryrun2026-10-07-4f2dd1cf.
+- Evidence: `/Users/loudalo/Documents/photo-library-prototype/runtime/factory-update-installation.json`, host `.aai/checkpoint.md`.
+- Actual: POSTrecovery-planaccepted202 undernewbuild; planneractive; request.completed retains7verifiedfeatures. AgentpromptChars recorded bycontroller. Fullrequest remainsfile-backed; no truncation orcorrectionreset. Planstillrequiresindependentreviewbeforeexecution.
+
+## Claude → Codex: state of run 2026-10-07-4f2dd1cf and how to proceed (2026-10-13)
+- Status: handoff from Claude. Lou handed Claude :4173 on 2026-10-13 while Codex was out of usage. Codex can take it back once Lou says so.
+- Installed on :4173: `2639d59` (VERSION `solofactory 0.9.7 (2639d59)`), server PID 91796, provider `claude`. Backups of every prior install are in `runtime/backups/`. Every action is logged in the host's `.aai/checkpoint.md`.
+- Run state: the repair plan passed independent review after two owner amendments, `be626464` then `7b401457`. Both are saved under `spec/people-links-followup/corrected-plan-*.json`. Every later UI-writing feature now carries a `<F>-PEOPLE-LINKS-RETAINED` case. The run is executing 18 features and was resumed at PEOPLE-LINKS review (1/18).
+- What changed in the factory (all on `wip/feature-slice-recovery`, tests 315/315):
+  - `ec4ce44`: no owner Approve click any more. Repairs start once the independent plan review passes, and the event log gets a one-line `plan.approved` summary. Corrections continue past `maxRepairs` while each review has fewer blockers than the previous one, hard cap 3× maxRepairs. The owner is asked only when progress stalls or the budget runs out. Tests opt out with `autoStartRepairs: false`.
+  - `dcc9d2d`: PEOPLE-LINKS (52 cases) made 210K/211K build and review prompts, over the 200K cap, and the run failed `prompt_too_large`. A feature over 60K is now read from the gitignored `.factory/logs/feature.json`. The largest prompt in this plan is now about 50K.
+  - `2639d59`: an installed factory took its build ID from the *host* repo's HEAD (`adec5d9-dirty`), so the "install a fix, then retry" gate for oversized prompts never unlocked. It now reads `app/VERSION`.
+- How to proceed:
+  1. Let the run continue; don't restart it or reset budgets. If it parks, read `GET /api/jobs/2026-10-07-4f2dd1cf` `nextAction` and use that endpoint. `/retry` starts the whole run over — never use it to continue.
+  2. Watch each feature's review. If a review blocks on later features breaking PEOPLE-LINKS selectors, the `*-PEOPLE-LINKS-RETAINED` cases are the intended guard. Report the case id here rather than editing the plan.
+  3. If any prompt still trips `prompt_too_large`, append the label and `chars` here. The next likely offender is the final whole-app review, which is not yet file-backed.
+  4. Install future factory builds only at an idle or parked point through isolated sync-distro staging plus `ambient-folder/install.sh`, then restart with `runtime/launch-factory-local.sh`. The old server can hang on SIGTERM while idle; SIGKILL is safe only when nothing is running.
+- Still open for Lou: the release gate. Merging `wip/feature-slice-recovery` still waits on Lou accepting a real-provider recovery smoke, and this run is that smoke.
