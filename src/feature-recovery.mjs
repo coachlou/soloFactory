@@ -189,7 +189,8 @@ export async function planFeatureRecovery(factory, id, signal, guidance = '', { 
     // A deterministic integration proof failed: its obligation is the finding; no reviewer rejection exists to bind.
     const failedProof = pendingProofFailure(job);
     if (failedProof) return await replanForProof(factory, job, signal, guidance, { prior, executed, failedProof });
-    if (job.error?.code === 'quality_gate_failed') return await replanForGate(factory, job, signal, guidance, { prior, executed });
+    // A review cap has no rejection to bind either (the last verdict may be a voided pass).
+    if (['quality_gate_failed', 'review_unstable'].includes(job.error?.code)) return await replanForGate(factory, job, signal, guidance, { prior, executed });
     // Revising a stale-input plan that was never executed reuses its assessment; there is still no review to bind.
     if (prior && !executed && prior.request.review === null) return await draftRepairPlan(factory, job, signal, { ...prior.request, id: randomUUID(), guidance, baseline: await sourceBaseline(factory.store), priorPlan: prior.plan ?? prior.request.priorPlan }, prior);
     const revising = ['planning', 'plan_failed', 'ready'].includes(prior?.status) && prior.request.review;
@@ -284,10 +285,12 @@ async function replanForGate(factory, job, signal, guidance, { prior, executed }
   const done = executed ? prior.done : job.sliceDone ?? [];
   const closed = new Set((plan?.slices ?? []).filter(slice => done.includes(slice.id)).flatMap(sliceChecks));
   const { gate = 'quality', command = [], output = '' } = job.error.details ?? {};
-  const checks = [...(executed ? prior.request.checks : originalChecks(job.brief)).filter(check => !closed.has(check.id)), { id: `GATE-${gate}`, text: `The ${gate} gate passes: ${command.join(' ')}` }];
-  const blockers = [`The ${gate} gate failed with its repairs spent: ${command.join(' ')}${output ? `\nGate output (tail):\n${String(output).slice(-2000)}` : ''}`];
+  const unstable = job.error.code === 'review_unstable';
+  const open = (executed ? prior.request.checks : originalChecks(job.brief)).filter(check => !closed.has(check.id));
+  const checks = unstable ? open : [...open, { id: `GATE-${gate}`, text: `The ${gate} gate passes: ${command.join(' ')}` }];
+  const blockers = [unstable ? job.error.message : `The ${gate} gate failed with its repairs spent: ${command.join(' ')}${output ? `\nGate output (tail):\n${String(output).slice(-2000)}` : ''}`];
   const sources = await sourceSet(appDir, runInputs(job));
-  const request = { id: randomUUID(), jobId: job.id, contractDigest: frozen, review: null, reviewToken: null, failedGate: gate, checks, blockers, sources, sourcesDigest: digest(sources), baseline: await sourceBaseline(factory.store), guidance, priorPlan: plan, completed: done };
+  const request = { id: randomUUID(), jobId: job.id, contractDigest: frozen, review: null, reviewToken: null, failedGate: unstable ? 'review' : gate, checks, blockers, sources, sourcesDigest: digest(sources), baseline: await sourceBaseline(factory.store), guidance, priorPlan: plan, completed: done };
   return draftRepairPlan(factory, job, signal, request, prior);
 }
 

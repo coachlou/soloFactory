@@ -189,6 +189,16 @@ test('scoped review uses its own checks and binds the verdict to the candidate',
   await assert.rejects(validateReview(dir, req), /captures\/screen\.png for F-1 does not exist/);
 });
 
+test('a pass verdict that lists a failing QA test is a blocked review', async t => {
+  const dir = await contractDir(t);
+  const req = await prepareReview(dir, { id: 'job-1', brief: { mustHaves: ['a'] } }, { checks: [{ id: 'MH-1', text: 'a' }] });
+  await writeFile(path.join(dir, 'qa-bug.test.mjs'), '');
+  await writeFile(path.join(dir, '.factory/review-result.json'), JSON.stringify({ ...passReport(req), bugs: [{ test: 'qa-bug.test.mjs', files: ['server.mjs'], description: 'saves twice' }] }));
+  const error = await validateReview(dir, req).then(() => null, e => e);
+  assert.ok(error, 'a pass with bugs must not deploy');
+  assert.equal(error.details.bugs.length, 1);
+});
+
 test('plan verdicts bind token, plan digest and contract; blocked names its blocker', async t => {
   const dir = await contractDir(t);
   const req = await preparePlanReview(dir, { id: 'job-1' }, 'p'.repeat(64));

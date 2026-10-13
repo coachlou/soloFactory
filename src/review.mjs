@@ -84,7 +84,8 @@ export async function validateReview(appDir, request) {
     id: check.id, text: request.checks.find(item => item.id === check.id).text,
     status: check.status ?? "unverified", reason: typeof check.reason === "string" ? check.reason : "",
   }));
-  if (failedChecks.length || report.verdict !== "pass" || report.blockers.length) {
+  // A failing QA test blocks the release whatever the verdict says.
+  if (failedChecks.length || report.verdict !== "pass" || report.blockers.length || bugs.length) {
     const first = failedChecks[0];
     const message = first ? `Review blocked: ${first.id} — ${first.text} (${first.status}).` : "Review blocked: unresolved reviewer findings.";
     const output = [message, "", "All unfinished checks:",

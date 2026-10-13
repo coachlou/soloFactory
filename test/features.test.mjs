@@ -412,14 +412,22 @@ test("a reviewer that edits the candidate voids its verdict and forces fresh che
 
 test("a reviewer that edits the candidate every time stops at the review cap", async () => {
   let n = 0;
-  const { store, job, factory } = await plannedRun({ after: async (stage, cwd) => {
-    if (stage.startsWith("feature-review-SLICE-SKELETON-")) await writeFile(path.join(cwd, "reviewer-edit.js"), `export const x = ${++n};\n`);
+  let editing = true;
+  const { store, job, make } = await plannedRun({ after: async (stage, cwd) => {
+    if (editing && stage.startsWith("feature-review-SLICE-SKELETON-")) await writeFile(path.join(cwd, "reviewer-edit.js"), `export const x = ${++n};\n`);
   } });
-  const result = await factory.start(job.id);
+  const result = await make().start(job.id);
   assert.equal(result.state, "failed");
   assert.equal(result.error.code, "review_unstable");
   assert.deepEqual(result.sliceDone ?? [], []);
   assert.equal(count(await started(store, job.id), "build-slice-SLICE-UI"), 0, "a dependent never starts");
+  // Resume would hit the same cap, and the last verdict was a voided pass: only a repair plan can move.
+  assert.equal(continuationAction(result).action, "prepare-plan");
+  editing = false;
+  const ready = await make().planRecovery(job.id);
+  assert.equal(ready.recoveryPhase.status, "ready", ready.error?.message);
+  assert.equal(ready.recoveryPhase.request.failedGate, "review");
+  assert.ok(ready.recoveryPhase.request.blockers.some((text) => text.includes("stable reviewed candidate")));
 });
 
 for (const fixedAfter of [2, Infinity]) test(`a malformed plan ${fixedAfter === 2 ? "is fixed on the schema budget without spending a correction" : "spends the schema budget, then the corrections, then blocks"}`, async () => {
