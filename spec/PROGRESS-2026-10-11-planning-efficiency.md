@@ -135,3 +135,14 @@ Next steps:
 - f8596e8 UI nit fixed and browser-verified on 3a3f59e8's ready plan (replace-plan note + packet now inside the "Advanced" disclosure). :4205 active project is smoke-cases-8 for that check; nothing is running.
 - :4205 still running (opus reasoning env, default budget). Plans c094c539 and 42d97519 stay unapproved.
 - Waiting on Lou: release-gate interpretation (amendment-path ready), merge of wip/feature-slice-recovery, push of commits after a8b442b, whether to pursue the ≤4 target further.
+
+## CURRENT STATE — 2026-10-13 close (supersedes the 03:15Z 2026-10-12 section above)
+- The AFK delegation of 2026-10-12 is over; Lou is back. The usual limits apply: no merge, and push only when Lou asks.
+- Pushed `wip/feature-slice-recovery` at `08066e1` on Lou's ask. It includes ec4ce44 (repairs auto-start after the independent review passes; corrections continue while blockers shrink, capped at 3× maxRepairs), dcc9d2d (a feature over 60K is read from `.factory/logs/feature.json`), 2639d59 (BUILD_ID comes from `app/VERSION` in an installed copy) and 91f7246 (run-screen telemetry).
+- Photo-library run 2026-10-07-4f2dd1cf on :4173 runs factory 2639d59. **Codex took it back on 2026-10-13** (provider switched to Codex; see its receipt in spec/INBOX-codex.md). Claude doesn't touch it without a new handoff.
+- Release gate: this run is the real-provider recovery smoke. Merge waits on Lou accepting it.
+- Open dev work:
+  1. Prompts that still paste unbounded content inline: the final whole-app review, plan-correction prompts (src/feature-recovery.mjs ~102, src/prompts.mjs ~503) and interview JSON (src/server.mjs ~295, src/interview.mjs ~180). Move them to files only if one hits `prompt_too_large`, or proactively if Lou asks.
+  2. Flaky: one full `npm test` had test/e2e.test.mjs hang about 56 min after all its tests passed ("Promise resolution is still pending"). Alone it passes in 26s. If it recurs, look for a leaked server or timer.
+  3. Compact planner inputs: spec/TODO-compact-planner-inputs.md.
+- The working tree has uncommitted changes from another session (public/app.js, src/factory.mjs, src/interview.mjs, src/server.mjs, tests) and a Codex inbox entry. They are not Claude's from this session; check with Lou before committing them.
