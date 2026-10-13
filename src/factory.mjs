@@ -921,9 +921,11 @@ export class SoloFactory {
     return relative;
   }
 
+  // A feature's build and resume turns share one session. Exact match: a substring let API resume
+  // API-AUTH's session, and a recovery build resume its own reviewer's (`<label>-review-1`).
   resumeSessionFor(job, label) {
-    const stageKey = label.replace(/^build-slice-|^slice-resume-/, "");
-    const match = Object.entries(job.agentSessions ?? {}).find(([key]) => key.includes(stageKey));
+    const stageKey = (value) => value.replace(/^build-slice-|^slice-resume-/, "").replace(/-resume$/, "");
+    const match = Object.entries(job.agentSessions ?? {}).findLast(([key]) => stageKey(key) === stageKey(label));
     return match ? match[1] : null;
   }
 

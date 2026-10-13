@@ -770,3 +770,12 @@ test("the feature reviewer judges cased checks by their tests, not by re-explori
   assert.match(prompt, /case[^.]*test[^.]*asserts what (the|its) case says/i);
   assert.match(prompt, /earlier features?[^.]*(not|never)[^.]*(reread|re-read|rerun|re-run|explore)/i);
 });
+
+test("a resumed build reuses only its own feature's build session", () => {
+  const job = { agentSessions: { "build-slice-API-AUTH": "auth", "recovery-p-API-review-1": "reviewer", "recovery-p-API": "build", "build-slice-API": "api" } };
+  const factory = Object.create(SoloFactory.prototype);
+  assert.equal(factory.resumeSessionFor(job, "slice-resume-API"), "api");
+  assert.equal(factory.resumeSessionFor(job, "recovery-p-API-resume"), "build");
+  assert.equal(factory.resumeSessionFor(job, "slice-resume-API-AUTH"), "auth");
+  assert.equal(factory.resumeSessionFor(job, "slice-resume-WEB"), null);
+});
