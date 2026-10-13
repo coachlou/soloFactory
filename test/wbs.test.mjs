@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nextExecutable, orderSlices, pendingChecks, pendingObligations, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "../src/wbs.mjs";
+import { featureProofs, nextExecutable, orderSlices, pendingChecks, pendingObligations, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "../src/wbs.mjs";
 
 const validPlan = {
   slices: [
@@ -295,4 +295,15 @@ test("a case may supersede only an earlier feature's obligation; unknown ids are
   assert.deepEqual(validateFeaturePlan(plan(["STORE-GATE"]), binding).slices[2].acceptance[1].cases[0].supersedes, ["STORE-GATE"]);
   assert.throws(() => validateFeaturePlan(plan(["TREND-1"]), binding), /kept and also superseded by case TREND-SEED-PASS/);
   assert.doesNotThrow(() => validateFeaturePlan(plan(["OLD-PLAN-ITEM"]), binding));
+});
+
+test('a recovery final gate reruns the original built features too, with a same-id repair replacing its original', () => {
+  const f = (id, proofId, cases) => ({ id, acceptance: [{ id: proofId, proof: { command: ['node', '--test', `${proofId}.test.mjs`] }, ...(cases && { cases }) }] });
+  const job = {
+    approvedPlan: { plan: { slices: [f('BASE', 'BASE-1'), f('SEARCH', 'SEARCH-1'), f('UNBUILT', 'UNBUILT-1')] } }, sliceDone: ['BASE', 'SEARCH'],
+    recoveryPhase: { plan: { slices: [f('SEARCH', 'SEARCH-R1'), f('PEOPLE', 'PEOPLE-1', [{ id: 'K', supersedes: ['BASE-1'] }])] }, done: ['SEARCH', 'PEOPLE'] },
+  };
+  assert.deepEqual(featureProofs(job).map(p => p.id), ['SEARCH.SEARCH-R1', 'PEOPLE.PEOPLE-1'], 'BASE-1 is superseded, SEARCH-1 replaced, UNBUILT never built');
+  job.recoveryPhase.plan.slices[1].acceptance[0].cases = undefined;
+  assert.deepEqual(featureProofs(job).map(p => p.id), ['BASE.BASE-1', 'SEARCH.SEARCH-R1', 'PEOPLE.PEOPLE-1']);
 });

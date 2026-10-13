@@ -208,13 +208,16 @@ export function recordPendingProofs(job, planDigest, slice) {
 }
 
 // Build-time proofs of every verified feature, rerun once at final integration so a later feature's
-// regression is caught there instead of by aggregate proofs in every feature.
-// ponytail: a recovery run reruns only its own plan's features; original features it left alone rely
-// on the manifest test gate. Carry their proofs forward if those regressions start slipping through.
+// regression is caught there instead of by aggregate proofs in every feature. A recovery run also reruns
+// the original plan's built features; a repair feature with the same id replaces the original.
+// ponytail: features built by earlier recovery phases are not carried; add them if regressions slip there.
 export function featureProofs(job) {
+  const builtOf = (plan, done) => (plan?.slices ?? []).filter((slice) => done.includes(slice.id));
+  const original = builtOf(job.approvedPlan?.plan, job.sliceDone ?? []);
   const phase = job.recoveryPhase;
-  const [plan, done] = phase?.done?.length ? [phase.plan, phase.done] : [job.approvedPlan?.plan, job.sliceDone ?? []];
-  const built = (plan?.slices ?? []).filter((slice) => done.includes(slice.id));
+  const repaired = phase?.done?.length ? builtOf(phase.plan, phase.done) : [];
+  const ids = new Set(repaired.map((slice) => slice.id));
+  const built = [...original.filter((slice) => !ids.has(slice.id)), ...repaired];
   // A stage obligation (e.g. "the seed script fails until the summary exists") is retired once a built
   // feature's case supersedes it; demanding its test at integration would be unrepairable.
   return proofsOf(built);

@@ -217,7 +217,7 @@ feature reviewer reads the controller's gate logs and case results instead of re
 commands. After a repair, the gate that failed runs first (behind install), then the full set.
 Final integration reruns every verified feature's build-time proofs once, so a later feature that
 breaks an earlier one is caught before the final review. A repair run reruns its own features'
-proofs; original features it left alone rely on the manifest test command.
+proofs and the original plan's built features' proofs; a repair feature with the same id replaces the original.
 Plans get two corrections (more while each review finds fewer blockers, at most three times
 that); features and final integration each get two repairs. Resume never refills them. There is
 no single-build option for new runs; older single and slice runs still resume. Details:
