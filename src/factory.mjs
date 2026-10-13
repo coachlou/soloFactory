@@ -132,7 +132,7 @@ export class SoloFactory {
         job.agentSessions = {};
         if (job.recoveryPhase) (job.recoveryPhaseHistory ??= []).push({ ...job.recoveryPhase, status: "discarded" });
         job.recoveryPhase = null;
-        if (job.planVersion === 2) Object.assign(job, { featureCursor: null, finalBudgetSet: false, repairBudgetLimit: null });
+        if (job.planVersion === 2) Object.assign(job, { featureCursor: null, setAside: null, finalBudgetSet: false, repairBudgetLimit: null });
         else job.repairBudgetLimit = job.attempt + this.maxRepairs;
         await this.store.writeState(job);
         await this.emit(job.id, { type: "job.restarted", state: job.state, message: `Restarting from slice ${sliceId} at ${base.slice(0, 7)}` });
@@ -675,18 +675,32 @@ export class SoloFactory {
   async buildFeatures(job, signal) {
     const slices = job.approvedPlan.plan.slices;
     const checks = originalChecks(job.brief);
-    for (let i = job.sliceIndex ?? 0; i < slices.length; i++) {
+    // Set-aside features and everything that depends on them wait; sliceDone, not position, says what is built.
+    const waiting = new Set((job.setAside ?? []).map((entry) => entry.id));
+    for (let i = 0; i < slices.length; i++) {
       const slice = slices[i];
+      if (job.sliceDone?.includes(slice.id) || waiting.has(slice.id)) continue;
+      if (slice.dependsOn.some((id) => waiting.has(id))) {
+        waiting.add(slice.id);
+        await this.emit(job.id, { type: "slice.waiting", state: job.state, slice: slice.id, message: `Feature ${slice.id} waits for a set-aside feature it depends on` });
+        continue;
+      }
       await this.assertPlanCurrent(job);
       if (job.featureCursor?.id !== slice.id) {
         // Each feature gets maxRepairs; set once per feature, so resume never refills it.
-        job.featureCursor = { id: slice.id, substage: "implementing", implementStarted: false, reviews: 0, startedAt: new Date().toISOString(), attemptBefore: job.attempt };
+        job.featureCursor = { id: slice.id, substage: "implementing", implementStarted: false, reviews: 0, startedAt: new Date().toISOString(), attemptBefore: job.attempt, base: await this.store.git("rev-parse", "HEAD") };
         job.repairBudgetLimit = job.attempt + this.maxRepairs;
         job.sliceIndex = i;
         await this.store.writeState(job);
         await this.emit(job.id, { type: "slice.started", state: job.state, slice: slice.id, message: `Feature ${i + 1}/${slices.length}: ${slice.title}` });
       }
-      job = await this.proveFeature(job, slice, checks, `${i + 1}/${slices.length}`, signal);
+      try {
+        job = await this.proveFeature(job, slice, checks, `${i + 1}/${slices.length}`, signal);
+      } catch (error) {
+        if (!await this.setAside(job, slice, error, signal)) throw error;
+        waiting.add(slice.id);
+        continue;
+      }
       const cursor = job.featureCursor;
       job.sliceStats ||= {};
       job.sliceStats[slice.id] = {
@@ -702,12 +716,56 @@ export class SoloFactory {
       await this.store.writeState(job);
       await this.emit(job.id, { type: "slice.completed", state: job.state, slice: slice.id, message: `Feature ${i + 1}/${slices.length} verified${pendingNote(pendingChecks(slice, { plan: job.approvedPlan.plan, outstanding: job.outstandingProofs }))}` });
     }
+    if (job.setAside?.length) await this.parkSetAside(job, waiting);
     if (!job.finalBudgetSet) {
       job.repairBudgetLimit = job.attempt + this.maxRepairs;
       job.finalBudgetSet = true;
       await this.store.writeState(job);
     }
     return this.finishFromBuild(job, signal, { includeInstall: false });
+  }
+
+  // Continue past a blocked feature (PRD stage 4): a feature that ran out of repairs moves its work to a ref and
+  // the tree returns to where the feature started, so features that don't depend on it keep building. Declared
+  // writes keep that work disjoint from theirs. Only a feature with independent work left behind it is set aside.
+  async setAside(job, slice, error, signal) {
+    const cursor = job.featureCursor;
+    const slices = job.approvedPlan.plan.slices;
+    if (signal?.aborted || !["quality_gate_failed", "review_rejected", "review_unstable"].includes(error.code) || !cursor?.base || cursor.restored || !slices.every((item) => item.writes)) return false;
+    const waiting = new Set([slice.id, ...(job.setAside ?? []).map((entry) => entry.id)]);
+    let independent = false;
+    for (const item of slices.slice(slices.indexOf(slice) + 1)) {
+      if (item.dependsOn.some((id) => waiting.has(id))) waiting.add(item.id);
+      else if (!job.sliceDone?.includes(item.id)) independent = true;
+    }
+    if (!independent) return false;
+    await this.store.commit(`factory: set aside ${slice.id}`);
+    const ref = `refs/factory/set-aside/${slice.id}`;
+    await this.store.git("update-ref", ref, "HEAD");
+    await this.store.reset(cursor.base);
+    (job.setAside ??= []).push({ id: slice.id, ref, base: cursor.base, cursor, limit: job.repairBudgetLimit, error: { code: error.code, message: error.message, details: error.details } });
+    job.featureCursor = null;
+    await this.store.writeState(job);
+    await this.emit(job.id, { type: "slice.set_aside", state: job.state, slice: slice.id, message: `Feature ${slice.id} set aside (${error.message}); features that don't depend on it continue` });
+    return true;
+  }
+
+  // The run parks once, on the first set-aside feature with its work restored over everything built since: the
+  // same parked state as a feature that blocked the run, so Resume, repair plans and restart work unchanged.
+  // ponytail: always-writable files (README, package-lock.json) take the set-aside feature's version.
+  async parkSetAside(job, waiting) {
+    const [entry, ...rest] = job.setAside;
+    const changes = (await this.store.git("diff", "--name-status", "-z", "--no-renames", entry.base, entry.ref, "--", ".", ":(exclude).factory")).split("\0").filter(Boolean);
+    for (let n = 0; n < changes.length; n += 2) {
+      if (changes[n] === "D") await rm(path.join(this.store.appDir(job.id), changes[n + 1]), { force: true });
+      else await this.store.git("checkout", entry.ref, "--", changes[n + 1]);
+    }
+    await this.store.git("reset", "-q");
+    const slices = job.approvedPlan.plan.slices;
+    Object.assign(job, { setAside: rest, featureCursor: { ...entry.cursor, restored: true }, sliceIndex: slices.findIndex((item) => item.id === entry.id), repairBudgetLimit: entry.limit });
+    await this.store.writeState(job);
+    const blocked = [...waiting].filter((id) => id !== entry.id);
+    throw new FactoryError(entry.error.code, `${entry.error.message} Features that don't depend on ${entry.id} were built; still waiting: ${blocked.join(", ")}.`, entry.error.details);
   }
 
   // Cursor substages: implementing → checking → reviewing → committing → verified. Each is

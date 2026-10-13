@@ -123,6 +123,20 @@ cannot edit the finding's test. Findings no feature owns keep the unscoped repai
 - the repairer sees a finding's description only through the failing test's name in the gate output;
 - non-feature (v1) runs are unchanged.
 
+## Step 8 (in progress)
+
+*Set aside, done:* a feature that runs out of repairs (gate, review or unstable-review failure) is set aside
+when features that don't depend on it remain. Its work is committed to `refs/factory/set-aside/<id>` and the
+tree resets to the commit it started from. Dependents wait. After the loop, the run parks once on the first
+set-aside feature with its files restored over everything built since, plus its cursor and spent budget. That
+is the same parked state as today, so Resume, the repair plan and restart are unchanged (restart drops the
+set-aside list). Ceilings:
+- always-writable files (README, package-lock.json) take the set-aside feature's version on restore;
+- a repair plan made while a second feature is still set aside replans that feature from scratch;
+- plans without `writes` keep the old stop-at-first-failure behavior.
+
+The feature-record module stays deferred: set-aside reuses the cursor as its record.
+
 ## Open questions (decided 2026-10-12, Lou delegated)
 
 - Trigger: release QA stays once per run, before deploy. Every-N-features waits for step 8's record.
