@@ -238,17 +238,24 @@ ready for deterministic controller verification.
 ${DATA_RULE}`;
 }
 
-export function repairPrompt(failurePath, slice = null) {
+export function repairPrompt(failurePath, slice = null, bugs = []) {
   const sliceLines = slice
     ? `
-The failure is inside slice ${slice.id} (${slice.title}). Earlier completed slices must be
-preserved — fix only what this slice's acceptance criteria need.`
+The failure is inside slice ${slice.id} (${slice.title}), given in full below: do not read the plan file.
+Earlier completed slices must be preserved — fix only what this slice's acceptance criteria need.${slice.writes ? ` Change
+only the files its writes list; any other changed file fails its checks.` : ""}
+${JSON.stringify(slice, null, 2)}`
+    : "";
+  const bugLines = bugs.length
+    ? `
+Release QA findings to fix. Their tests are the evidence: never edit them.
+${bugs.map((bug) => `- ${bug.proof.command.at(-1)}: ${bug.description}`).join("\n")}`
     : "";
   return `You are the repair worker. Read ${failurePath} first, then only the parts of the frozen
-.factory contract and plan that the failure touches${slice ? ` (in the plan, only slice ${slice.id})` : ""}. Fix the root cause of the recorded controller
+.factory contract${slice ? "" : " and plan"} that the failure touches. Fix the root cause of the recorded controller
 gate failure with the smallest coherent change. Do not weaken, skip, rename, or delete tests,
-health checks, metrics, build commands, or acceptance criteria.${sliceLines} Run the relevant
-checks and leave the app ready for the controller to rerun every gate.
+health checks, metrics, build commands, or acceptance criteria.${sliceLines}${bugLines}
+Run the relevant checks and leave the app ready for the controller to rerun every gate.
 
 ${DATA_RULE}`;
 }

@@ -59,6 +59,9 @@ test("a release finding goes to the feature owning the failing file, and its rep
   assert.ok(events.some((event) => event.type === "gate.failed" && event.gate === "proof-BUG-1"), "the finding's test ran and failed before any repair");
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /inside slice SLICE-UI/);
+  assert.match(prompts[0], /qa\/BUG-1\.test\.mjs: History drops the score after reload/, "the finding reaches the repairer");
+  assert.match(prompts[0], /"writes": \[\s*"index.html"/, "the feature is inlined with its writes");
+  assert.doesNotMatch(prompts[0], /contract and plan/);
 });
 
 test("a bug repair that edits the finding's test fails the writes gate", async () => {

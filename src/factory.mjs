@@ -1198,7 +1198,7 @@ export class SoloFactory {
         this.active.pauseRequested = false;
         throw new FactoryError("paused", "Paused before repairing", { before: "verifying" });
       }
-      current = await this.repair(current, failure, signal, slice);
+      current = await this.repair(current, failure, signal, slice, proofs.filter((proof) => proof.description));
       manifest = await this.readManifest(this.store.appDir(current.id));
       // Reinstall only when the repair touched dependencies or install itself failed.
       includeInstall = failure.details?.gate === "install" || await depsDigest(this.store.appDir(current.id)) !== current.installedDeps;
@@ -1256,7 +1256,7 @@ export class SoloFactory {
   }
 
   // One repair turn against a recorded failure. Throws the failure itself once the budget is spent.
-  async repair(job, failure, signal, slice = null) {
+  async repair(job, failure, signal, slice = null, bugs = []) {
     await this.recordAttempt(job, failure, slice);
     const loop = repeatedFailure(job.watch.attempts.filter((item) => item.scope === job.watch.attempts.at(-1).scope), this.watch.loopThreshold);
     if (loop) {
@@ -1269,7 +1269,7 @@ export class SoloFactory {
     const failureRelative = `.factory/last-failure-${job.attempt}.txt`;
     await writeFile(path.join(this.store.appDir(job.id), failureRelative), failure.details?.output ?? failure.message);
     job = await this.stage(job, "repairing", `Repairing failed ${failure.details?.gate ?? "unknown"} gate`);
-    await this.invoke(job, `repair-${job.attempt}`, repairPrompt(failureRelative, slice), signal);
+    await this.invoke(job, `repair-${job.attempt}`, repairPrompt(failureRelative, slice, bugs), signal);
     return job;
   }
 
