@@ -17,7 +17,8 @@ const extra = (ui, id, dependsOn, file, check) => ({
   acceptance: [{ ...ui.acceptance[0], id: `${id}-A`, behavior: `${id} works end to end`, refs: [check], proof: { command: ["node", "--test", file], expect: "passes" } }],
 });
 
-test("a blocked feature is set aside, independent features still build, and the run parks with its work restored", async () => {
+// unstable: the UI's reviewer edits its candidate every time (review cap, repairs left) and EXTRA spends one repair.
+async function setAsideRun({ unstable = false } = {}) {
   const store = new JobStore(await mkdtemp(path.join(os.tmpdir(), "solo-factory-set-aside-")));
   await store.init();
   const job = await store.create({ brief, transcript, provider: "fixture" });
@@ -42,13 +43,26 @@ test("a blocked feature is set aside, independent features still build, and the 
       await writeFile(file, JSON.stringify(value, null, 2));
       return { message: "planned" };
     }
+    // A stray write the gate rejects: it rides along in the set-aside commit but belongs to EXTRA.
+    if (!unstable && stage === "build-slice-SLICE-UI") { await fixture.run(options); await mkdir(path.join(options.cwd, "extra"), { recursive: true }); await writeFile(path.join(options.cwd, "extra/extra.test.mjs"), "// ui stray\n"); return { message: "built" }; }
+    if (unstable && stage.startsWith("feature-review-SLICE-UI-")) { await fixture.run(options); await writeFile(path.join(options.cwd, "index.html"), `${await readFile(path.join(options.cwd, "index.html"), "utf8")}<!-- ${stage} -->\n`); return { message: "reviewed" }; }
     if (stage === "build-slice-SLICE-EXTRA") { await mkdir(path.join(options.cwd, "extra"), { recursive: true }); await writeFile(path.join(options.cwd, "extra/extra.test.mjs"), "export {};\n"); return { message: "built" }; }
     if (stage === "build-slice-SLICE-LATER") { await mkdir(path.join(options.cwd, "later"), { recursive: true }); await writeFile(path.join(options.cwd, "later/later.test.mjs"), "export {};\n"); return { message: "built" }; }
     return fixture.run(options);
   } };
   // The UI's proof keeps failing until the owner steps in.
-  const commandRunner = async ({ logPath }) => (blockUI && path.basename(logPath).startsWith("proof-UI-") ? { code: 1, output: "ui failed" } : { code: 0, output: "passed" });
+  let extraFails = unstable ? 1 : 0;
+  const commandRunner = async ({ logPath }) => {
+    const name = path.basename(logPath);
+    if (name.startsWith("proof-SLICE-EXTRA-") && extraFails > 0) { extraFails -= 1; return { code: 1, output: "extra failed" }; }
+    return blockUI && !unstable && name.startsWith("proof-UI-") ? { code: 1, output: "ui failed" } : { code: 0, output: "passed" };
+  };
   const make = () => new SoloFactory({ store, provider, commandRunner, autoStartRepairs: false, deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9985" }) });
+  return { store, job, builds, make, unblock: () => { blockUI = false; } };
+}
+
+test("a blocked feature is set aside, independent features still build, and the run parks with its work restored", async () => {
+  const { store, job, builds, make, unblock } = await setAsideRun();
 
   const parked = await make().start(job.id);
   assert.equal(parked.state, "failed");
@@ -57,16 +71,25 @@ test("a blocked feature is set aside, independent features still build, and the 
   assert.equal(parked.featureCursor?.id, "SLICE-UI", "the run parks on the blocked feature, as before");
   assert.match(parked.error.message, /SLICE-LATER/);
   assert.match(await readFile(path.join(store.appDir(job.id), "index.html"), "utf8"), /Record your daily score/, "its work is back in the tree");
-  await access(path.join(store.appDir(job.id), "extra/extra.test.mjs"));
+  assert.equal(await readFile(path.join(store.appDir(job.id), "extra/extra.test.mjs"), "utf8"), "export {};\n", "only the feature's declared writes come back");
   const events = await store.events(job.id, 1000);
   assert.ok(events.some((event) => event.type === "slice.set_aside" && event.slice === "SLICE-UI"));
   await access(path.join(store.appDir(job.id), ".factory/last-failure-1.txt")); // the repair planner's failure record came back too
 
   // Its budget is spent, so the next step is the owner's repair plan, exactly as when a feature blocks the run.
   await assert.rejects(make().resume(job.id), /repair plan/);
-  blockUI = false;
+  unblock();
   const ready = await make().planRecovery(job.id);
   assert.equal(ready.recoveryPhase?.status, "ready", ready.error?.message);
   const recovered = await make().startRecovery(job.id, ready.recoveryPhase.planDigest);
   assert.equal(recovered.state, "completed", recovered.error?.message);
+});
+
+test("a feature set aside with repairs left gets them back after independent features spend repairs", async () => {
+  const { job, make } = await setAsideRun({ unstable: true });
+  const parked = await make().start(job.id);
+  assert.equal(parked.error?.code, "review_unstable", parked.error?.message);
+  assert.deepEqual(parked.sliceDone, ["SLICE-SKELETON", "SLICE-EXTRA"]);
+  assert.ok(parked.attempt >= 1, "EXTRA spent a repair on the shared counter");
+  assert.equal(parked.repairBudgetLimit - parked.attempt, 2, "the UI's unspent repairs are restored, not its old ceiling");
 });

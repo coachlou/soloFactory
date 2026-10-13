@@ -754,7 +754,7 @@ export class SoloFactory {
     const ref = `refs/factory/set-aside/${slice.id}`;
     await this.store.git("update-ref", ref, "HEAD");
     // State first: a crash after the reset still finds the ref to restore from.
-    (job.setAside ??= []).push({ id: slice.id, ref, base: cursor.base, cursor, limit: job.repairBudgetLimit, error: { code: error.code, message: error.message, details: error.details } });
+    (job.setAside ??= []).push({ id: slice.id, ref, base: cursor.base, cursor, remaining: job.repairBudgetLimit == null ? null : job.repairBudgetLimit - (job.attempt ?? 0), limit: job.repairBudgetLimit, error: { code: error.code, message: error.message, details: error.details } });
     job.featureCursor = null;
     await this.store.writeState(job);
     await this.store.reset(cursor.base);
@@ -764,17 +764,24 @@ export class SoloFactory {
 
   // The run parks once, on the first set-aside feature with its work restored over everything built since: the
   // same parked state as a feature that blocked the run, so Resume, repair plans and restart work unchanged.
+  // Only the feature's declared writes come back: the set-aside commit took the whole tree, including files the
+  // writes gate rejected, which a later feature may own. Its repairs left come back on top of the shared attempt
+  // counter, which the features built meanwhile advanced.
   // ponytail: always-writable files (README, package-lock.json) take the set-aside feature's version.
   async parkSetAside(job, waiting) {
     const [entry, ...rest] = job.setAside;
+    const slices = job.approvedPlan.plan.slices;
+    const { writes } = slices.find((item) => item.id === entry.id);
     const changes = (await this.store.git("diff", "--name-status", "-z", "--no-renames", entry.base, entry.ref, "--", ".", ":(exclude).factory/review-request.json", ":(exclude).factory/review-result.json")).split("\0").filter(Boolean);
     for (let n = 0; n < changes.length; n += 2) {
+      if (outsideWrites([changes[n + 1]], writes).length) continue;
       if (changes[n] === "D") await rm(path.join(this.store.appDir(job.id), changes[n + 1]), { force: true });
       else await this.store.git("checkout", entry.ref, "--", changes[n + 1]);
     }
     await this.store.git("reset", "-q");
-    const slices = job.approvedPlan.plan.slices;
-    Object.assign(job, { setAside: rest, featureCursor: { ...entry.cursor, restored: true }, sliceIndex: slices.findIndex((item) => item.id === entry.id), repairBudgetLimit: entry.limit });
+    // An entry saved by an older release has only its ceiling.
+    const limit = entry.remaining == null ? entry.limit : (job.attempt ?? 0) + entry.remaining;
+    Object.assign(job, { setAside: rest, featureCursor: { ...entry.cursor, restored: true }, sliceIndex: slices.findIndex((item) => item.id === entry.id), repairBudgetLimit: limit });
     await this.store.writeState(job);
     const blocked = [...waiting].filter((id) => id !== entry.id);
     throw new FactoryError(entry.error.code, `${entry.error.message} Features that don't depend on ${entry.id} were built; still waiting: ${blocked.join(", ")}.`, entry.error.details);
