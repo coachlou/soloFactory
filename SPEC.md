@@ -24,7 +24,7 @@ failure I can recover from without discarding completed work.
 
 ### Design principles
 
-1. One machine, one owner, one active build. Concurrency does not earn its place in v0.1.
+1. One machine, one owner, one writer per project. Other projects may build at the same time, up to `SOLOFACTORY_MAX_ACTIVE_RUNS` (default 1).
 2. A subscription-authenticated coding CLI does the semantic work. SoloFactory does not
    request, persist, or pass API keys.
 3. The controller owns state, commands, gates, retries, and deployment. Agent prose cannot
@@ -398,7 +398,8 @@ carry a strategy forward.
    the approved plan and contract are unchanged (`stale_plan`) and its supplied inputs are
    unchanged (`inputs_changed`). Proofs marked `pending: "integration"` are skipped here and
    run before the final review; the checks they prove stay pending until then.
-5. **Budgets.** 2 corrections per plan, 2 repairs per feature, 2 for final integration. Each is
+5. **Budgets.** 2 corrections per plan (more while each review finds fewer blockers than the one
+   before, at most 3× the base), 2 repairs per feature, 2 for final integration. Each is
    set once and never refilled by resume.
 6. **Final review and deployment** are the same whole-app gates and contract review as before,
    plus every outstanding `pending: "integration"` proof (from this and every earlier plan of the
@@ -502,8 +503,8 @@ exhausted and that no repairs have started, and offers **Submit corrected plan f
 (`POST /api/jobs/:id/recovery-review` with `{"phaseId","plan"}`). That runs exactly one independent
 review of the submitted plan: no planner, no automatic correction, no renewed correction budget.
 The failed phase is archived with its plan untouched (a malformed one is kept as raw evidence), the
-prior blockers go into the review request, and a pass parks the run `ready`, so the owner still approves
-the exact plan digest. A block records the new findings and parks again; every further review needs a
+prior blockers go into the review request, and a pass starts repairs on its own, bound to the exact
+plan digest. A block records the new findings and parks again; every further review needs a
 new explicit, different plan, since a plan already reviewed for these inputs (ignoring formatting and
 the request id) is refused, also after a restart. An interrupted amendment review resumes the review
 only (**Resume plan review**). The submission is refused with `409`/`400`/`413`, before any state write
@@ -516,7 +517,8 @@ corrected file. **Revise inputs and prepare a new plan** remains for inputs that
 `recovery-plan` still refuses with `409`, before any planner or reviewer turn, while the inputs
 match any fingerprint that exhausted its corrections since the last executed plan. A
 correction budget belongs to the input fingerprint: revised inputs start fresh, and every later
-retry, feedback revision or return to earlier inputs shares what that fingerprint already spent. A `ready` plan continues only with exact approval. An exhausted budget or changed
+retry, feedback revision or return to earlier inputs shares what that fingerprint already spent. A plan that passes review starts repairs on its own. A `ready` plan (a Pause stopped it before
+repairs began) continues only with exact approval. An exhausted budget or changed
 inputs continue with **Prepare repair plan**. An approved plan that is `running` resumes from
 its cursor. A run that already has a worker or a queue entry gets no second launch. A refused Resume
 returns `409` with `nextAction` naming the allowed action and its endpoint. Saved banners from
@@ -538,10 +540,14 @@ prototype handoffs, snapshotted by SHA-256. The plan is a version 2 feature plan
 and every acceptance obligation cites its source path and locator with an executable
 proof. A broad MH/SC tag alone is not enough. An independent reviewer compares the
 plan against those inputs and blocks omitted detailed requirements; blocked plans
-get up to two corrections, then stop before any build. The card shows the remaining
-gaps, proposed features, verification checks and repair allowance. Choose **Approve
-and continue repairs**. Approval is bound to the reviewed plan digest, source
-baseline, source review, input snapshot and frozen contract; any change rejects it.
+get two corrections, more while each review finds fewer blockers than the one before
+(at most three times the base budget), then stop before any build. A plan that passes
+review starts repairs on its own; `features: N` on `recovery-plan` limits that start to a
+batch of N features. Execution is bound to the reviewed plan digest, source baseline,
+source review, input snapshot and frozen contract; any change rejects it. A Pause
+during planning parks the plan `ready`: the card shows the remaining gaps, proposed
+features, verification checks and repair allowance, and **Approve and continue
+repairs** starts it.
 
 Each feature runs the same safeguards as new-run features: deterministic gates, a
 scoped evidence review bound to the checked candidate (a reviewer that edits source
@@ -589,10 +595,11 @@ still needs at least one proof that runs when it is built.
 A recovery phase parked mid-feature by an older version (no substage cursor) resumes
 at checks for that feature, keeping its consumed budget, rather than rebuilding it.
 
-`POST /api/jobs/:id/recovery-plan` starts planning through the project scheduler.
+`POST /api/jobs/:id/recovery-plan` starts planning through the project scheduler
+(optional `features: N` bounds the repairs that start once the plan passes review).
 Read the resulting plan at `GET /api/jobs/:id` under `job.recoveryPhase`.
 `POST /api/jobs/:id/recovery-start` with `{"planDigest":"…"}` approves that exact
-plan and queues execution. These controls reject active/queued project writers.
+`ready` plan and queues execution. These controls reject active/queued project writers.
 The run card shows planned/current/verified features, acceptance checks and budgets.
 The Guide can explain this state; chat text alone does not execute recovery.
 

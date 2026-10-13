@@ -89,12 +89,12 @@ export class SoloFactory {
     return this.activate(jobId, (signal) => this.runResume(jobId, signal, { features }));
   }
 
-  async planRecovery(jobId, guidance = "") {
+  async planRecovery(jobId, guidance = "", { features } = {}) {
     const job = await this.continuable(jobId);
     await assertPlanInputsRevised(this.store, job);
     // An interrupted amendment review continues as a review; it never becomes a fresh planner run.
     if (await amendmentResumable(this.store, job)) return this.activate(jobId, signal => resumeAmendedReview(this, jobId, signal));
-    return this.activate(jobId, signal => planFeatureRecovery(this, jobId, signal, guidance));
+    return this.activate(jobId, signal => planFeatureRecovery(this, jobId, signal, guidance, { features }));
   }
 
   // The owner's corrected plan gets one independent review. Admission re-validates under writer ownership,
@@ -636,7 +636,8 @@ export class SoloFactory {
         plan = await readPlan();
         continue;
       }
-      if (!keepCorrecting(job.planCorrections, this.maxRepairs, job.planBlockerCounts)) {
+      // A plan that no longer parses is not progress, even after two shrinking reviews.
+      if (!keepCorrecting(job.planCorrections, this.maxRepairs, plan instanceof Error ? [] : job.planBlockerCounts)) {
         throw new FactoryError("plan_blocked", `The feature plan is still blocked after ${job.planCorrections} corrections: ${blockers[0]}`, { blockers, output: blockers.join("\n") });
       }
       await pauseBeforeTurn();
@@ -1684,11 +1685,11 @@ export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
     alternatives: [next("revise-inputs", "Revise inputs and prepare a new plan", "recovery-plan", "Use this only if the specs or prototype inputs themselves are wrong or ambiguous; it prepares a new plan with a fresh correction budget.")] };
   if (job.recoveryPhase?.amendment && (phase === "planning" || phase === "plan_failed")) return next("retry-plan", "Resume plan review", "recovery-plan", "The review of the submitted corrected plan stopped before it finished. Resume plan review: it only reviews that plan again; it does not start the planner or renew plan corrections.");
   if (phase === "planning" || phase === "plan_failed") return next("retry-plan", "Retry repair-plan preparation", "recovery-plan", `${phase === "planning" ? "Repair-plan preparation stopped before it finished" : "Repair-plan preparation failed"}, so no plan is approved. Retry repair-plan preparation; Resume cannot continue an unapproved plan.`);
-  if (phase === "ready") return { ...next("approve-plan", "Approve and continue repairs", "recovery-start", "Review and approve the recovery plan before execution; Resume does not start an unapproved plan."),
-    alternatives: [next("amend-plan", "Submit corrected plan for review", "recovery-review", "Replaces the ready plan with your corrected plan. The ready plan stays in history as evidence but can no longer be approved. The replacement gets one independent review, no automatic corrections, and still needs your approval.")] };
-  if (repairsExhausted(job, maxRepairs)) return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The repair budget is exhausted. Prepare a repair plan and approve it; Resume does not renew the budget or rerun the same review.");
+  if (phase === "ready") return { ...next("approve-plan", "Approve and continue repairs", "recovery-start", "The repair plan passed independent review, but a Pause stopped it before repairs started. Approve and continue repairs to start it; Resume does not start an unapproved plan."),
+    alternatives: [next("amend-plan", "Submit corrected plan for review", "recovery-review", "Replaces the ready plan with your corrected plan. The ready plan stays in history as evidence but can no longer be approved. The replacement gets one independent review and no automatic corrections; if it passes, repairs start on their own.")] };
+  if (repairsExhausted(job, maxRepairs)) return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The repair budget is exhausted. Prepare a repair plan; once it passes independent review, repairs start on their own. Resume does not renew the budget or rerun the same review.");
   if (job.error?.details?.loop) return job.error.code === "review_rejected" || pendingProofFailure(job)
-    ? next("prepare-plan", "Prepare repair plan", "recovery-plan", "The same failure repeated on unchanged code, so repeating repairs cannot help. Prepare a repair plan and approve it; Resume does not renew the budget.")
+    ? next("prepare-plan", "Prepare repair plan", "recovery-plan", "The same failure repeated on unchanged code, so repeating repairs cannot help. Prepare a repair plan; once it passes independent review, repairs start on their own. Resume does not renew the budget.")
     : next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", "The same failure repeated on unchanged code. Change the code or inputs first: Resume reruns the checks, and no repair turn runs while the code is unchanged.");
   if (initialPlanBlocked(job, maxRepairs)) return next("resume", "Resume plan review", "resume", "Automatic plan corrections are exhausted. Correct .factory/slices.json, then Resume for one independent review; a plan the reviewer already blocked is refused. If the supplied specs themselves are wrong or incomplete, revise them or add a spec file instead: Resume then reviews against them with a fresh correction budget.");
   if (inputsChanged(job)) return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The specs or prototype inputs changed after the plan was approved. Prepare a repair plan against the current inputs.");
@@ -1731,7 +1732,7 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
       actions.push("Once it has exited, Resume continues this run from its preserved files.");
     } else if (planBlocked) {
       actions.push(`Download the plan help packet: the blocked plan, the request, the reviewer's blockers and the source references. Fix the plan yourself or hand the packet to your coding agent.`);
-      actions.push("Submit corrected plan for review: it gets one independent review and, if it passes, waits for your approval before any repair runs.");
+      actions.push("Submit corrected plan for review: it gets one independent review and, if it passes, repairs start on their own.");
       actions.push("Revise inputs and prepare a new plan only if the specs or prototype themselves are wrong or ambiguous.");
     } else if (initialPlanBlocked(job, maxRepairs)) {
       actions.push(`Read the reviewer's blockers; automatic plan corrections are exhausted (${job.planCorrections} used) and nothing has been built.`);
@@ -1742,14 +1743,14 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
       actions.push("Change the code or inputs, or prepare a repair plan; Resume does not renew the repair budget.");
     } else if (stale) {
       actions.push("Prepare repair plan: the factory compares the changed inputs with the approved plan and plans the unfinished work against the current inputs; verified features stay done.");
-      actions.push("Review the plan, then Approve and continue repairs. Resume would stop again on the same changed inputs.");
+      actions.push("Once the plan passes independent review, repairs start on their own. Resume would stop again on the same changed inputs.");
     } else if (exhausted) {
       actions.push(pendingProofFailure(job)
         ? "Prepare repair plan: the factory plans features for the requirements the failed integration proof supports, from its obligation, command and output."
         : job.error.code === "quality_gate_failed"
           ? `Prepare repair plan: the factory plans a fix for the failed ${job.error.details?.gate ?? "quality"} gate from its command and output, with the unfinished checks and every spec and prototype input.`
           : "Prepare repair plan: the factory plans features for the unfinished checks from the review findings and every spec and prototype input.");
-      actions.push("Review the remaining gaps, proposed features and proof checks, then Approve and continue repairs to start a new bounded repair phase.");
+      actions.push("Once the plan passes independent review, a new bounded repair phase starts on its own; Pause stops it before the next feature.");
       actions.push("Resume does not renew the repair budget; dashboard chat explains or shapes briefs and does not resume a run.");
     } else if (reviewBlocked) {
       actions.push("Read the unfinished checks and reviewer blockers in this packet and .factory/REVIEW.md.");

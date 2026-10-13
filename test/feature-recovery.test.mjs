@@ -56,7 +56,8 @@ async function setup(t, mutate = async () => {}, { uploads = {}, alreadyPasses =
   const job = await store.create({ brief: { workingName: 'Recovery fixture', mustHaves: ['Live saved searches', 'Edit people'], acceptanceScenarios: ['A new item enters its smart album'] }, transcript: [{ role: 'user', content: 'Recover the missing behavior' }, ...Object.keys(uploads).map(name => ({ role: 'user', content: `Attached file: .factory/uploads/${name}` }))], provider: 'fixture', sdlc: 'single' });
   const fixture = createFixtureProvider(); let recovering = false; let deployments = 0;
   const stages = []; const prompts = {};
-  const factory = new SoloFactory({ store, maxRepairs: 1, autoStartRepairs: autoStart,
+  // 'default' omits the option, so the test runs the constructor default the server also uses.
+  const factory = new SoloFactory({ store, maxRepairs: 1, ...(autoStart !== 'default' && { autoStartRepairs: autoStart }),
     commandRunner: async () => {
       // A repair plan targets real gaps, so a feature's checks fail until its builder has run.
       const cursor = (await store.read(job.id)).recoveryPhase?.cursor;
@@ -107,12 +108,20 @@ test('keepCorrecting continues past the budget only while blockers shrink, up to
 });
 
 test('by default a reviewed repair plan starts repairs without an approval click', async t => {
-  const env = await setup(t, undefined, { autoStart: true });
+  const env = await setup(t, undefined, { autoStart: 'default' });
   const result = await env.factory.planRecovery(env.failed.id);
   assert.equal(result.state, 'completed', result.error?.message);
   assert.equal(result.recoveryPhase.done.length, 2); assert.equal(env.deployments(), 1);
   const events = await env.store.events(env.failed.id);
   assert.match(events.find(e => e.type === 'plan.approved' && /repairs start now/.test(e.message))?.message ?? '', /2 features/);
+});
+
+test('an auto-started repair plan honors the owner batch size given when preparing it', async t => {
+  const env = await setup(t, undefined, { autoStart: 'default' });
+  const parked = await env.factory.planRecovery(env.failed.id, '', { features: 1 });
+  assert.equal(parked.state, 'paused', parked.error?.message);
+  assert.equal(parked.recoveryPhase.status, 'running'); assert.equal(parked.recoveryPhase.done.length, 1); assert.equal(parked.recoveryPhase.plan.slices.length, 2);
+  assert.equal(env.deployments(), 0);
 });
 
 for (const changed of ['source', 'review', 'contract', 'plan', 'specs', 'reviewed plan']) test(`approval rejects changed ${changed}`, async t => {

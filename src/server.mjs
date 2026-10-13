@@ -112,7 +112,7 @@ export async function createSoloFactoryServer(options = {}) {
       factories.set(job.id, factory);
       const run = { jobId: job.id, factory };
       runs.set(entry.projectId, run);
-      const launch = entry.mode === "recovery-plan" ? factory.planRecovery(job.id, entry.guidance)
+      const launch = entry.mode === "recovery-plan" ? factory.planRecovery(job.id, entry.guidance, { features: entry.features })
         : entry.mode === "recovery-review" ? factory.amendRecovery(job.id, entry.submission)
         : entry.mode === "recovery-start" ? factory.startRecovery(job.id, entry.planDigest, { features: entry.features })
         : entry.mode === "resume" ? factory.resume(job.id, { features: entry.features }) : entry.mode === "restart" ? factory.restartFromSlice(job.id, entry.fromSlice) : factory.start(job.id);

@@ -161,8 +161,10 @@ export async function reviewedPlanKeys(appDir, job, sourcesDigest) {
   return keys;
 }
 
-export async function planFeatureRecovery(factory, id, signal, guidance = '') {
+export async function planFeatureRecovery(factory, id, signal, guidance = '', { features } = {}) {
   let job = await factory.store.read(id);
+  // The owner's batch for a plan that starts on its own once it passes review (draftRepairPlan).
+  job.repairBatch = features ?? null;
   const appDir = factory.store.appDir();
   // Outside the try: a refused plan must not be recorded as a failure of the run.
   if (!['failed', 'interrupted', 'paused'].includes(job.state) || job.dismissed || (job.recoveryPhase && !['planning', 'plan_failed', 'ready', 'running', 'built'].includes(job.recoveryPhase.status))) throw new Error('Repair planning requires an unresolved parked run.');
@@ -312,8 +314,7 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
       const sourceReport = request.review && !amendment ? JSON.parse(await readFile(path.join(appDir, '.factory/review-result.json'), 'utf8')) : null;
       if (prior) { job.recoveryPhaseHistory ??= []; job.recoveryPhaseHistory.push(prior); }
       const corrections = spentCorrections(job, request.sourcesDigest);
-      const blockerCounts = budgetLedger(job).find(item => item.request?.sourcesDigest === request.sourcesDigest && item.blockerCounts)?.blockerCounts ?? [];
-      job.recoveryPhase = { id: phaseId, status: 'planning', request, sourceReportDigest: amendment ? prior.sourceReportDigest : sourceReport && digest(sourceReport), planFile, done: [], index: 0, stats: {}, reviews: 0, corrections, blockerCounts, reviewedPlans: [],
+      job.recoveryPhase = { id: phaseId, status: 'planning', request, sourceReportDigest: amendment ? prior.sourceReportDigest : sourceReport && digest(sourceReport), planFile, done: [], index: 0, stats: {}, reviews: 0, corrections, blockerCounts: [], reviewedPlans: [],
         ...(amendment && { amendment: { priorPhase: prior.id, priorBlockers: prior.planBlockers ?? [], submittedAt: new Date().toISOString(), ...((prior.status === 'ready' || prior.amendment?.base) && { base: prior.status === 'ready' ? prior.id : prior.amendment.base }) } }) };
     }
     const phase = job.recoveryPhase;
@@ -379,7 +380,8 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
         plan = await readPlan();
         continue;
       }
-      if (phase.amendment || !keepCorrecting(phase.corrections, factory.maxRepairs, phase.blockerCounts)) phase.blocked = true;
+      // Progress is judged within this plan only (counts start empty per preparation), and a plan that no longer parses is not progress.
+      if (phase.amendment || !keepCorrecting(phase.corrections, factory.maxRepairs, plan instanceof Error ? [] : phase.blockerCounts)) phase.blocked = true;
       if (phase.blocked) throw Object.assign(new Error(`The repair plan is still blocked after ${phase.corrections} corrections: ${planBlockers[0]}`), { code: 'plan_blocked', details: { blockers: planBlockers } });
       // After the exhaustion check, so a Pause never turns a spent budget into a retryable preparation.
       factory.takePause('specifying');
@@ -407,7 +409,7 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
     await factory.emit(id, { type: 'plan.approved', state: job.state, message: planChangeSummary(plan, request.priorPlan) });
     // A Pause requested during planning parks with the ready plan; Approve still starts it.
     factory.takePause('building');
-    return runFeatureRecovery(factory, id, signal, phase.planDigest);
+    return runFeatureRecovery(factory, id, signal, phase.planDigest, { features: job.repairBatch ?? undefined });
   } catch (error) {
     if (job.recoveryPhase?.status === 'planning') { job.recoveryPhase.status = 'plan_failed'; await factory.store.writeState(job); }
     return factory.fail(id, signal, error);

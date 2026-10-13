@@ -218,126 +218,16 @@ commands. After a repair, the gate that failed runs first (behind install), then
 Final integration reruns every verified feature's build-time proofs once, so a later feature that
 breaks an earlier one is caught before the final review. A repair run reruns its own features'
 proofs; original features it left alone rely on the manifest test command.
-Plans, features and final integration each get two repairs; Resume never refills them. There is
+Plans get two corrections (more while each review finds fewer blockers, at most three times
+that); features and final integration each get two repairs. Resume never refills them. There is
 no single-build option for new runs; older single and slice runs still resume. Details:
 [SPEC.md §12](SPEC.md).
 
-## Completion review gate
+## Completion review, continuation and feature recovery
 
-A completed worker turn is not review approval. After build/tests, the controller writes a fresh `.factory/review-request.json` covering every intake must-have (MH-n) and acceptance scenario (SC-n), bound to the run and frozen contract digest. The reviewer writes `.factory/review-result.json` and a human-readable REVIEW.md. Every check must pass with existing project-relative evidence files, verdict must be pass, and blockers must be empty. Missing, stale, malformed, partial, blocked or unevidenced reports fail the gate even if npm test passes. Reviewers must report missing capabilities and required browser/visual evidence instead of waiving scope.
-
-Review failures use the existing bounded repair budget, then park the run. Once that budget is exhausted, Resume is refused: it would only repeat the same review. The card offers **Prepare repair plan** instead (below). Attempt numbers remain monotonic so earlier failure files are retained. Neither Resume nor automatic retries renew this budget. Repairs after review (including deployment repairs) require re-review. The frozen contract cannot be narrowed during repair. Existing completed runs are historical and are not retroactively reclassified. A structured review still depends on honest behavioral assessment; the controller validates coverage, evidence presence and verdict consistency rather than proving arbitrary application semantics.
-
-One continuation policy decides what may continue a parked run, and the controller, the API
-and the dashboard all use it. That way a banner never offers an action the controller would refuse. A run whose
-repair-plan preparation stopped or failed (`planning` or `plan_failed`) continues only with
-**Retry repair-plan preparation**, which starts one planner, keeps the earlier phase in history,
-retains the unfinished checks, keeps spent plan corrections, and runs no implementation or
-deployment. A plan whose review still blocks after its corrections are spent (`plan_blocked`)
-gets no retry: the dashboard lists the review blockers, says that automatic corrections are
-exhausted and that no repairs have started, and offers **Submit corrected plan for review**
-(`POST /api/jobs/:id/recovery-review` with `{"phaseId","plan"}`). That runs exactly one independent
-review of the submitted plan: no planner, no automatic correction, no renewed correction budget.
-The failed phase is archived with its plan untouched (a malformed one is kept as raw evidence), the
-prior blockers go into the review request, and a pass parks the run `ready`, so the owner still approves
-the exact plan digest. A block records the new findings and parks again; every further review needs a
-new explicit, different plan, since a plan already reviewed for these inputs (ignoring formatting and
-the request id) is refused, also after a restart. An interrupted amendment review resumes the review
-only (**Resume plan review**). The submission is refused with `409`/`400`/`413`, before any state write
-or provider turn, for a stale phase, malformed or incomplete plan, changed inputs, contract, source or
-review evidence, a dismissed or completed run, or an active writer; the checks repeat under writer
-ownership. The limit is 4,000,000 bytes of plan, and nothing is truncated. **Download plan help
-packet** (`GET /api/jobs/:id/recovery-plan-packet`) gives the plan, request, blockers, sources and
-instructions for the owner or their coding agent, and the dashboard's advanced file input submits the
-corrected file. **Revise inputs and prepare a new plan** remains for inputs that are genuinely wrong:
-`recovery-plan` still refuses with `409`, before any planner or reviewer turn, while the inputs
-match any fingerprint that exhausted its corrections since the last executed plan. A
-correction budget belongs to the input fingerprint: revised inputs start fresh, and every later
-retry, feedback revision or return to earlier inputs shares what that fingerprint already spent. A `ready` plan continues only with exact approval. An exhausted budget or changed
-inputs continue with **Prepare repair plan**. An approved plan that is `running` resumes from
-its cursor. A run that already has a worker or a queue entry gets no second launch. A refused Resume
-returns `409` with `nextAction` naming the allowed action and its endpoint. Saved banners from
-older versions are re-derived when the API serves them and never rewritten.
-
-Review recovery diagnostics include every unfinished MH/SC with its full requirement, all reviewer blockers, artifact paths and repair-budget guidance. Dashboard Guide receives the selected project’s latest run snapshot and matching recovery evidence; it must not treat an existing PRD as proof of delivery or claim chat resumes execution. Matching older terse failures are enriched read-only without rewriting run history.
-
-## Feature recovery within a preserved run
-
-For an unresolved parked run with a matching failed review (the final review, or
-a feature review in a new planned run), choose **Prepare
-repair plan** (the primary action once the repair budget is exhausted). An active
-run must first reach a safe stop through Pause. Planning preserves the source,
-original contract and completed work; after a feature stop, verified features stay
-done and the gaps are the approved plan's unclosed checks. It reads the latest review findings and every
-authoritative input: the frozen contract plus `.factory/uploads/` specs and
-prototype handoffs, snapshotted by SHA-256. The plan is a version 2 feature plan
-(the same validator as new runs). Every unfinished check has one closing feature,
-and every acceptance obligation cites its source path and locator with an executable
-proof. A broad MH/SC tag alone is not enough. An independent reviewer compares the
-plan against those inputs and blocks omitted detailed requirements; blocked plans
-get up to two corrections, then stop before any build. The card shows the remaining
-gaps, proposed features, verification checks and repair allowance. Choose **Approve
-and continue repairs**. Approval is bound to the reviewed plan digest, source
-baseline, source review, input snapshot and frozen contract; any change rejects it.
-
-Each feature runs the same safeguards as new-run features: deterministic gates, a
-scoped evidence review bound to the checked candidate (a reviewer that edits source
-voids its verdict), a strict checkpoint commit before the feature counts as done, and
-a persisted substage cursor so a pause after checks resumes at review rather than
-re-implementing. Completed features are
-recorded durably; Resume continues at the unfinished feature. There are up to two
-repairs per feature and two for final integration, bounded by the approved phase.
-Recovery resumes do not replenish consumed budgets. The original full-contract
-review still gates deployment. The run ID and original strategy are unchanged;
-source reviews, feature reviews and prior phase histories remain available.
-
-New-run feature plans get the same input set: the planner, plan reviewer and every
-review read the frozen contract plus the uploads the run's own intake transcript
-attached, and each obligation cites its source path and locator. Files uploaded for
-another brief share `.factory/uploads/` but never enter a running plan's input set.
-The approved plan records the input fingerprint; if a supplied input changes or is
-removed afterwards, execution, review validation and deployment fail closed with
-`inputs_changed`, and Resume is refused (the run would stop again). **Prepare repair
-plan** then replans against the current inputs without a review: it names each changed
-file, keeps verified features done, and reopens any verified feature whose obligations
-cited a changed file (every verified feature if the changed file was cited by none).
-Editing the approved plan itself is still `stale_plan`.
-
-An obligation whose proof can only run on the integrated app (a populated end-to-end
-state, for example) may mark `proof.pending: "integration"`. It is not run or reviewed
-with its feature; when that feature is verified it is recorded on the run as an
-outstanding proof keyed `<plan digest>:<feature>/<obligation>`, so the same obligation id
-in an original and a repair plan never collides. A check stays "pending integration proof",
-not verified, at whichever feature closes it while any obligation in the plan or any
-outstanding proof still supports it. Proof identities use the full plan digest; gate
-names preserve component boundaries as `proof-<digest>.<feature>.<obligation>`.
-Every non-superseded proof runs before final review and remains a review check across
-later repair plans. Identical commands run once while retaining every obligation they
-prove, including commands shared with install, test or build. When a gate exhausts its
-budget, Prepare repair plan uses all its failed obligations, commands and output as
-findings. Obligations without MH/SC refs become repair checks under their own ledger
-keys, preserving their detailed behavior and source citations.
-After the integration gates and final review pass, the ledger records passed evidence
-bound to the application source. Source changes invalidate it; integration verification
-reruns all non-superseded proofs even if they passed before, so repairs cannot reuse stale
-evidence. Input-driven reopening supersedes the replaced feature's proofs. Every feature
-still needs at least one proof that runs when it is built.
-
-A recovery phase parked mid-feature by an older version (no substage cursor) resumes
-at checks for that feature, keeping its consumed budget, rather than rebuilding it.
-
-`POST /api/jobs/:id/recovery-plan` starts planning through the project scheduler.
-Read the resulting plan at `GET /api/jobs/:id` under `job.recoveryPhase`.
-`POST /api/jobs/:id/recovery-start` with `{"planDigest":"…"}` approves that exact
-plan and queues execution. These controls reject active/queued project writers.
-The run card shows planned/current/verified features, acceptance checks and budgets.
-The Guide can explain this state; chat text alone does not execute recovery.
-
-To revise a ready plan, enter feedback and choose Prepare repair plan again.
-The planning endpoint accepts optional `guidance` text (up to 6000 characters);
-prior candidate/history are preserved and old approval becomes invalid.
-
-Prerequisite-only repair features may use an empty `closes` array, but still
-require executable acceptance criteria. Every unfinished original check must
-still have exactly one owning slice; its full evidence gate runs after its
-prerequisites, and final review covers the unchanged full contract.
+A completed worker turn is not review approval: every must-have and acceptance scenario needs
+passing, evidenced checks before deployment. When a parked run can continue, one policy names
+the allowed action (Resume, Prepare repair plan, Submit corrected plan for review), and a repair
+plan that passes independent review starts its repairs on its own. The full contract for the
+review gate, continuation and feature recovery lives in
+[SPEC.md, Completion review gate](SPEC.md#completion-review-gate) and the sections after it.

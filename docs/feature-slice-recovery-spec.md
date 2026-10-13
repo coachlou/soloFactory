@@ -5,7 +5,8 @@ Status: first implementation verified (124 tests pass), 2026-10-07. Requested by
 The first version supports parked runs with matching failed review checks. Pause an
 active run with the existing Pause control before planning. It does not automatically
 chain a pause into planning. The original strategy remains recorded; recovery is a
-separate execution phase. Approval is required before feature execution. Recovery
+separate execution phase. A plan that passes independent review starts execution on
+its own (owner decision, 2026-10-12); a Pause during planning leaves it for approval. Recovery
 resumes retain consumed repair budgets; they do not replenish them. Plans can be
 regenerated before execution or after the full final review fails, retaining earlier
 phase history. Preview deployment and new requirements during recovery remain deferred.
@@ -51,7 +52,7 @@ contract or declare the original run complete with requirements deferred.
    passes goes straight to its scoped review; a failure is handed to the
    builder. This check spends no repair budget. A reviewer's blockers on a
    pre-verified slice start its build turn, not a repair.
-   The owner may approve a batch (`features: N` on `recovery-start` or on
+   The owner may set a batch (`features: N` on `recovery-plan`, `recovery-start` or
    `resume`): the run parks as paused after N more slices, with its cursor,
    budgets and evidence kept. A plain resume keeps an unfinished batch's end.
 6. Resume after interruption at the unfinished recovery slice. Do not replay
