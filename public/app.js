@@ -511,14 +511,23 @@ function renderJob() {
   const feature = job.featureCursor;
   $("#strategy-label").textContent = sdlcOption(job.sdlc).label + (feature ? ` · ${feature.id} ${PARKED.includes(job.state) ? "blocked" : feature.substage}` : "");
   const elapsedUntil = job.completedAt ? new Date(job.completedAt).getTime() : Date.now();
-  $("#elapsed").textContent = `${formatDuration(elapsedUntil - new Date(job.startedAt || job.createdAt).getTime())} elapsed${usageLine(state.telemetry?.summary?.tokens?.total)}`;
+  const stages = state.telemetry?.summary?.stages;
+  const runLine = `${formatSpan(elapsedUntil - new Date(job.startedAt || job.createdAt).getTime())} elapsed${usageLine(state.telemetry?.summary?.tokens?.total)}`;
+  // The current step leads; the whole run is secondary.
+  $("#elapsed").textContent = stages?.current ? `${formatSpan(stages.current.durationMs)} this step${usageLine(stages.current.tokens)}` : runLine;
+  $("#run-total").textContent = stages?.current ? `Run total: ${runLine}` : "";
   const progressState = PARKED.includes(job.state) ? job.failedState : job.state;
   const currentIndex = Math.max(0, stageOrder.indexOf(progressState));
   $("#stage-bars").replaceChildren(...stageOrder.slice(0, -1).map((stage, index) => {
+    const segment = document.createElement("div");
+    segment.className = "stage-seg";
     const bar = document.createElement("span");
     bar.className = `stage-bar ${index < currentIndex || job.state === "completed" ? "done" : index === currentIndex ? "active" : ""}`;
     bar.title = stage;
-    return bar;
+    const spent = stages?.byState?.[stage];
+    const caption = Object.assign(document.createElement("small"), { textContent: spent ? `${formatSpan(spent.durationMs)}${usageLine(spent.tokens, true)}` : "" });
+    segment.append(bar, caption);
+    return segment;
   }));
   document.querySelectorAll(".stages li").forEach((item) => item.classList.remove("active"));
   const railStage = progressState === "repairing" ? "verifying" : progressState;
@@ -760,10 +769,10 @@ function renderArtifacts() {
 
 // "· 398K tokens in · 14K out". No dollar figure: members run on subscriptions, and the CLI's
 // list-price cost read as an API bill. Cost stays in runs.jsonl.
-function usageLine(usage) {
+function usageLine(usage, short = false) {
   if (!usage) return "";
   const count = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
-  return ` · ${count(usage.inputTokens)} tokens in · ${count(usage.outputTokens)} out`;
+  return short ? ` · ${count(usage.inputTokens)} in · ${count(usage.outputTokens)} out` : ` · ${count(usage.inputTokens)} tokens in · ${count(usage.outputTokens)} out`;
 }
 
 function renderAppMetrics() {
@@ -988,6 +997,13 @@ function stopPolling() {
 
 function statusCopy(status) {
   return ({ queued: "The run is queued.", specifying: "Turning the interview into a build contract.", building: "The coding agent is implementing the app.", verifying: "The controller is running the real checks.", repairing: "A failed gate is being repaired, then every gate runs again.", reviewing: "The implementation is being audited against the frozen contract.", deploying: "The app is starting and its health and metrics endpoints are being checked.", completed: "The app is live and its evidence is preserved." })[status] || "Factory activity is recorded below.";
+}
+
+// Readable at any length: 45s, 12m 05s, 2h 05m, 6d 1h.
+function formatSpan(milliseconds) {
+  const s = Math.max(0, Math.floor(milliseconds / 1000)), m = Math.floor(s / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
+  const pad = (n) => String(n).padStart(2, "0");
+  return d ? `${d}d ${h % 24}h` : h ? `${h}h ${pad(m % 60)}m` : m ? `${m}m ${pad(s % 60)}s` : `${s}s`;
 }
 
 function formatDuration(milliseconds) {

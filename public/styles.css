@@ -138,7 +138,9 @@ h2 { font: 500 27px/1.08 var(--serif); margin: 0 0 14px; }
 .activity-orb { width: 42px; height: 42px; border-radius: 50%; background: radial-gradient(circle, var(--green) 0 17%, rgba(167,240,112,.18) 20% 48%, rgba(167,240,112,.05) 51%); animation: breathe 2s ease-in-out infinite; }
 @keyframes breathe { 50% { transform: scale(1.08); filter: brightness(1.2); } }
 .big-status strong, .big-status small { display: block; }.big-status strong { font: 500 22px var(--serif); }.big-status small { color: var(--dim); margin-top: 4px; font-size: 11px; }
-.stage-bars { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
+.stage-bars { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+.stage-seg { display: grid; gap: 6px; min-width: 0; }.stage-seg small { color: var(--muted); font-size: 11px; line-height: 1.3; overflow-wrap: anywhere; }
+.run-total { display: block; opacity: .7; }
 .stage-bar { height: 5px; border-radius: 99px; background: var(--line); }.stage-bar.done { background: var(--green); }.stage-bar.active { background: var(--orange); }
 .stats-row, .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 22px; }
 .stats-row div, .metric-grid div { border: 1px solid var(--line); border-radius: 11px; padding: 12px; }

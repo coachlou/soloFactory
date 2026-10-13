@@ -1505,6 +1505,7 @@ export class SoloFactory {
       gateRuns,
       stageCount: job.stageHistory.length,
       tokens: usageTotals(allEvents),
+      stages: stageUsage(job.stageHistory, allEvents),
     };
     const measurement = measureRun(allEvents);
     let app = null;
@@ -1914,4 +1915,26 @@ export function usageTotals(events) {
     total = addUsage(total, event.usage);
   }
   return { total, byStage, turnsWithoutUsage };
+}
+
+// Time and usage per pipeline state, plus the current step alone, so the run screen leads with what is
+// happening now. A turn counts toward the stage entry it finished in.
+// ponytail: linear scan of stageHistory per turn; index by time if runs reach thousands of stages.
+export function stageUsage(history, events, now = Date.now()) {
+  const entries = history.map((stage) => ({ state: stage.state, label: stage.label, start: Date.parse(stage.startedAt),
+    durationMs: (stage.endedAt ? Date.parse(stage.endedAt) : now) - Date.parse(stage.startedAt), tokens: null }));
+  for (const event of events) {
+    if (event.type !== "agent.completed" || !event.usage) continue;
+    const at = Date.parse(event.at);
+    const entry = entries.findLast((item) => item.start <= at);
+    if (entry) entry.tokens = addUsage(entry.tokens, event.usage);
+  }
+  const byState = {};
+  for (const { state, durationMs, tokens } of entries) {
+    const bucket = byState[state] ??= { durationMs: 0, tokens: null };
+    bucket.durationMs += durationMs;
+    bucket.tokens = addUsage(bucket.tokens, tokens);
+  }
+  const last = entries.at(-1);
+  return { byState, current: last ? { label: last.label, state: last.state, durationMs: last.durationMs, tokens: last.tokens } : null };
 }

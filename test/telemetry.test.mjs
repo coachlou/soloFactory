@@ -5,7 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import { createProvider } from "../src/providers.mjs";
 import { JobStore } from "../src/store.mjs";
-import { SoloFactory, usageTotals } from "../src/factory.mjs";
+import { SoloFactory, stageUsage, usageTotals } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
 
 const brief = { workingName: "Pocket Pulse", acceptanceScenarios: ["A user records a score."] };
@@ -161,4 +161,25 @@ test("a run mixing Claude and Codex turns keeps its cost unknown", () => {
   assert.equal(totals.total.costUsd, null, "a partial Claude-only cost would understate the run");
   assert.equal(totals.byStage.slice.inputTokens, 5000, "slices fold into one stage");
   assert.equal(totals.byStage.specification.costUsd, 0.5);
+});
+
+test("stage usage buckets each turn into the stage it finished in and reports the current step alone", () => {
+  const usage = (input, output) => ({ inputTokens: input, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: output, costUsd: null, models: [] });
+  const history = [
+    { state: "specifying", label: "Plan", startedAt: "2026-10-13T10:00:00Z", endedAt: "2026-10-13T10:10:00Z" },
+    { state: "building", label: "Build", startedAt: "2026-10-13T10:10:00Z", endedAt: "2026-10-13T10:30:00Z" },
+    { state: "specifying", label: "Repair plan", startedAt: "2026-10-13T11:00:00Z" },
+  ];
+  const events = [
+    { type: "agent.completed", at: "2026-10-13T10:05:00Z", usage: usage(100, 10) },
+    { type: "agent.completed", at: "2026-10-13T10:20:00Z", usage: usage(200, 20) },
+    { type: "agent.completed", at: "2026-10-13T11:05:00Z", usage: usage(300, 30) },
+    { type: "agent.completed", at: "2026-10-13T11:06:00Z" },
+  ];
+  const { byState, current } = stageUsage(history, events, Date.parse("2026-10-13T11:15:00Z"));
+  assert.equal(byState.specifying.durationMs, 25 * 60_000);
+  assert.equal(byState.specifying.tokens.inputTokens, 400);
+  assert.equal(byState.building.tokens.outputTokens, 20);
+  assert.deepEqual([current.label, current.durationMs, current.tokens.inputTokens], ["Repair plan", 15 * 60_000, 300]);
+  assert.equal(stageUsage([], events).current, null);
 });
