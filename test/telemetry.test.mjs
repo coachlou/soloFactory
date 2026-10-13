@@ -74,7 +74,7 @@ test("Claude turns ignore the owner's personal config and write turns may run th
   const cwd = await mkdtemp(path.join(os.tmpdir(), "sf-claude-isolation-"));
   const capture = path.join(cwd, "args.json");
   await withFakeCli("claude", `require("node:fs").writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2)));
-process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({result:"ok"})));`, async () => {
+let input = ""; process.stdin.on("data", (chunk) => input += chunk); process.stdin.on("end", () => { require("node:fs").writeFileSync(${JSON.stringify(capture + ".stdin")}, input); console.log(JSON.stringify({result:"ok"})); });`, async () => {
     const args = async (mode, context) => {
       await createProvider("claude").run({ cwd, prompt: "ok", mode, context });
       return JSON.parse(await readFile(capture, "utf8"));
@@ -88,6 +88,7 @@ process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify
     const read = await args("read", { stage: "review" });
     assert.ok(read.includes("--strict-mcp-config"));
     assert.ok(!read.includes("--allowedTools"));
+    assert.match(await readFile(`${capture}.stdin`, "utf8"), /^ok\n\nShell: .*one per Bash/s, "every turn learns that compound commands are denied");
   });
 });
 

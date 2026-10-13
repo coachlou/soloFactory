@@ -227,6 +227,12 @@ async function runCodexAttempt({
   return { result, resultPath, sessionId: observedSessionId, usage };
 }
 
+// Claude's prefix allow-list never matches compound commands: smoke 13's 24 denials were all `cd <project> && ...`,
+// pipes, loops, heredoc writes or python edits. Each denial costs the turn a round trip.
+const CLAUDE_SHELL_RULE = `Shell: you are already in the project root. Only plain single commands are approved, one per Bash
+call; a command with cd, &&, ;, |, a loop, a heredoc or a redirect is denied without running. Read files with
+Read, create and change them with Write and Edit, and search with Glob and Grep.`;
+
 async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = "write", context = {} }) {
   await mkdir(cwd, { recursive: true });
   const reasoningTask = /^(specification(?:-|$)|feature-plan(?:-|$)|plan-review$|plan-correction-|recovery-plan-)|(?:^|-)review(?:-|$)/.test(context.stage ?? "");
@@ -255,7 +261,7 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
     executable: "claude",
     args,
     cwd,
-    stdin: prompt,
+    stdin: `${prompt}\n\n${CLAUDE_SHELL_RULE}`,
     logPath,
     signal,
     // `claude -p --output-format json` prints nothing until the process ends, so
