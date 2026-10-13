@@ -48,7 +48,7 @@ test("a blocked feature is set aside, independent features still build, and the 
   } };
   // The UI's proof keeps failing until the owner steps in.
   const commandRunner = async ({ logPath }) => (blockUI && path.basename(logPath).startsWith("proof-UI-") ? { code: 1, output: "ui failed" } : { code: 0, output: "passed" });
-  const make = () => new SoloFactory({ store, provider, commandRunner, deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9985" }) });
+  const make = () => new SoloFactory({ store, provider, commandRunner, autoStartRepairs: false, deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9985" }) });
 
   const parked = await make().start(job.id);
   assert.equal(parked.state, "failed");

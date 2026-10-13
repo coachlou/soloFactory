@@ -515,7 +515,7 @@ test('HTTP feature recovery requires matching approval and respects the project 
   const holdPlan = new Promise(resolve => { releasePlan = resolve; });
   let planningStarted;
   const sawPlan = new Promise(resolve => { planningStarted = resolve; });
-  const app = await createSoloFactoryServer({ home, fixtureMode: true, providerFactory: () => ({
+  const app = await createSoloFactoryServer({ home, fixtureMode: true, autoStartRepairs: false, providerFactory: () => ({
     id: 'fixture', async run(args) {
       if (args.context.stage.startsWith('recovery-plan-')) { planningStarted(); await holdPlan; }
       return fixture.run(args);

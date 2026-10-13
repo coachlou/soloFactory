@@ -16,7 +16,7 @@ async function setup(t, mutate, { maxRepairs = 0, sdlc = 'single' } = {}) {
   const fixture = createFixtureProvider();
   let deployments = 0;
   let reviews = 0;
-  const factory = new SoloFactory({ store, maxRepairs,
+  const factory = new SoloFactory({ store, maxRepairs, autoStartRepairs: false,
     commandRunner: async () => ({ code: 0, output: 'All existing tests pass' }),
     deployer: async () => { deployments++; return { status: 'live', url: 'http://127.0.0.1:9991' }; },
     provider: { id: 'fixture', async run(args) {

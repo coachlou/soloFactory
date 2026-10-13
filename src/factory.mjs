@@ -14,7 +14,7 @@ import { contractDigest, originalChecks, preparePlanReview, prepareReview, runIn
 import { addUsage } from "./providers.mjs";
 import { measureRun } from "./measure.mjs";
 import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, watchConfig, workerAlive } from "./watchdog.mjs";
-import { amendRepairPlan, archiveReview, assertBatch, consolidationBase, assertPlanningCurrent, digest, exhaustedPreparations, planFeatureRecovery, planKey, resumeAmendedReview, reviewedPlanKeys, runFeatureRecovery, sourceBaseline, validateRecoveryApproval, validateRecoveryPlan } from "./feature-recovery.mjs";
+import { amendRepairPlan, archiveReview, assertBatch, consolidationBase, keepCorrecting, assertPlanningCurrent, digest, exhaustedPreparations, planFeatureRecovery, planKey, resumeAmendedReview, reviewedPlanKeys, runFeatureRecovery, sourceBaseline, validateRecoveryApproval, validateRecoveryPlan } from "./feature-recovery.mjs";
 
 // Which harness produced a run, so runs.jsonl can compare harness changes. Read once at load.
 const harnessRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -53,11 +53,12 @@ export class FactoryError extends Error {
 const liveByProject = new Map();
 
 export class SoloFactory {
-  constructor({ store, provider, maxRepairs = 2, commandRunner = runProcess, deployer, watch = watchConfig() } = {}) {
+  constructor({ store, provider, maxRepairs = 2, autoStartRepairs = true, commandRunner = runProcess, deployer, watch = watchConfig() } = {}) {
     this.store = store;
     this.watch = watch;
     this.provider = provider;
     this.maxRepairs = maxRepairs;
+    this.autoStartRepairs = autoStartRepairs;
     this.commandRunner = commandRunner;
     this.deployer = deployer;
     this.active = null;
@@ -304,7 +305,7 @@ export class SoloFactory {
       // since then is the owner's revision: re-baseline it and give it a fresh correction budget.
       if (job.planVersion === 2 && !job.approvedPlan && !job.recoveryPhase && previousError?.code === "plan_blocked" && await initialInputsRevised(this.store, job)) {
         job.planBaseline.inputs = digest(await sourceSet(appDir, runInputs(job)));
-        Object.assign(job, { planCorrections: 0, planSchemaFixes: 0, planBlockedDigests: [], planBlockerHistory: [] });
+        Object.assign(job, { planCorrections: 0, planSchemaFixes: 0, planBlockedDigests: [], planBlockerHistory: [], planBlockerCounts: [] });
         await this.emit(job.id, { type: "plan.inputs_revised", state: failedState, message: "The supplied specs changed since the plan was blocked; plan review restarts with a fresh correction budget." });
       }
       job.error = null;
@@ -610,6 +611,7 @@ export class SoloFactory {
           // Durable, so neither a restart nor switching back to an earlier rejected plan buys another review.
           job.planBlockedDigests = [...new Set([...(job.planBlockedDigests ?? []), await planFileDigest(appDir)])];
           job.planBlockerHistory = [...new Set([...(job.planBlockerHistory ?? []), ...blockers])];
+          job.planBlockerCounts = [...(job.planBlockerCounts ?? []), blockers.length];
           await this.store.writeState(job);
         }
       }
@@ -630,7 +632,7 @@ export class SoloFactory {
         plan = await readPlan();
         continue;
       }
-      if (job.planCorrections >= this.maxRepairs) {
+      if (!keepCorrecting(job.planCorrections, this.maxRepairs, job.planBlockerCounts)) {
         throw new FactoryError("plan_blocked", `The feature plan is still blocked after ${job.planCorrections} corrections: ${blockers[0]}`, { blockers, output: blockers.join("\n") });
       }
       await pauseBeforeTurn();

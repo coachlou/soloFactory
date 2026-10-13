@@ -120,6 +120,23 @@ function spentCorrections(job, sourcesDigest) {
   return Math.max(0, ...budgetLedger(job).filter(phase => phase.request?.sourcesDigest === sourcesDigest).map(phase => phase.corrections ?? 0));
 }
 
+// Corrections continue past the base budget while each review finds fewer blockers than the one before;
+// the owner is asked only once a round stops making progress. Shared with the initial feature plan.
+// ponytail: hard ceiling of 3x the base budget bounds cost if the count keeps shrinking by one.
+export function keepCorrecting(corrections, maxRepairs, counts = []) {
+  if (corrections < maxRepairs) return true;
+  const [before, now] = counts.slice(-2);
+  return counts.length >= 2 && now < before && corrections < 3 * maxRepairs;
+}
+
+// What an owner may want to read about a plan that starts without them: which features are new or changed.
+export function planChangeSummary(plan, prior) {
+  const before = new Map((prior?.slices ?? []).map(slice => [slice.id, digest(stable(slice))]));
+  const added = plan.slices.filter(slice => !before.has(slice.id)).map(slice => slice.id);
+  const changed = plan.slices.filter(slice => before.has(slice.id) && before.get(slice.id) !== digest(stable(slice))).map(slice => slice.id);
+  return `Repair plan passed independent review; repairs start now: ${plan.slices.length} feature${plan.slices.length === 1 ? '' : 's'}${prior ? `. New: ${added.join(', ') || 'none'}. Changed from the previous plan: ${changed.join(', ') || 'none'}` : ''}.`;
+}
+
 // Preparations in the ledger whose plan review still blocked after the fingerprint's corrections ran out.
 export function exhaustedPreparations(job) {
   return budgetLedger(job).filter(phase => phase.blocked);
@@ -295,7 +312,8 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
       const sourceReport = request.review && !amendment ? JSON.parse(await readFile(path.join(appDir, '.factory/review-result.json'), 'utf8')) : null;
       if (prior) { job.recoveryPhaseHistory ??= []; job.recoveryPhaseHistory.push(prior); }
       const corrections = spentCorrections(job, request.sourcesDigest);
-      job.recoveryPhase = { id: phaseId, status: 'planning', request, sourceReportDigest: amendment ? prior.sourceReportDigest : sourceReport && digest(sourceReport), planFile, done: [], index: 0, stats: {}, reviews: 0, corrections, reviewedPlans: [],
+      const blockerCounts = budgetLedger(job).find(item => item.request?.sourcesDigest === request.sourcesDigest && item.blockerCounts)?.blockerCounts ?? [];
+      job.recoveryPhase = { id: phaseId, status: 'planning', request, sourceReportDigest: amendment ? prior.sourceReportDigest : sourceReport && digest(sourceReport), planFile, done: [], index: 0, stats: {}, reviews: 0, corrections, blockerCounts, reviewedPlans: [],
         ...(amendment && { amendment: { priorPhase: prior.id, priorBlockers: prior.planBlockers ?? [], submittedAt: new Date().toISOString(), ...((prior.status === 'ready' || prior.amendment?.base) && { base: prior.status === 'ready' ? prior.id : prior.amendment.base }) } }) };
     }
     const phase = job.recoveryPhase;
@@ -345,6 +363,7 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
           if (!error.details?.blockers) throw error;
           planBlockers = error.details.blockers.length ? error.details.blockers : [error.message];
           phase.blockerHistory = [...new Set([...(phase.blockerHistory ?? []), ...planBlockers])];
+          phase.blockerCounts = [...(phase.blockerCounts ?? []), planBlockers.length];
         }
       }
       phase.planBlockers = planBlockers;
@@ -360,7 +379,7 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
         plan = await readPlan();
         continue;
       }
-      if (phase.amendment || phase.corrections >= factory.maxRepairs) phase.blocked = true;
+      if (phase.amendment || !keepCorrecting(phase.corrections, factory.maxRepairs, phase.blockerCounts)) phase.blocked = true;
       if (phase.blocked) throw Object.assign(new Error(`The repair plan is still blocked after ${phase.corrections} corrections: ${planBlockers[0]}`), { code: 'plan_blocked', details: { blockers: planBlockers } });
       // After the exhaustion check, so a Pause never turns a spent budget into a retryable preparation.
       factory.takePause('specifying');
@@ -375,11 +394,20 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
     phase.planBlockers = [];
     phase.status = 'ready';
     await writeFile(path.join(jobDir, `recovery-${phaseId}-approved-candidate.json`), JSON.stringify(plan, null, 2));
-    job = await factory.stage(job, 'paused', 'Repair plan ready for approval');
-    job.failedState = 'building';
-    job.recovery = { canResume: false, title: 'Repair plan ready', summary: 'Review the remaining gaps, proposed features and proof checks, then approve to continue repairs. Existing files are preserved.', actions: ['Approve and continue repairs, or send feedback to prepare a revised plan.'], workspace: appDir, automaticRetry: 'No repair runs until the plan is approved.' };
+    if (!factory.autoStartRepairs) {
+      job = await factory.stage(job, 'paused', 'Repair plan ready for approval');
+      job.failedState = 'building';
+      job.recovery = { canResume: false, title: 'Repair plan ready', summary: 'Review the remaining gaps, proposed features and proof checks, then approve to continue repairs. Existing files are preserved.', actions: ['Approve and continue repairs, or send feedback to prepare a revised plan.'], workspace: appDir, automaticRetry: 'No repair runs until the plan is approved.' };
+      await factory.store.writeState(job);
+      return job;
+    }
+    // The validator (frozen contract, every check closed, nothing narrowed) and the independent review are the
+    // gate; an owner click on hundreds of obligations added nothing, as the main feature plan already does.
     await factory.store.writeState(job);
-    return job;
+    await factory.emit(id, { type: 'plan.approved', state: job.state, message: planChangeSummary(plan, request.priorPlan) });
+    // A Pause requested during planning parks with the ready plan; Approve still starts it.
+    factory.takePause('building');
+    return runFeatureRecovery(factory, id, signal, phase.planDigest);
   } catch (error) {
     if (job.recoveryPhase?.status === 'planning') { job.recoveryPhase.status = 'plan_failed'; await factory.store.writeState(job); }
     return factory.fail(id, signal, error);
@@ -427,7 +455,7 @@ export async function amendmentPacket(store, job) {
       ]),
       'Read each file in request.sources (paths are relative to the workspace) before editing. Keep jobId, requestId and contractDigest exactly as given.',
       `Save the corrected plan as a new JSON file and submit it with "Submit corrected plan for review" in the dashboard, or POST {"phaseId": "${phase.id}", "plan": <the corrected plan>} to /api/jobs/${job.id}/recovery-review.`,
-      'A submitted plan gets exactly one independent review, no new automatic corrections, and still needs your approval before any repair runs.',
+      'A submitted plan gets exactly one independent review and no new automatic corrections; if it passes, repairs start on their own.',
     ],
     blockers: ready ? [] : phase.planBlockers ?? [], ...(ready && { planDigest: phase.planDigest }), correctionsUsed: phase.corrections ?? 0, repairsStarted: false,
     submit: { method: 'POST', endpoint: `/api/jobs/${job.id}/recovery-review`, body: { phaseId: phase.id, plan: '<corrected plan JSON>' } },

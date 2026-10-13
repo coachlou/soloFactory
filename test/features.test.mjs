@@ -34,7 +34,7 @@ async function plannedRun({ after = async () => {}, commandRunner = passing, upl
     await after(options.context.stage, options.cwd, options.context, options.prompt);
     return result;
   } };
-  const make = (overrides = {}) => new SoloFactory({ store, provider, commandRunner, deployer, ...overrides });
+  const make = (overrides = {}) => new SoloFactory({ store, provider, commandRunner, deployer, autoStartRepairs: false, ...overrides });
   return { store, job, make, factory: make() };
 }
 

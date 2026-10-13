@@ -27,7 +27,7 @@ async function setup(t, { malformed = false, ready = false } = {}) {
   const fixture = createFixtureProvider(); let recovering = false; let deployments = 0;
   const stages = []; const requests = [];
   const ctl = { block: !ready, modify: false, fail: false, cases: [] };
-  const opts = { store, maxRepairs: 1,
+  const opts = { store, maxRepairs: 1, autoStartRepairs: false,
     // Stands in for node:test under the factory's case reporter: every listed case passes.
     commandRunner: async ({ env = {} }) => {
       const destination = env.NODE_OPTIONS?.match(/--test-reporter-destination="([^"]+)"/)?.[1];
@@ -308,7 +308,7 @@ test('HTTP: packet download, a 540KB bounded submission, refusals that change no
   const home = await mkdtemp(path.join(os.tmpdir(), 'solo-http-amendment-'));
   const fixture = createFixtureProvider(); const stages = []; let block = true;
   const saved = process.env.SOLOFACTORY_MAX_REPAIRS; process.env.SOLOFACTORY_MAX_REPAIRS = '0'; // the first block exhausts corrections
-  const app = await createSoloFactoryServer({ home, fixtureMode: true, providerFactory: () => ({ id: 'fixture', async run(args) {
+  const app = await createSoloFactoryServer({ home, fixtureMode: true, autoStartRepairs: false, providerFactory: () => ({ id: 'fixture', async run(args) {
     stages.push(args.context.stage);
     const result = await fixture.run(args);
     if (reviewer(args.context.stage) && block) {

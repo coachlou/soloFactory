@@ -6,7 +6,7 @@ import path from 'node:path';
 import { JobStore } from '../src/store.mjs';
 import { SoloFactory, continuationAction, withContinuation } from '../src/factory.mjs';
 import { createFixtureProvider } from '../src/fixture-provider.mjs';
-import { digest, sourceBaseline, validateRecoveryPlan, validateRecoveryApproval } from '../src/feature-recovery.mjs';
+import { digest, keepCorrecting, sourceBaseline, validateRecoveryPlan, validateRecoveryApproval } from '../src/feature-recovery.mjs';
 
 const request = { id: 'request', contractDigest: 'frozen', checks: [{ id: 'MH-3' }, { id: 'SC-2' }] };
 const plan = () => ({ version: 1, requestId: 'request', contractDigest: 'frozen', slices: [
@@ -47,7 +47,7 @@ test('v2 repair plans may depend on already completed features but not on unknow
   assert.throws(() => validateRecoveryPlan(p, v2Request), /unknown slice MONTHLY-SUMMARY/);
 });
 
-async function setup(t, mutate = async () => {}, { uploads = {}, alreadyPasses = false } = {}) {
+async function setup(t, mutate = async () => {}, { uploads = {}, alreadyPasses = false, autoStart = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'solo-feature-recovery-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const store = new JobStore(root); await store.init();
@@ -56,7 +56,7 @@ async function setup(t, mutate = async () => {}, { uploads = {}, alreadyPasses =
   const job = await store.create({ brief: { workingName: 'Recovery fixture', mustHaves: ['Live saved searches', 'Edit people'], acceptanceScenarios: ['A new item enters its smart album'] }, transcript: [{ role: 'user', content: 'Recover the missing behavior' }, ...Object.keys(uploads).map(name => ({ role: 'user', content: `Attached file: .factory/uploads/${name}` }))], provider: 'fixture', sdlc: 'single' });
   const fixture = createFixtureProvider(); let recovering = false; let deployments = 0;
   const stages = []; const prompts = {};
-  const factory = new SoloFactory({ store, maxRepairs: 1,
+  const factory = new SoloFactory({ store, maxRepairs: 1, autoStartRepairs: autoStart,
     commandRunner: async () => {
       // A repair plan targets real gaps, so a feature's checks fail until its builder has run.
       const cursor = (await store.read(job.id)).recoveryPhase?.cursor;
@@ -96,6 +96,23 @@ test('plans, approves and executes same-run recovery, preserving contract and or
   assert.equal(result.recoveryPhase.done.length, 2); assert.equal(env.deployments(), 1);
   assert.equal(await readFile(path.join(env.root, '.factory/last-failure-1.txt'), 'utf8'), oldFailure);
   assert.ok(env.stages.at(-1) === 'review');
+});
+
+test('keepCorrecting continues past the budget only while blockers shrink, up to 3x', () => {
+  assert.equal(keepCorrecting(0, 2), true);
+  assert.equal(keepCorrecting(2, 2, [5, 3]), true);
+  assert.equal(keepCorrecting(2, 2, [5, 5]), false);
+  assert.equal(keepCorrecting(2, 2, [3]), false);
+  assert.equal(keepCorrecting(6, 2, [9, 8, 7, 6, 5, 4]), false);
+});
+
+test('by default a reviewed repair plan starts repairs without an approval click', async t => {
+  const env = await setup(t, undefined, { autoStart: true });
+  const result = await env.factory.planRecovery(env.failed.id);
+  assert.equal(result.state, 'completed', result.error?.message);
+  assert.equal(result.recoveryPhase.done.length, 2); assert.equal(env.deployments(), 1);
+  const events = await env.store.events(env.failed.id);
+  assert.match(events.find(e => e.type === 'plan.approved' && /repairs start now/.test(e.message))?.message ?? '', /2 features/);
 });
 
 for (const changed of ['source', 'review', 'contract', 'plan', 'specs', 'reviewed plan']) test(`approval rejects changed ${changed}`, async t => {
