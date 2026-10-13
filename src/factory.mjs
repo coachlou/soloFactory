@@ -124,12 +124,16 @@ export class SoloFactory {
         job.sliceDone = job.sliceDone.slice(0, index);
         job.sliceStats = Object.fromEntries(Object.entries(job.sliceStats).filter(([id]) => job.sliceDone.includes(id)));
         job.sliceIndex = index;
-        job.attempt = 0;
         job.error = null;
         job.failedState = null;
         job.recovery = null;
-        // Attempts restart at zero, so every v2 budget is re-derived from the rewound cursor.
+        // `attempt` stays run-wide so repair labels and logs never overwrite the parked run's; each rebuilt
+        // feature's budget is re-derived from it. Agent sessions and any repair plan describe rewound work.
+        job.agentSessions = {};
+        if (job.recoveryPhase) (job.recoveryPhaseHistory ??= []).push({ ...job.recoveryPhase, status: "discarded" });
+        job.recoveryPhase = null;
         if (job.planVersion === 2) Object.assign(job, { featureCursor: null, finalBudgetSet: false, repairBudgetLimit: null });
+        else job.repairBudgetLimit = job.attempt + this.maxRepairs;
         await this.store.writeState(job);
         await this.emit(job.id, { type: "job.restarted", state: job.state, message: `Restarting from slice ${sliceId} at ${base.slice(0, 7)}` });
         if (job.planVersion === 2) return await this.buildFeatures(job, signal);

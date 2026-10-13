@@ -89,6 +89,9 @@ dependency fails its gate by design: the plan must put the dependency in a found
   budgets and reviews can be tested without a Factory.
 - Restart stops zeroing `attempt`. It drops the rewound features' records and their `agentSessions`, and clears a
   stale `recoveryPhase`.
+  *Done first (test/restart.test.mjs):* the stale session reproduced (the rebuild resumed the parked build's session).
+  Restart now keeps `attempt`, clears all `agentSessions`, and archives the repair plan as `discarded`, which also
+  starts a fresh correction budget. v1 runs get `repairBudgetLimit = attempt + maxRepairs`, the same budget as before.
 - Migration on read turns `featureCursor` / `phase.cursor` plus `repairBudgetLimit` into a record with the same
   remaining budget.
 - `test/features.test.mjs` asserts on `featureCursor` and `attempt` in 21 places. To keep it unchanged, the record
