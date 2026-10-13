@@ -76,9 +76,10 @@ async function declaredRun(stray) {
     }
     return result;
   } };
-  const factory = new SoloFactory({ store, provider, commandRunner: async () => ({ code: 0, output: "passed" }), deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9982" }) });
+  const logs = [];
+  const factory = new SoloFactory({ store, provider, commandRunner: async ({ logPath }) => { logs.push(path.basename(logPath)); return { code: 0, output: "passed" }; }, deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9982" }) });
   const result = await factory.start(job.id);
-  return { result, events: await store.events(job.id, 1000) };
+  return { result, events: await store.events(job.id, 1000), logs };
 }
 
 test("a feature that stays inside its declared writes completes", async () => {
@@ -95,6 +96,12 @@ test("a build turn that edits a file outside its writes fails its gates and the 
   assert.equal(result.state, "failed");
   assert.equal(result.error.details?.gate, "writes");
   assert.match(result.error.message, /stray\.mjs/);
+});
+
+test("each feature's gate logs keep their own evidence", async () => {
+  const { result, logs } = await declaredRun(false);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.ok(logs.includes("build-SLICE-SKELETON-0.log") && logs.includes("build-SLICE-UI-0.log"), logs.join(", "));
 });
 
 test("a stray file the build agent committed itself still fails the writes gate", async () => {

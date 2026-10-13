@@ -556,7 +556,7 @@ export function featureReviewPrompt(slice, featureFile = ".factory/logs/feature.
 .factory/review-request.json: its obligations and the original requirements it closes. The
 controller already ran build and the feature's own proof commands on this exact candidate (the whole
 test suite runs at final integration, not per feature); their output is in
-.factory/logs/<gate>-<attempt>.log. Do not rerun them. Read the proofs and their logs, and run only
+.factory/logs/<gate>-<feature>-<attempt>.log. Do not rerun them. Read the proofs and their logs, and run only
 targeted checks of real behavior the proofs do not exercise. A requirement with cases passes only when every case is
 "passed" in the request's caseResults (the controller's own record of the tests named [CASE-ID]). For a
 check covered by cases, judge only that each case's test asserts what its case says it asserts — open the

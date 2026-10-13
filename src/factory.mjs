@@ -1314,7 +1314,7 @@ export class SoloFactory {
     try { candidate = await sourceBaseline(this.store, { head: false }); } catch {}
     const scope = `${slice?.id ?? job.recoveryPhase?.cursor?.id ?? job.featureCursor?.id ?? "app"}:${failure.details?.gate ?? failure.code}`;
     job.watch ??= {};
-    job.watch.attempts = [...(job.watch.attempts ?? []), { ...failureSignature(failure, { scope, candidate }), log: failure.details?.gate ? `.factory/logs/${failure.details.gate}-${job.attempt}.log` : null, at: new Date().toISOString() }].slice(-30);
+    job.watch.attempts = [...(job.watch.attempts ?? []), { ...failureSignature(failure, { scope, candidate }), log: failure.details?.gate ? gateLog(job, failure.details.gate) : null, at: new Date().toISOString() }].slice(-30);
     await this.store.writeState(job);
   }
 
@@ -1373,7 +1373,8 @@ export class SoloFactory {
           executable: command[0],
           args: command.slice(1),
           cwd: this.store.appDir(job.id),
-          logPath: path.join(this.store.appDir(job.id), ".factory", "logs", `${gate}-${job.attempt}.log`),
+          logPath: path.join(this.store.appDir(job.id), gateLog(job, gate)),
+          gate,
           env,
           timeoutMs,
           signal,
@@ -1904,6 +1905,8 @@ function obligationCheck(item) {
 
 // The feature a turn or gate serves, for per-feature measurement; null while planning or integrating.
 const featureOf = (job) => job.recoveryPhase?.cursor?.id ?? job.featureCursor?.id ?? null;
+// Per feature: attempts only advance on repairs, so two clean features shared `test-3.log` and the later overwrote the earlier's evidence.
+const gateLog = (job, gate) => `.factory/logs/${[gate, featureOf(job), job.attempt].filter((part) => part != null).join("-")}.log`;
 // Every proof the controller may gate on, so a builder or repair agent can run it before finishing.
 const planProofCommands = (job) => ((job.recoveryPhase?.plan ?? job.approvedPlan?.plan)?.slices ?? [])
   .flatMap((slice) => slice.acceptance ?? []).map((item) => item?.proof?.command).filter(Array.isArray);

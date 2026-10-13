@@ -155,7 +155,7 @@ test("final integration has its own two-repair budget after every feature is ver
 const e2eSkeleton = async (stage, cwd) => {
   if (stage === "feature-plan") await patch(path.join(cwd, ".factory/slices.json"), (plan) => { plan.slices[0].acceptance[0].proof.command = ["node", "e2e/skeleton.mjs"]; });
 };
-const gateOf = (options) => path.basename(options.logPath).replace(/-\d+\.log$/, "");
+const gateOf = (options) => options.gate;
 
 test("a feature's checks run its own proofs without the whole suite; after a repair the failed gate runs first", async () => {
   const order = [];
