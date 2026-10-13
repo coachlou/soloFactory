@@ -60,6 +60,7 @@ test("a blocked feature is set aside, independent features still build, and the 
   await access(path.join(store.appDir(job.id), "extra/extra.test.mjs"));
   const events = await store.events(job.id, 1000);
   assert.ok(events.some((event) => event.type === "slice.set_aside" && event.slice === "SLICE-UI"));
+  await access(path.join(store.appDir(job.id), ".factory/last-failure-1.txt")); // the repair planner's failure record came back too
 
   // Its budget is spent, so the next step is the owner's repair plan, exactly as when a feature blocks the run.
   await assert.rejects(make().resume(job.id), /repair plan/);

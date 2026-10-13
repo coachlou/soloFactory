@@ -742,10 +742,11 @@ export class SoloFactory {
     await this.store.commit(`factory: set aside ${slice.id}`);
     const ref = `refs/factory/set-aside/${slice.id}`;
     await this.store.git("update-ref", ref, "HEAD");
-    await this.store.reset(cursor.base);
+    // State first: a crash after the reset still finds the ref to restore from.
     (job.setAside ??= []).push({ id: slice.id, ref, base: cursor.base, cursor, limit: job.repairBudgetLimit, error: { code: error.code, message: error.message, details: error.details } });
     job.featureCursor = null;
     await this.store.writeState(job);
+    await this.store.reset(cursor.base);
     await this.emit(job.id, { type: "slice.set_aside", state: job.state, slice: slice.id, message: `Feature ${slice.id} set aside (${error.message}); features that don't depend on it continue` });
     return true;
   }
@@ -755,7 +756,7 @@ export class SoloFactory {
   // ponytail: always-writable files (README, package-lock.json) take the set-aside feature's version.
   async parkSetAside(job, waiting) {
     const [entry, ...rest] = job.setAside;
-    const changes = (await this.store.git("diff", "--name-status", "-z", "--no-renames", entry.base, entry.ref, "--", ".", ":(exclude).factory")).split("\0").filter(Boolean);
+    const changes = (await this.store.git("diff", "--name-status", "-z", "--no-renames", entry.base, entry.ref, "--", ".", ":(exclude).factory/review-request.json", ":(exclude).factory/review-result.json")).split("\0").filter(Boolean);
     for (let n = 0; n < changes.length; n += 2) {
       if (changes[n] === "D") await rm(path.join(this.store.appDir(job.id), changes[n + 1]), { force: true });
       else await this.store.git("checkout", entry.ref, "--", changes[n + 1]);
