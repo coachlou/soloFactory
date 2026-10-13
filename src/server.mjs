@@ -592,7 +592,16 @@ export async function createSoloFactoryServer(options = {}) {
       await Promise.all(live.map((run) => run.promise));
       await draining;
       await Promise.all([...factories.values()].map((factory) => factory.shutdown()));
-      await new Promise((resolve) => server.close(resolve));
+      // server.close() waits for every open request to finish, so one stalled request (a
+      // browser tab mid-fetch) kept the process alive after SIGTERM. Give in-flight requests a
+      // short grace period, then drop whatever connections remain.
+      const closed = new Promise((resolve) => server.close(resolve));
+      server.closeIdleConnections();
+      let timer;
+      await Promise.race([closed, new Promise((resolve) => (timer = setTimeout(resolve, 1000)))]);
+      clearTimeout(timer);
+      server.closeAllConnections();
+      await closed;
     },
   };
 }
@@ -701,6 +710,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log(`SoloFactory is ready at http://${host}:${port}`);
   });
   const stop = async () => {
+    // Backstop: close() still waits, unbounded, on runs that ignore cancellation. Never outlive a signal by more than 10s.
+    setTimeout(() => {
+      console.error("Shutdown took over 10s; exiting anyway.");
+      process.exit(1);
+    }, 10_000).unref();
     await app.close();
     process.exit(0);
   };

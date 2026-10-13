@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, stat, utimes, writeFile } from "node:fs/promi
 import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import net from "node:net";
 import { createSoloFactoryServer } from "../src/server.mjs";
 import { assertPlanReviewable } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
@@ -791,4 +792,27 @@ test("HTTP: owner cancellation is final; plan, resume and start are refused and 
   await assert.rejects(factory.resume(job.id));
   await assert.rejects(factory.startRecovery(job.id, "anything"));
   assert.equal(await stateFile(app, job.id), before, "a refused controller action leaves the saved run unchanged");
+});
+
+test("close() finishes promptly while a browser holds keep-alive and stalled requests open", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-close-"));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true });
+  await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  const port = app.server.address().port;
+  // The run page's live updates: a keep-alive connection left idle after a poll.
+  const poller = net.connect(port, "127.0.0.1");
+  poller.on("error", () => {});
+  poller.write("GET /api/health HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n\r\n");
+  await new Promise((resolve) => poller.once("data", resolve));
+  // A request mid-flight that never completes its body; server.close() alone waits on it forever.
+  const stalled = net.connect(port, "127.0.0.1");
+  stalled.on("error", () => {});
+  stalled.write("POST /api/projects HTTP/1.1\r\nHost: x\r\nContent-Length: 100\r\n\r\n{");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  const started = Date.now();
+  await app.close();
+  assert.ok(Date.now() - started < 3000, `close() took ${Date.now() - started}ms`);
+  poller.destroy();
+  stalled.destroy();
 });
