@@ -140,6 +140,14 @@ set-aside list). Ceilings:
 
 The feature-record module stays deferred: set-aside reuses the cursor as its record.
 
+## Release QA smoke 13 (2026-10-13, run 2026-10-13-f959e599, HEAD a9e528c)
+
+Habit Ledger brief, same as smokes 9–12. Completed with no repairs: 920 s wall (smoke 11: 2110 s), feature builds
+plus reviews 560 s (smoke 11: 1478 s), $6.63 in total, only `claude-opus-5-5` in every turn. Final review passed
+with no findings. Permission denials: 24 (smoke 11: 46). All are compound shell commands (`cd "<project>" && ...`,
+pipes, `for` loops, heredoc writes, python edits) that a prefix allow-list cannot match. Not exercised: repairs,
+bug items, set-aside (nothing failed), and step 4's one-job-vs-follow-ons measurement.
+
 ## Open questions (decided 2026-10-12, Lou delegated)
 
 - Trigger: release QA stays once per run, before deploy. Every-N-features waits for step 8's record.
