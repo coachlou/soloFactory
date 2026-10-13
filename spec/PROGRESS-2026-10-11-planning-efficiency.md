@@ -1,18 +1,17 @@
 # Progress: planning efficiency and the integration-rerun regression
 
-Working file for the current stretch. Read this first after a `/clear`.
+Working file for the current stretch. After a `/clear`, read the standing constraints, then jump to the last section (**CURRENT STATE — 2026-10-13 close**). Everything between is history.
 
 ## Standing constraints (do not relax)
-- Never touch the photo-library app, run 2026-10-07-4f2dd1cf, the :4173 worker or `~/.solofactory`; Codex owns them.
+- Never touch the photo-library app, run 2026-10-07-4f2dd1cf, the :4173 worker or `~/.solofactory` without a handoff; Codex owns them (again, since 2026-10-13).
 - Never approve recovery plans (plan 42d97519 stays unapproved). Never auto-approve.
 - Push only with permission; never merge or open a PR. Stage specific files. Commit messages say why and end with the Co-Authored-By line from the session reminder.
 - `wip/feature-slice-recovery` is not merged/released until a real-provider recovery smoke test passes.
-- :4205 runs from this worktree at f31bcfc; do not restart it while smoke run 2026-10-11-a943a5da is active (watcher bw161apqi waits for its repair plan to reach ready; record success, do NOT approve).
 - Keep src/ test-green and committed.
 
 ## Done this stretch
 - 5261167 measurement: `src/measure.mjs`, `scripts/measure-run.mjs`, telemetry `measurement`. Smoke run a943a5da: wall 5400s, agent 5202s, controller gates 15.7s, planning 2451s over 10 turns.
-- 5959577 planning prompts: shared `PLAN_CHECKLIST`, `CONTROLLER_FACTS`, `ALL_BLOCKERS` in src/prompts.mjs, used by planner/reviewer/corrector and repair-plan prompts; `plan.blocked` events carry `blockers` (full list). Pushed to origin? NO (5959577 is local only; 5261167 was pushed).
+- 5959577 planning prompts: shared `PLAN_CHECKLIST`, `CONTROLLER_FACTS`, `ALL_BLOCKERS` in src/prompts.mjs, used by planner/reviewer/corrector and repair-plan prompts; `plan.blocked` events carry `blockers` (full list). Both pushed.
 
 ## Findings behind the plan
 - The smoke brief fixed delivery order; the specification turn turned that into ACCEPTANCE gates 43–45 asserting a feature's *absence* ("FAIL: GET /api/summary -> 404 is the expected state") and gate 47 (`git status --porcelain`). Those cost one planning round, three F1 repairs and an F1 job failure.
@@ -23,14 +22,14 @@ Working file for the current stretch. Read this first after a `/clear`.
 1. **[done, committed] Superseded cases at integration.** Fixture test in test/features.test.mjs ("a later feature's case supersedes an earlier stage obligation…") reproduced the `missing` failure; fix: `supersedes` in `FEATURE_PLAN_SCHEMA`, `featureProofs` skips obligations retired by a built feature's case, `validateFeaturePlan` rejects superseding a same-or-later feature's obligation (unknown ids left to assertConsolidation). Suite 276/276.
 2. **[done, committed]** Spec prompt: delivery order → `dependsOn`; never acceptance items asserting absence or repository state (both modes, follow-on too).
 3. **[done, committed]** Feature reviewer prompt: cased checks judged by their tests only; uncased directly; earlier features not reread/rerun. Suite 278/278.
-4. After smoke run a943a5da ends: restart :4205 on HEAD, run one smoke, `node scripts/measure-run.mjs <run>`; compare planning turns (target ≤4) and review vs implement time. Only then decide on "contract cards" (per-feature interface/ownership cards so reviewers judge one feature in isolation).
+4. **[done; see smokes 90b8b32e–07631040 below; contract cards judged unnecessary]** After smoke run a943a5da ends: restart :4205 on HEAD, run one smoke, `node scripts/measure-run.mjs <run>`; compare planning turns (target ≤4) and review vs implement time. Only then decide on "contract cards" (per-feature interface/ownership cards so reviewers judge one feature in isolation).
 - Open, not requested: Codex amendment items 3–4 (shadow-mode gate selection); Codex asked in spec/INBOX-codex.md to run measure-run on the photo-library run.
 
 ## Smoke run a943a5da — status at 17:16Z (checked 2026-10-11)
 - F1–F3 all verified (F1 after 3 repairs + 1 job failure; F2, F3 first time). Final integration: test, build and the F1 seed proof passed.
 - My planter task (byuopkqck) wrote the smoke fault into `scripts/populated-summary.mjs` at 17:16:05Z, inside the 0.7s integration-gate window, so the controller's stale-evidence check fired: `review_rejected` "Integration gates changed the application source; proof evidence is stale." Correct controller behaviour; wrong plant timing (should plant *after* integration passes, or before the F3 review commit).
 - 19s later a prepare-plan request hit "Repair planning requires a matching review with unfinished checks" (no failed review exists). **Fixed (next commit):** `planRecovery` precondition failures go through `fail()` and overwrite the parked run's error (`review_rejected` → `unexpected_error`); an inapplicable operator request should leave the run's error alone. Now refused with `recovery_not_applicable` and the run is left as it was.
-- Fault is still uncommitted in the app tree; :4205 runs with SOLOFACTORY_MAX_REPAIRS=0. `nextAction` = resume. Resuming would rerun integration with the fault → `quality_gate_failed` → prepare-plan is then valid → plan reaches ready (do NOT approve). Resume was denied by the auto-mode classifier; needs Lou.
+- Fault is still uncommitted in the app tree; :4205 runs with SOLOFACTORY_MAX_REPAIRS=0. `nextAction` = resume. Resuming would rerun integration with the fault → `quality_gate_failed` → prepare-plan is then valid → plan reaches ready (do NOT approve). Resume was denied by the auto-mode classifier; Lou resumed it (next section).
 
 ## Smoke run a943a5da — completed 19:50Z (baseline on f31bcfc prompts)
 - Resumed by Lou at 19:44Z; integration passed (the planted `throw` sat after `process.exit`, so it was dead code); final review passed (it noted the dead throw); deployed and healthy. First real-provider run to finish F1–F3 plus final integration. The recovery path was NOT exercised; the release gate is still open.
@@ -46,11 +45,11 @@ Working file for the current stretch. Read this first after a `/clear`.
 A full read of spec/, PROGRESS.md, SPEC.md, README.md and .aai/ found 26 open items. Disposition:
 - **Done now (suite 282/282):** 58702bc fixes the idle-deadline flake. 3399e71 adds a factory_busy test. 01a7792 adds a test for shutdown during an amendment review. ac8f2e2 adds a ready-plan help packet. c60c865 limits legacy-run diagnostics to the failing turn's log. e8d1ed7 adds a controller-level Claude-silence test. The PROGRESS.md BUG 1/2 note now records the fix in 7579594.
 - **Closed as limits:** Duplicate detection for legacy amendment phases can't improve, because earlier plans were overwritten on disk and only photo-library run 42d97519 is affected (Codex-owned). Legacy runs have no recorded pid, and that data does not exist. Continuation through start() uses the same invoke() wiring.
-- **In progress:** The release-gate recovery smoke is run 90b8b32e, with measurements to compare against the baseline. Real-provider checks of case tables, Claude task profiles and the Codex token line will be observed during it.
-- **Needs Lou:** installing the current build; the proof.tests evidence check versus the reviewer-only fallback for the photo candidate; housekeeping of stale smoke configs and branches (token-telemetry, remote claude/*); Node 24 verification (not installed).
+- **Superseded:** The release-gate recovery smoke was planned as run 90b8b32e (it failed planning; 3a3f59e8 reached ready instead), with measurements to compare against the baseline. Real-provider checks of case tables, Claude task profiles and the Codex token line will be observed during it.
+- **Needs Lou:** ~~installing the current build~~ (done: 2639d59 installed on :4173 2026-10-13); the proof.tests evidence check versus the reviewer-only fallback for the photo candidate; housekeeping of stale smoke configs and branches (token-telemetry, remote claude/*); Node 24 verification (not installed).
 - **Deferred by design:** per-stage Codex model routing (M; needs a cost check on a live run); per-proof gate timeouts (only once one global limit proves too blunt); per-case staleness binding; Jev backlog items 3–6; grandchild process tracking.
 - **Codex-owned:** shadow-mode test selection (amendment items 3–4); false-completion investigation (item 5); measure-run on the photo-library run.
-- **Browser check of the amendment file input:** a source-level check only; run it on a ready plan once the smoke reaches one.
+- **Browser check of the amendment file input:** done on 3a3f59e8's ready plan (see that section).
 
 ## Smoke run 90b8b32e — failed in planning 20:26Z
 - `plan_blocked` after 2 corrections; no feature built, no gates run. nextAction = resume ("Resume plan review"); not resumed (Lou's call).
@@ -109,7 +108,7 @@ Next steps:
 - Planning target ≤4 still missed; 35d732a (re-review scoping) is untested on a real run.
 - Open for Lou: merge/release decision for wip/feature-slice-recovery (Claude never merges); whether an amendment-path ready counts, or a run with the default budget should reach ready through automatic corrections.
 
-## CURRENT STATE — read this first after /clear (03:15Z 2026-10-12)
+## (Superseded) CURRENT STATE 03:15Z 2026-10-12 — see the last section
 - Recovery smoke DONE: run 3a3f59e8 repair plan c094c539 is ready, NOT approved. Never call /recovery-start on it.
 - :4205 still runs from this worktree (35d732a code, SOLOFACTORY_MAX_REPAIRS=0). Leave it or stop it (pid via `lsof -nP -iTCP:4205 -sTCP:LISTEN`); restart with the default budget before any new smoke.
 - Waiting on Lou: (1) does an amendment-path ready satisfy the release gate, or run one more smoke with default budget that reaches ready via automatic corrections; (2) merge/release of wip/feature-slice-recovery (Claude never merges); (3) push of commits after a8b442b.
@@ -130,17 +129,19 @@ Next steps:
 - Feature reviews are now ~20–35% of implement time (were ≈100%). fa408cd/35d732a prompts plus opus/medium; model change confounds attribution. "Contract cards" not needed on this evidence.
 - Recovery path not exercised (no failure, no plant: smoke 8 already covered it).
 
-## CURRENT STATE (05:30Z 2026-10-12) — supersedes the 03:15Z section above
+## (Superseded) CURRENT STATE 05:30Z 2026-10-12 — open items carried into the last section
 - Smoke 9 (07631040) done: planning 6 turns (scoped re-review approved in one round), completed with zero repairs, wall 3289s. ≤4 target still missed by 2 turns; the stopping rule did not trigger, but the remaining gap is first-draft coverage, not reviewer drift. Decision: stop prompt iteration here; further gains need a first-draft change (e.g. a planner self-check against PLAN_CHECKLIST before submitting), which is Lou's call on cost vs benefit.
 - f8596e8 UI nit fixed and browser-verified on 3a3f59e8's ready plan (replace-plan note + packet now inside the "Advanced" disclosure). :4205 active project is smoke-cases-8 for that check; nothing is running.
 - :4205 still running (opus reasoning env, default budget). Plans c094c539 and 42d97519 stay unapproved.
 - Waiting on Lou: release-gate interpretation (amendment-path ready), merge of wip/feature-slice-recovery, push of commits after a8b442b, whether to pursue the ≤4 target further.
 
-## CURRENT STATE — 2026-10-13 close (supersedes the 03:15Z 2026-10-12 section above)
+## CURRENT STATE — 2026-10-13 close (the only current section; supersedes both 2026-10-12 sections)
 - The AFK delegation of 2026-10-12 is over; Lou is back. The usual limits apply: no merge, and push only when Lou asks.
 - Pushed `wip/feature-slice-recovery` at `08066e1` on Lou's ask. It includes ec4ce44 (repairs auto-start after the independent review passes; corrections continue while blockers shrink, capped at 3× maxRepairs), dcc9d2d (a feature over 60K is read from `.factory/logs/feature.json`), 2639d59 (BUILD_ID comes from `app/VERSION` in an installed copy) and 91f7246 (run-screen telemetry).
 - Photo-library run 2026-10-07-4f2dd1cf on :4173 runs factory 2639d59. **Codex took it back on 2026-10-13** (provider switched to Codex; see its receipt in spec/INBOX-codex.md). Claude doesn't touch it without a new handoff.
-- Release gate: this run is the real-provider recovery smoke. Merge waits on Lou accepting it.
+- Waiting on Lou:
+  1. Release gate: does the photo-library run (the real-provider recovery smoke) and/or 3a3f59e8's amendment-path ready satisfy it? Merge of `wip/feature-slice-recovery` waits on that; Claude never merges. Plans c094c539 and 42d97519 stay unapproved.
+  2. Whether to pursue the ≤4 planning-turn target further (smoke 9 reached 6; the remaining lever is first-draft quality, e.g. a planner self-check against PLAN_CHECKLIST).
 - Open dev work:
   1. Prompts that still paste unbounded content inline: the final whole-app review, plan-correction prompts (src/feature-recovery.mjs ~102, src/prompts.mjs ~503) and interview JSON (src/server.mjs ~295, src/interview.mjs ~180). Move them to files only if one hits `prompt_too_large`, or proactively if Lou asks.
   2. Flaky: one full `npm test` had test/e2e.test.mjs hang about 56 min after all its tests passed ("Promise resolution is still pending"). Alone it passes in 26s. If it recurs, look for a leaked server or timer.
