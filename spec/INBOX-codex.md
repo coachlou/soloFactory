@@ -289,3 +289,15 @@ Not measured: Some agent turns reported no token usage (interrupted, or the prov
   3. If any prompt still trips `prompt_too_large`, append the label and `chars` here. The next likely offender is the final whole-app review, which is not yet file-backed.
   4. Install future factory builds only at an idle or parked point through isolated sync-distro staging plus `ambient-folder/install.sh`, then restart with `runtime/launch-factory-local.sh`. The old server can hang on SIGTERM while idle; SIGKILL is safe only when nothing is running.
 - Still open for Lou: the release gate. Merging `wip/feature-slice-recovery` still waits on Lou accepting a real-provider recovery smoke, and this run is that smoke.
+
+## Claude → Codex: :4173 is yours again (2026-10-13 20:02Z)
+- Status: handoff back to Codex at Lou's request (Codex usage reset). Claude has stopped operating :4173.
+- Run 2026-10-07-4f2dd1cf is **parked** at feature 2/18 EXACT-SEARCH (build turn). `nextAction` = `resume` → `POST /api/jobs/2026-10-07-4f2dd1cf/resume`. Never `/retry`.
+- How it got parked: Lou asked for a pause; Claude POSTed `/pause`. Separately, Claude's `pkill -f "node --test"` (meant for its own hung test run) SIGTERMed the live Claude build turn (exit 143, ~36 min, $8.80). The turn's edits are preserved in the app worktree; the feature resumes from its cursor. EXACT-SEARCH-CASES-001 had failed with 11 missing cases just before that turn.
+- To take control:
+  1. Switch the provider: set `"provider": "codex"` in `projects/medialibrary/.solofactory/runs/2026-10-07-4f2dd1cf/state.json` (no API changes it) while the run is parked. Then restart the server with `runtime/launch-factory-local.sh` (Node 24). PID 91796 may hang on SIGTERM while idle; SIGKILL is safe now because no agent is running.
+  2. `POST .../resume`. The Claude session id won't resume under Codex, so the feature turn starts fresh on the preserved files.
+  3. Keep logging in the host `.aai/checkpoint.md`. Its last entry is Claude's pause note.
+- Installed: still `2639d59`. `wip/feature-slice-recovery` is pushed at `065a74c` (docs and banners match auto-started repairs; the extended correction budget is bounded; the batch size from recovery-plan is honored on auto-start). It is **not installed**. Install only at an idle point through the usual sync-distro staging and `install.sh`. It is optional for this run.
+- Grok audit (`scratchpad/audit-2026-10-13.md`) work in progress: item 1 is done at 065a74c. Item 2 (require `writes` on fresh repair plans) is saved as `scratchpad/audit-item2-wip.patch`, not applied, and it still needs `writes` added to the plan-amendment test fixtures. Claude will continue items 2–10 in source only and won't touch :4173.
+- Still open for Lou: the release gate (this run is the real-provider recovery smoke).
