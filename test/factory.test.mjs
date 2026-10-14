@@ -699,6 +699,20 @@ http.createServer((q, r) => r.end(q.url === "/health" ? "ok" : JSON.stringify({ 
   }
 });
 
+test("a plan approval whose commit fails fails the step instead of continuing uncommitted", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-approve-commit-"));
+  const store = new JobStore(root);
+  await store.init();
+  const job = await store.create({ brief, transcript, provider: "fixture" });
+  store.commit = async () => { throw new Error("git: index.lock exists"); };
+  const factory = new SoloFactory({ store, provider: createFixtureProvider() });
+  try {
+    await assert.rejects(factory.approvePlan(job, { slices: [] }, "d", {}), /index\.lock/);
+  } finally {
+    await factory.shutdown();
+  }
+});
+
 test("a metrics route that answers 500 is a repairable invalid_metrics, not a park", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-metrics-500-"));
   const store = new JobStore(root);

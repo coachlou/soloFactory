@@ -681,8 +681,9 @@ export class SoloFactory {
     job.sliceIndex = 0;
     await writeFile(path.join(this.store.jobDir(job.id), "approved-plan.json"), `${JSON.stringify(job.approvedPlan, null, 2)}\n`);
     await this.store.writeState(job);
-    // Committed so restart-from-slice resets and resumes always see the approved plan.
-    await this.commit(job, "factory: feature plan approved");
+    // Committed so restart-from-slice resets and resumes always see the approved plan. Not best effort:
+    // without this commit a restart's hard reset deletes the plan and every Resume parks on stale_plan.
+    if (await this.store.commit("factory: feature plan approved")) await this.emit(job.id, { type: "git.committed", state: job.state, message: "factory: feature plan approved" });
     await this.emit(job.id, { type: "plan.approved", state: job.state, message: `Feature plan approved: ${plan.slices.length} feature${plan.slices.length === 1 ? "" : "s"}` });
     return job;
   }
