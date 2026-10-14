@@ -6,7 +6,7 @@ import path from 'node:path';
 import { JobStore } from '../src/store.mjs';
 import { SoloFactory, continuationAction, withContinuation } from '../src/factory.mjs';
 import { createFixtureProvider } from '../src/fixture-provider.mjs';
-import { digest, keepCorrecting, sourceBaseline, validateRecoveryPlan, validateRecoveryApproval } from '../src/feature-recovery.mjs';
+import { digest, keepCorrecting, repairPlanPrompt, sourceBaseline, validateRecoveryPlan, validateRecoveryApproval } from '../src/feature-recovery.mjs';
 
 const request = { id: 'request', contractDigest: 'frozen', checks: [{ id: 'MH-3' }, { id: 'SC-2' }] };
 const plan = () => ({ version: 1, requestId: 'request', contractDigest: 'frozen', slices: [
@@ -711,4 +711,14 @@ test('a repair-plan correction patches only what blockers name, and the re-revie
   const correction = env.prompts[`recovery-correction-${reqId}-1`];
   assert.match(correction, /byte for byte/);
   assert.doesNotMatch(correction, /every source it lists/);
+});
+
+// Run 4f2dd1cf's retried repair plan came back as 30 features, 28 chained one-to-one. The prompt asked for
+// "small dependency-ordered features" and told the planner to split, so it chained them to satisfy the writes rule.
+test('the repair-plan prompt asks for few, mostly independent features and no chaining to order writes', () => {
+  const prompt = repairPlanPrompt('plan.json', 'request.json');
+  assert.doesNotMatch(prompt, /small dependency-ordered features/);
+  assert.match(prompt, /fewest features/);
+  assert.match(prompt, /most of them independent/);
+  assert.match(prompt, /never to order two features that write different files/);
 });
