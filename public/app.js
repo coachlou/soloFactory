@@ -889,11 +889,11 @@ function renderStop(stops, selected, showHealth, health) {
     about.textContent = "Watches the agent's streamed tool use, the commands it runs and the controller's events.";
     const quiet = lastActivityAge(job);
     status.textContent = `${health.text}${job.supervision ? ` · supervision: ${job.supervision.status}` : ""}${quiet != null ? ` · quiet ${formatSpan(quiet)}` : ""} · green under ${QUIET_WARN_MS / 60_000} minutes quiet, amber to ${QUIET_BAD_MS / 60_000}, red past that or when the run stops.`;
-    $("#stop").replaceChildren(title, about, status);
+    patchChildren($("#stop"), [title, about, status]);
     return;
   }
   const stop = stops[selected];
-  if (!stop) { $("#stop").replaceChildren(); return; }
+  if (!stop) { patchChildren($("#stop"), []); return; }
   title.textContent = `${selected + 1} · ${stop.id}`;
   about.textContent = stop.title;
   const tone = document.createElement("span");
@@ -912,7 +912,7 @@ function renderStop(stops, selected, showHealth, health) {
     tone.className = "muted"; tone.textContent = "Queued";
     status.append(tone, waiting.length ? ` · waits on ${waiting.join(", ")}` : " · ready when the line reaches it");
   }
-  $("#stop").replaceChildren(title, about, status);
+  patchChildren($("#stop"), [title, about, status]);
 }
 
 function renderAnswers(stops, live, features) {
@@ -937,10 +937,22 @@ function renderAnswers(stops, live, features) {
     : job.recoveryPhase?.status === "ready" ? ["warn", "Yes: review and approve the repair plan above."]
       : parked ? ["bad", "Yes: the run stopped; see the recovery checkpoint above."]
         : ["ok", "No."];
-  $("#qa").replaceChildren(...[["Moving?", moving], ["Healthy?", healthy], ["How far?", far], ["Needs you?", needs]].flatMap(([question, [tone, answer]]) => [
+  patchChildren($("#qa"), [["Moving?", moving], ["Healthy?", healthy], ["How far?", far], ["Needs you?", needs]].flatMap(([question, [tone, answer]]) => [
     Object.assign(document.createElement("dt"), { textContent: question }),
     Object.assign(document.createElement("dd"), { textContent: answer, className: tone }),
   ]));
+}
+
+// Polling redraws every 1.5s. Replacing nodes wholesale drops the browser's scroll anchor and the page
+// jumps, so keep each existing element and change only the text or class that differs.
+function patchChildren(parent, nodes) {
+  const old = [...parent.children];
+  if (old.length !== nodes.length || old.some((node, index) => node.tagName !== nodes[index].tagName)) { parent.replaceChildren(...nodes); return; }
+  old.forEach((node, index) => {
+    const next = nodes[index];
+    if (node.className !== next.className) node.className = next.className;
+    if (node.innerHTML !== next.innerHTML) node.replaceChildren(...next.childNodes);
+  });
 }
 
 function renderStream() {
@@ -956,6 +968,10 @@ function renderStream() {
   for (const button of $("#chips").children) button.setAttribute("aria-pressed", String(button.dataset.kind === state.mapFilter));
   const seen = state.streamSeen?.job === state.job.id ? state.streamSeen.at : null;
   // ponytail: last 300 rows; a full long run has thousands of tool events. Page back if the owner needs older ones.
+  // Rebuild only when the rows would differ; an unchanged rebuild also resets the list's own scroll.
+  const key = `${state.job.id}|${state.mapFilter}|${state.events.length}|${state.events.at(-1)?.at}`;
+  if ($("#events").dataset.key === key) return;
+  $("#events").dataset.key = key;
   const rows = state.events.filter((entry) => state.mapFilter === "all" || eventKind(entry) === state.mapFilter).slice(-300).reverse();
   $("#events").replaceChildren(...rows.map((entry) => {
     const kind = eventKind(entry), failed = /failed|error/.test(entry.type);
