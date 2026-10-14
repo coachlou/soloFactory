@@ -264,7 +264,7 @@ export const CASE_SURFACES = ["api", "browser", "cli", "unit", "integration"];
 // A requirement that consolidates overlapping obligations keeps each one as an explicit case: its own
 // surface, action, field/boundary and expected result (failure condition included). Together the cases
 // cite exactly the requirement's checks and sources, so consolidation cannot drop a citation.
-function validateCases(item, { registry, sources, ids, claimed }) {
+function validateCases(item, { registry: known, sources, ids, claimed }) {
   const where = `Requirement ${item.id}`;
   if (!Array.isArray(item.cases) || !item.cases.length) throw new Error(`${where} has a malformed cases table; omit it or list at least one case.`);
   const refs = new Set();
@@ -375,12 +375,14 @@ export function caseResults(cases, events) {
 const CONTROLLER_TOOLCHAIN_RE = /^(node(\.js)?|npm)(\s+cli)?(\s*\((?![^()]*\b(version|lts|latest|requires?|required|minimum|newer|older|least)\b)[^()\d]*\))?$/i;
 
 // ownership: also require test ownership across features (assertProofOwnership); off for re-validating approved plans.
-export function validateFeaturePlan(raw, { jobId, contractDigest, checks, sources = null, ownership = false }) {
+export function validateFeaturePlan(raw, { jobId, contractDigest, checks, sources = null, ownership = false, closedChecks = [] }) {
   if (!raw || typeof raw !== "object" || raw.version !== 2) throw new Error("slices.json must be a version 2 feature plan.");
   if (raw.jobId !== jobId || raw.contractDigest !== contractDigest) throw new Error("Feature plan does not match this run and its frozen contract.");
   if (!Array.isArray(raw.slices) || raw.slices.length === 0) throw new Error("slices.json must contain at least one feature.");
   if (raw.slices.length > MAX_FEATURES) throw new Error(`Feature plan has ${raw.slices.length} features; the limit is ${MAX_FEATURES}. Park and split the brief rather than merging or dropping scope.`);
   const registry = new Map(checks.map((check) => [check.id, check.text]));
+  // Built features closed these; obligations may still cite them, but they need no new owner.
+  const known = new Map([...closedChecks.map((check) => [check.id, check.text]), ...registry]);
   if (!registry.size) throw new Error("Feature planning requires at least one original requirement or acceptance scenario.");
 
   for (const item of raw.compatibility ?? []) {
@@ -424,7 +426,7 @@ export function validateFeaturePlan(raw, { jobId, contractDigest, checks, source
       const key = item.behavior.trim().toLowerCase();
       if (behaviors.has(key)) throw new Error(`Features ${behaviors.get(key)} and ${slice.id} share the behavior "${item.behavior.slice(0, 90)}". Merge or redraw the boundary.`);
       behaviors.set(key, slice.id);
-      if (!Array.isArray(item.refs) || item.refs.some((ref) => !registry.has(ref))) throw new Error(`Obligation ${item.id} references unknown original checks.`);
+      if (!Array.isArray(item.refs) || item.refs.some((ref) => !known.has(ref))) throw new Error(`Obligation ${item.id} references unknown original checks.`);
       const command = item.proof?.command;
       try { assertAllowedCommand(command); if (command.length < 2) throw new Error("needs arguments"); }
       catch (error) { throw new Error(`Obligation ${item.id} needs an executable proof command as an npm/node/npx argument array (${error.message})`); }

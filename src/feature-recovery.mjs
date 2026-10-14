@@ -48,7 +48,7 @@ export function validateRecoveryPlan(raw, request, { fresh = false } = {}) {
     const built = new Set(request.completed ?? []);
     raw = { ...raw, slices: raw.slices?.map(slice => Array.isArray(slice?.dependsOn) ? { ...slice, dependsOn: slice.dependsOn.filter(dep => !built.has(dep)) } : slice) };
     // ponytail: older kept features lack writes, so proof ownership waits until all features declare them.
-    return { ...validateFeaturePlan(raw, { jobId: request.jobId, contractDigest: request.contractDigest, checks: request.checks, sources: request.sources.map(item => item.path), ownership: fresh && !keep.some(slice => slice.writes === undefined) }), requestId: request.id };
+    return { ...validateFeaturePlan(raw, { jobId: request.jobId, contractDigest: request.contractDigest, checks: request.checks, closedChecks: request.closedChecks, sources: request.sources.map(item => item.path), ownership: fresh && !keep.some(slice => slice.writes === undefined) }), requestId: request.id };
   }
   if (raw?.version !== 1 || raw.requestId !== request.id || raw.contractDigest !== request.contractDigest) throw new Error('Recovery plan does not match its request and frozen contract.');
   const normalized = validateSlicePlan(raw);
@@ -306,6 +306,7 @@ async function replanForGate(factory, job, signal, guidance, { prior, executed }
     const slice = plan.slices[failed];
     request.scope = { feature: slice.id, checks: [...open.filter(check => sliceChecks(slice).includes(check.id)).map(check => check.id), `GATE-${gate}`] };
     request.keep = plan.slices.slice(failed + 1).filter(slice => !done.includes(slice.id));
+    request.closedChecks = prior.request.checks.filter(check => closed.has(check.id));
   }
   return draftRepairPlan(factory, job, signal, request, prior);
 }

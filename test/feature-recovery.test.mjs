@@ -80,6 +80,19 @@ test('an approved kept copy replaces a planner slice with the same id', () => {
   assert.deepEqual(merged.slices[1], keep[0]);
 });
 
+test('a kept feature may cite a check that built features already closed, but a new plan may not close it', () => {
+  const p = v2Plan(); const keep = p.slices.splice(1);
+  p.slices[0].writes = ['src/browse.js'];
+  p.slices[0].acceptance[0].proof.command = ['node', '--test', 'test/browse.test.mjs'];
+  keep[0].acceptance[0].refs = ['SC-2', 'MH-8'];
+  const scoped = { ...v2Request, keep };
+  assert.throws(() => validateRecoveryPlan(p, scoped, { fresh: true }), /unknown original checks/);
+  const closedChecks = [{ id: 'MH-8', text: 'Already built' }];
+  assert.equal(validateRecoveryPlan(p, { ...scoped, closedChecks }, { fresh: true }).slices.length, 2);
+  p.slices[0].closes.push('MH-8');
+  assert.throws(() => validateRecoveryPlan(p, { ...scoped, closedChecks }, { fresh: true }), /unknown check MH-8/);
+});
+
 async function setup(t, mutate = async () => {}, { uploads = {}, alreadyPasses = false, autoStart = false } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'solo-feature-recovery-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
