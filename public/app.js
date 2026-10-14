@@ -687,16 +687,6 @@ function renderRecovery() {
   if (incident && PARKED.includes(state.job.state)) list("Incident", [`Observed: ${incident.observed}`, `Uncertain: ${incident.uncertain}`, `Tried: ${incident.tried}`, `Preserved: ${incident.preserved}`, `Next: ${state.job.nextAction?.label ?? state.job.nextAction?.reason ?? incident.nextAction}`, ...incident.logs.map((log) => `Log: ${log}`)]);
   if (phase?.status === "plan_failed") list("Plan review blockers", phase.planBlockers ?? []);
   if (phase?.plan) {
-    const status = (slice) => phase.done.includes(slice.id) ? "verified" : phase.current === slice.id ? "current" : "queued";
-    const strip = document.createElement("div"); strip.className = "recovery-strip"; strip.style.gridTemplateColumns = `repeat(${phase.plan.slices.length}, minmax(0, 1fr))`;
-    strip.append(...phase.plan.slices.map((slice, index) => Object.assign(document.createElement("i"), { className: status(slice), title: `${index + 1}. ${slice.id} — ${slice.title}` })));
-    features.append(strip);
-    const currentIndex = phase.plan.slices.findIndex((slice) => slice.id === phase.current);
-    if (currentIndex >= 0) {
-      const now = document.createElement("p"); now.className = "recovery-now";
-      now.append(Object.assign(document.createElement("strong"), { textContent: `Now · ${currentIndex + 1}` }), ` ${phase.current} — ${phase.plan.slices[currentIndex].title}`);
-      features.append(now);
-    }
     list("Remaining gaps", (phase.request?.checks ?? []).map((check) => `${check.id}: ${check.text}${check.reason ? ` — ${check.reason}` : ""}`), true);
     // Mirrors pendingChecks in src/wbs.mjs: a check is not verified with its feature while any pending
     // obligation in this plan, or outstanding from an earlier one, still supports it.

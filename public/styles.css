@@ -128,12 +128,6 @@ h2 { font: 500 27px/1.08 var(--serif); margin: 0 0 14px; }
 .recovery-meta strong, .recovery-meta span { display: block; }
 .recovery-meta strong { color: var(--orange); margin-bottom: 5px; font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
 #feature-recovery-controls { grid-column: 1 / -1; min-width: 0; }
-.recovery-strip { display: grid; gap: 3px; margin: 0 0 10px; }
-.recovery-strip i { height: 10px; border-radius: 2px; background: rgba(255,255,255,.14); }
-.recovery-strip i.verified { background: var(--green, #6fcf97); }
-.recovery-strip i.current { background: var(--orange); }
-.recovery-now { margin: 0 0 12px; font-size: 13px; }
-.recovery-now strong { color: var(--orange); }
 .recovery-fold { border-top: 1px solid var(--line); padding: 8px 0; }
 .recovery-fold:last-of-type { border-bottom: 1px solid var(--line); }
 .recovery-fold summary { cursor: pointer; font-size: 13px; }
