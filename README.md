@@ -138,7 +138,7 @@ file never leaves your machine; `GET /api/errors?limit=50` returns the latest en
 
 ## Operational boundaries
 
-- SoloFactory binds to `127.0.0.1` by default (`HOST` overrides) and runs one active build at a time unless `SOLOFACTORY_MAX_ACTIVE_RUNS` is raised (runs in one project always go one after another).
+- SoloFactory binds to `127.0.0.1` by default (`HOST` may name another loopback address; anything else is refused, since the API has no auth) and runs one active build at a time unless `SOLOFACTORY_MAX_ACTIVE_RUNS` is raised (runs in one project always go one after another).
 - Generated code runs with your local OS permissions. The command allowlist prevents shell
   interpolation but is not a hostile-code sandbox.
 - Never place credentials or production customer records in the interview.
