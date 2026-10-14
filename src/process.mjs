@@ -52,7 +52,8 @@ export async function runProcess({
     cwd,
     env: subscriptionEnvironment(env),
     stdio: ["pipe", "pipe", "pipe"],
-    detached: false,
+    // Its own process group, so a stop reaches grandchildren (npm -> node --test) that would keep writing.
+    detached: process.platform !== "win32",
   });
   if (child.pid) onSpawn?.(child);
 
@@ -76,8 +77,14 @@ export async function runProcess({
   const effectiveIdleTimeout = idleTimeoutMs ?? timeoutMs;
   const effectiveHardTimeout = hardTimeoutMs ?? timeoutMs;
 
+  const killGroup = (sig) => { try { process.kill(-child.pid, sig); } catch { child.kill(sig); } };
+  let escalation = null;
   const terminate = () => {
-    if (!child.killed) child.kill("SIGTERM");
+    if (escalation) return;
+    killGroup("SIGTERM");
+    // The leader may exit on SIGTERM while a grandchild ignores it; the group signal still reaches it.
+    escalation = setTimeout(() => killGroup("SIGKILL"), 2_000);
+    escalation.unref();
   };
 
   const triggerTimeout = (reason) => {
@@ -85,7 +92,6 @@ export async function runProcess({
     timedOut = true;
     timeoutReason = reason;
     terminate();
-    setTimeout(() => child.kill("SIGKILL"), 2_000).unref();
   };
 
   const resetIdleTimer = () => {

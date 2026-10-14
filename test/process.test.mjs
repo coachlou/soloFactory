@@ -316,3 +316,26 @@ test("genuine structured and plain-text authentication failures are still detect
   assert.deepEqual(detectProviderDiagnostics(JSON.stringify({ type: "item.completed", item: { type: "error", message: "401 Unauthorized" } })).map((item) => item.code), ["authentication"]);
   assert.deepEqual(detectProviderDiagnostics("Error: Not logged in. Please run codex login.").map((item) => item.code), ["authentication"]);
 });
+
+test("cancel stops grandchildren, not just the direct child", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "sf-group-"));
+  const pidFile = path.join(dir, "grandchild.pid");
+  const controller = new AbortController();
+  const script = `const { spawn } = require("node:child_process"); const fs = require("node:fs");
+    const g = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    fs.writeFileSync(${JSON.stringify(pidFile)}, String(g.pid)); setInterval(() => {}, 1000);`;
+  const run = runProcess({ executable: process.execPath, args: ["-e", script], signal: controller.signal, idleTimeoutMs: 30_000, hardTimeoutMs: 30_000 });
+  let pid;
+  for (let i = 0; i < 100 && !pid; i++) {
+    pid = Number(await readFile(pidFile, "utf8").catch(() => "")) || undefined;
+    if (!pid) await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.ok(pid, "grandchild started");
+  controller.abort();
+  await run;
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  for (let i = 0; i < 40 && alive(); i++) await new Promise((r) => setTimeout(r, 50));
+  const survived = alive();
+  if (survived) process.kill(pid, "SIGKILL");
+  assert.equal(survived, false);
+});
