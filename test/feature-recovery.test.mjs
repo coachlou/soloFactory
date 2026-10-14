@@ -6,7 +6,7 @@ import path from 'node:path';
 import { JobStore } from '../src/store.mjs';
 import { SoloFactory, continuationAction, withContinuation } from '../src/factory.mjs';
 import { createFixtureProvider } from '../src/fixture-provider.mjs';
-import { digest, keepCorrecting, repairPlanPrompt, sourceBaseline, validateRecoveryPlan, validateRecoveryApproval } from '../src/feature-recovery.mjs';
+import { digest, keepCorrecting, planKey, repairPlanPrompt, sourceBaseline, validateRecoveryPlan, validateRecoveryApproval } from '../src/feature-recovery.mjs';
 
 const request = { id: 'request', contractDigest: 'frozen', checks: [{ id: 'MH-3' }, { id: 'SC-2' }] };
 const plan = () => ({ version: 1, requestId: 'request', contractDigest: 'frozen', slices: [
@@ -54,6 +54,30 @@ test('v2 repair plans may depend on already completed features but not on unknow
   const p = v2Plan(); p.slices[0].dependsOn = ['MONTHLY-SUMMARY'];
   assert.deepEqual(validateRecoveryPlan(p, { ...v2Request, completed: ['MONTHLY-SUMMARY'] }).slices[0].dependsOn, []);
   assert.throws(() => validateRecoveryPlan(p, v2Request), /unknown slice MONTHLY-SUMMARY/);
+});
+
+test('a scoped fresh repair plan appends approved features without requiring their writes', () => {
+  const p = v2Plan(); const keep = p.slices.splice(1);
+  p.slices[0].writes = ['src/browse.js', 'test/browse.test.mjs'];
+  p.slices[0].acceptance[0].proof.command = ['node', '--test', 'test/browse.test.mjs'];
+  const before = structuredClone(keep);
+  const scoped = { ...v2Request, keep };
+  const merged = validateRecoveryPlan(p, scoped, { fresh: true });
+  assert.deepEqual(merged.slices.map(slice => slice.id), ['BROWSE', 'RESTART']);
+  assert.deepEqual(merged.slices[1], keep[0]);
+  assert.deepEqual(merged.slices[1].dependsOn, ['BROWSE']);
+  assert.deepEqual(validateRecoveryPlan(merged, scoped, { fresh: true }), merged, 'merging is idempotent');
+  assert.deepEqual(keep, before, 'approved copies are not mutated');
+  delete p.slices[0].writes;
+  assert.throws(() => validateRecoveryPlan(p, scoped, { fresh: true }), /BROWSE need writes/);
+});
+
+test('an approved kept copy replaces a planner slice with the same id', () => {
+  const p = v2Plan(); const keep = structuredClone(p.slices.slice(1));
+  p.slices[0].writes = ['src/browse.js'];
+  p.slices[1] = { id: 'RESTART', title: 'Planner changed the approved feature' };
+  const merged = validateRecoveryPlan(p, { ...v2Request, keep }, { fresh: true });
+  assert.deepEqual(merged.slices[1], keep[0]);
 });
 
 async function setup(t, mutate = async () => {}, { uploads = {}, alreadyPasses = false, autoStart = false } = {}) {
@@ -106,6 +130,44 @@ test('plans, approves and executes same-run recovery, preserving contract and or
   assert.equal(result.recoveryPhase.done.length, 2); assert.equal(env.deployments(), 1);
   assert.equal(await readFile(path.join(env.root, '.factory/last-failure-1.txt'), 'utf8'), oldFailure);
   assert.ok(env.stages.at(-1) === 'review');
+});
+
+test('a spent feature gate replans only its replacement and reviews the merged plan with scoped checks', async t => {
+  let reviewed;
+  const env = await setup(t, async args => {
+    const phase = args.context.job.recoveryPhase;
+    if (!phase?.request.scope) return;
+    if (/^recovery-plan-(?!review)/.test(args.context.stage)) {
+      const file = path.join(args.cwd, phase.planFile); const p = JSON.parse(await readFile(file, 'utf8'));
+      const replacement = structuredClone(phase.request.priorPlan.slices[0]);
+      replacement.closes = phase.request.scope.checks;
+      replacement.acceptance[0].refs = phase.request.scope.checks;
+      p.slices = [replacement]; await writeFile(file, JSON.stringify(p));
+    }
+    if (/^recovery-plan-review-/.test(args.context.stage)) reviewed = JSON.parse(await readFile(path.join(args.cwd, '.factory/plan-review-request.json'), 'utf8'));
+  });
+  const first = await env.factory.planRecovery(env.failed.id);
+  const saved = await env.store.read(first.id); const prior = saved.recoveryPhase;
+  // An already-approved older feature need not acquire a writes list during this replacement.
+  delete prior.plan.slices[1].writes;
+  const kept = structuredClone(prior.plan.slices[1]);
+  prior.status = 'running'; prior.cursor = { id: prior.plan.slices[0].id }; prior.current = prior.cursor.id;
+  saved.state = 'failed'; saved.failedState = 'verifying'; saved.attempt = saved.repairBudgetLimit = 1;
+  saved.error = { code: 'quality_gate_failed', message: 'Viewer proof failed', details: { gate: 'proof-VIEWER-005', command: ['node', '--test', 'test/viewer.test.mjs'], output: 'Viewer does not open' } };
+  await env.store.writeState(saved);
+  const ready = await env.factory.planRecovery(saved.id); const phase = ready.recoveryPhase;
+  assert.equal(phase.status, 'ready', ready.error?.message);
+  assert.deepEqual(phase.request.checks.map(check => check.id), ['MH-1', 'SC-1', 'GATE-proof-VIEWER-005']);
+  assert.deepEqual(phase.request.scope, { feature: prior.current, checks: ['MH-1', 'GATE-proof-VIEWER-005'] });
+  assert.deepEqual(phase.request.keep, [kept]);
+  assert.deepEqual(phase.plan.slices.map(slice => slice.id), [prior.current, kept.id]);
+  assert.deepEqual(phase.plan.slices[1], kept);
+  assert.deepEqual(reviewed.checks.map(check => check.id), phase.request.scope.checks);
+  assert.equal(reviewed.planDigest, digest(phase.plan));
+  assert.equal(phase.planDigest, digest(phase.plan));
+  assert.ok(phase.reviewedPlans.includes(planKey(phase.plan)));
+  assert.match(env.prompts[`recovery-plan-review-${phase.id}-1`], /do not block on checks outside the scope/);
+  await validateRecoveryApproval(env.factory, ready, phase.planDigest);
 });
 
 test('keepCorrecting continues past the budget only while blockers shrink, up to 3x', () => {
@@ -721,4 +783,21 @@ test('the repair-plan prompt asks for few, mostly independent features and no ch
   assert.match(prompt, /fewest features/);
   assert.match(prompt, /most of them independent/);
   assert.match(prompt, /never to order two features that write different files/);
+});
+
+test('the scoped repair-plan prompt plans only the failed feature and preserves kept ids', () => {
+  const prompt = repairPlanPrompt('plan.json', 'request.json', { feature: 'VIEWER', gate: 'proof-VIEWER-005', checks: ['MH-3', 'GATE-proof-VIEWER-005'], keep: ['EXPORT', 'SETTINGS'] });
+  assert.match(prompt, /Plan ONLY the replacement for feature VIEWER, which failed gate proof-VIEWER-005/);
+  assert.match(prompt, /closing exactly MH-3, GATE-proof-VIEWER-005/);
+  assert.match(prompt, /approved features EXPORT, SETTINGS unchanged/);
+  assert.match(prompt, /prior plan's VIEWER entry/);
+  assert.match(prompt, /Keep every obligation it had/);
+  assert.match(prompt, /Keep id VIEWER/);
+  assert.match(prompt, /new ids placed before VIEWER/);
+  assert.match(prompt, /Every check in scope has exactly one closing feature/);
+  assert.doesNotMatch(prompt, /Every unfinished check has exactly one closing feature/);
+  const unscoped = repairPlanPrompt('plan.json', 'request.json');
+  assert.equal(unscoped, repairPlanPrompt('plan.json', 'request.json', null));
+  assert.match(unscoped, /Every unfinished check has exactly one closing feature/);
+  assert.doesNotMatch(unscoped, /SCOPE:/);
 });

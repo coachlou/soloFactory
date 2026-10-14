@@ -30,19 +30,25 @@ export async function sourceBaseline(store, { head = true } = {}) {
 }
 
 // fresh: a plan drafted or submitted now, not one saved by an earlier release. It must be a feature plan
-// with declared writes, since the writes gate and impact selection are skipped for features without them.
+// with declared writes on new features; kept features were approved already.
 export function validateRecoveryPlan(raw, request, { fresh = false } = {}) {
   if (fresh && raw?.version !== 2) throw new Error('A new repair plan must be a version 2 feature plan.');
+  const keep = request.keep ?? [];
+  const keepIds = new Set(keep.map(slice => slice.id));
+  // Kept copies win if the planner restates an approved feature.
+  const own = Array.isArray(raw?.slices) ? raw.slices.filter(slice => !keepIds.has(slice?.id)) : raw?.slices;
+  if (request.keep && Array.isArray(own)) raw = { ...raw, slices: [...own, ...keep] };
   if (raw?.version === 2) {
     if (fresh) {
-      const bare = (Array.isArray(raw.slices) ? raw.slices : []).filter(slice => slice?.writes === undefined).map(slice => slice?.id);
+      const bare = (Array.isArray(own) ? own : []).filter(slice => slice?.writes === undefined).map(slice => slice?.id);
       if (bare.length) throw new Error(`Repair features ${bare.join(', ')} need writes: the paths, directories or globs each creates or edits, tests included.`);
     }
     if (raw.requestId !== request.id) throw new Error('Repair plan does not match its request.');
     // A dependency on an already built feature is satisfied; only ids in this plan are validated.
     const built = new Set(request.completed ?? []);
     raw = { ...raw, slices: raw.slices?.map(slice => Array.isArray(slice?.dependsOn) ? { ...slice, dependsOn: slice.dependsOn.filter(dep => !built.has(dep)) } : slice) };
-    return { ...validateFeaturePlan(raw, { jobId: request.jobId, contractDigest: request.contractDigest, checks: request.checks, sources: request.sources.map(item => item.path), ownership: fresh }), requestId: request.id };
+    // ponytail: older kept features lack writes, so proof ownership waits until all features declare them.
+    return { ...validateFeaturePlan(raw, { jobId: request.jobId, contractDigest: request.contractDigest, checks: request.checks, sources: request.sources.map(item => item.path), ownership: fresh && !keep.some(slice => slice.writes === undefined) }), requestId: request.id };
   }
   if (raw?.version !== 1 || raw.requestId !== request.id || raw.contractDigest !== request.contractDigest) throw new Error('Recovery plan does not match its request and frozen contract.');
   const normalized = validateSlicePlan(raw);
@@ -79,22 +85,23 @@ export async function archiveReview(factory, job, label) {
 const PLAN_SCHEMA = `{version:2,jobId,requestId,contractDigest (copied from the request),compatibility:[{subject,status:"verified",evidence}],slices:[{id (uppercase letters/digits/hyphens),title,objective,demo,dependsOn:[earlier feature ids],writes:[app-relative paths, directories or globs this feature creates or edits, its tests included],closes:[unfinished check ids this feature fully closes],acceptance:[{id,behavior (one concrete observable behavior),refs:[check ids],sources:[{path (one of request.sources),locator (section, heading, line or element)}],proof:{command:["npm"|"node"|"npx",...args],expect,pending?:"integration"},cases?:[{id (unique across the plan),surface:"api"|"browser"|"cli"|"unit"|"integration",action,field?,boundary?,expect (result or failure condition),refs:[subset of the requirement refs],sources:[subset of the requirement sources],supersedes?:[ids of a reviewed plan\'s obligations this case replaces]}]}]}]}`;
 
 // The request is referenced, never inlined: a prior case-table plan alone can exceed the provider's input limit.
-export function repairPlanPrompt(planFile, requestFile) {
+export function repairPlanPrompt(planFile, requestFile, scope = null) {
   return `Prepare a repair plan ONLY. Do not implement, reset, narrow scope, install, or deploy. Preserve all source, user data, the frozen contract and previous evidence. Read ALL of ${requestFile}, the authoritative request (unfinished checks, blockers, owner guidance, review, sources, prior plan, completed features), then .factory/REVIEW.md, the existing app and tests, and EVERY file in its sources (frozen contract plus attached specs, mockups and prototype handoffs). Investigate model/tool compatibility read-only if needed.
 Write ONLY ${planFile} as JSON: ${PLAN_SCHEMA}.
-Every unfinished check has exactly one closing feature. A broad MH/SC summary is not enough: carry each detailed obligation the sources state for that gap (fields, states, limits, error cases, layout, copy) as its own acceptance item citing the source path and locator. Each proof is an executable test of real behavior.
+${scope ? 'Every check in scope has exactly one closing feature.' : 'Every unfinished check has exactly one closing feature.'} A broad MH/SC summary is not enough: carry each detailed obligation the sources state for that gap (fields, states, limits, error cases, layout, copy) as its own acceptance item citing the source path and locator. Each proof is an executable test of real behavior.
 ${CONSOLIDATION_RULES}
 Preserve already passing behavior and completed features; no new walking skeleton. Use the fewest features the unfinished checks need, most of them independent: list a dependsOn only where a feature really uses another's output, never to order two features that write different files (give shared files their own feature, or divide the work by file, instead of chaining). Each feature is built in one agent turn capped at 45 minutes, proofs included: split a feature only when it would not fit that turn. The plan is reviewed against the sources and this checklist before execution; check it yourself first:
 ${PLAN_CHECKLIST}
 ${CONTROLLER_FACTS}
-Before you finish, run exactly node .factory/check-plan.mjs ${planFile} ${requestFile} as its own command from your working directory (no cd, absolute path or chaining: any other form is denied permission). It applies the controller's own validation to the plan. Fix every error it prints and rerun it until it prints OK; an invalid plan costs a whole extra turn.`;
+Before you finish, run exactly node .factory/check-plan.mjs ${planFile} ${requestFile} as its own command from your working directory (no cd, absolute path or chaining: any other form is denied permission). It applies the controller's own validation to the plan. Fix every error it prints and rerun it until it prints OK; an invalid plan costs a whole extra turn.${scope ? `
+SCOPE: Plan ONLY the replacement for feature ${scope.feature}, which failed gate ${scope.gate}, closing exactly ${scope.checks.join(', ')}. The controller appends the remaining approved features ${scope.keep.join(', ') || '(none)'} unchanged after yours. Do not plan, restate or change them. Start from the prior plan's ${scope.feature} entry (in the request's priorPlan). Keep every obligation it had, and diagnose why the gate failed from the blocker output and the existing tests. Keep id ${scope.feature} for the feature that completes it, because later features depend on it. If it is too large for one 45-minute turn, split it into new ids placed before ${scope.feature}.` : ''}`;
 }
 
-function repairPlanAuditPrompt(planFile, priorBlockers = null, consolidated = false, rereview = false) {
+function repairPlanAuditPrompt(planFile, priorBlockers = null, consolidated = false, rereview = false, scope = null) {
   const amended = priorBlockers && !priorBlockers.length ? '\nThis plan is an owner-submitted replacement for a plan that had passed review. Judge it independently on its merits; the earlier approval does not carry over.'
     : priorBlockers ? `\nThis plan is an owner-submitted correction after automatic corrections ran out. Its previous review blocked it for:\n${priorBlockers.map(item => `- ${item}`).join('\n')}\nAssess each of those blockers explicitly, then judge the whole plan on its merits.` : '';
   const mapped = consolidated ? '\nplan-review-request.json "base" lists every obligation of the reviewed plan this replaces; each is kept under its id or superseded by exactly one case (supersedes). Block when a kept requirement or superseding case asserts less than its base obligation: a lost field, action, boundary, failure condition or API/browser surface, a weaker expected result, or a case whose wording no longer matches the behavior it replaces.' : '';
-  return `You are the independent repair-plan reviewer. No repair has started.${amended}${mapped} Read .factory/plan-review-request.json (the unfinished checks, review findings and the authoritative sources), .factory/REVIEW.md, EVERY source file it lists, the existing app and tests, and ${planFile}.
+  return `You are the independent repair-plan reviewer. No repair has started.${amended}${mapped}${scope ? ` Only the failed feature ${scope.feature}'s replacement is under review; the remaining features were approved earlier and are appended by the controller, so do not block on checks outside the scope.` : ''} Read .factory/plan-review-request.json (the unfinished checks, review findings and the authoritative sources), .factory/REVIEW.md, EVERY source file it lists, the existing app and tests, and ${planFile}.
 Do NOT modify ${planFile} or any file except .factory/plan-review-result.json. Editing the plan voids your verdict. Write:
 { "version": 1, "jobId", "token", "contractDigest", "planDigest" copied exactly from plan-review-request.json, "verdict": "approve" | "blocked", "blockers": ["<concrete problem>"] }
 Block when a review finding is not addressed, or when (judged for the unfinished checks):
@@ -294,6 +301,12 @@ async function replanForGate(factory, job, signal, guidance, { prior, executed }
   const blockers = [unstable ? job.error.message : `The ${gate} gate failed with its repairs spent: ${command.join(' ')}${output ? `\nGate output (tail):\n${String(output).slice(-2000)}` : ''}`];
   const sources = await sourceSet(appDir, runInputs(job));
   const request = { id: randomUUID(), jobId: job.id, contractDigest: frozen, review: null, reviewToken: null, failedGate: unstable ? 'review' : gate, checks, blockers, sources, sourcesDigest: digest(sources), baseline: await sourceBaseline(factory.store), guidance, priorPlan: plan, completed: done };
+  const failed = executed && !unstable ? plan?.slices.findIndex(slice => slice.id === (prior.cursor?.id ?? prior.current)) : -1;
+  if (failed >= 0) {
+    const slice = plan.slices[failed];
+    request.scope = { feature: slice.id, checks: [...open.filter(check => sliceChecks(slice).includes(check.id)).map(check => check.id), `GATE-${gate}`] };
+    request.keep = plan.slices.slice(failed + 1).filter(slice => !done.includes(slice.id));
+  }
   return draftRepairPlan(factory, job, signal, request, prior);
 }
 
@@ -349,7 +362,7 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
       await writeFile(path.join(appDir, requestFile), JSON.stringify(request, null, 2));
       // Same self-check as feature planning; written here too, since a run planned before it existed has no stub.
       await writeFile(path.join(appDir, '.factory/check-plan.mjs'), `import ${JSON.stringify(pathToFileURL(fileURLToPath(new URL('./check-plan.mjs', import.meta.url))).href)};\n`);
-      await factory.invoke(job, `recovery-plan-${request.id}`, repairPlanPrompt(planFile, requestFile), signal);
+      await factory.invoke(job, `recovery-plan-${request.id}`, repairPlanPrompt(planFile, requestFile, request.scope ? { ...request.scope, gate: request.failedGate, keep: request.keep.map(slice => slice.id) } : null), signal);
     }
     await guard();
     let plan = await readPlan();
@@ -364,10 +377,10 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
         if (!phase.reviewedPlans.includes(key)) phase.reviewedPlans.push(key);
         // Automatic later rounds judge only earlier blockers and regressions, as main planning does (REREVIEW).
         const rereview = !phase.amendment && (phase.blockerHistory ?? []).length > 0;
-        const review = await preparePlanReview(appDir, job, planDigest, { kind: 'repair', requestId: request.id, planFile, checks, findings: blockers, sources, ...(phase.amendment ? { amendment: true, priorBlockers: phase.amendment.priorBlockers } : rereview && { priorBlockers: phase.blockerHistory }), ...(base && { base: base.slices.flatMap(slice => slice.acceptance.map(item => ({ feature: slice.id, ...item }))) }) });
+        const review = await preparePlanReview(appDir, job, planDigest, { kind: 'repair', requestId: request.id, planFile, checks: request.scope ? checks.filter(check => request.scope.checks.includes(check.id)) : checks, findings: blockers, sources, ...(phase.amendment ? { amendment: true, priorBlockers: phase.amendment.priorBlockers } : rereview && { priorBlockers: phase.blockerHistory }), ...(base && { base: base.slices.flatMap(slice => slice.acceptance.map(item => ({ feature: slice.id, ...item }))) }) });
         phase.reviews += 1;
         await factory.store.writeState(job);
-        await factory.invoke(job, `recovery-plan-review-${phaseId}-${phase.reviews}`, repairPlanAuditPrompt(planFile, phase.amendment?.priorBlockers, Boolean(base), rereview), signal);
+        await factory.invoke(job, `recovery-plan-review-${phaseId}-${phase.reviews}`, repairPlanAuditPrompt(planFile, phase.amendment?.priorBlockers, Boolean(base), rereview, request.scope), signal);
         await guard();
         const after = await readPlan();
         if (after instanceof Error || digest(after) !== planDigest) throw new Error('The repair plan reviewer changed the plan, so its verdict cannot approve it.');
