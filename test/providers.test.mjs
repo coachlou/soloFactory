@@ -101,3 +101,17 @@ test("claude stream lines yield the session id and one dashboard event per tool 
   assert.equal(claudeStreamLine('{"type":"result","structured_output":{"ok":true},"session_id":"abc"}').record.structured_output.ok, true);
   assert.deepEqual(claudeStreamLine("Background tasks still running after 600s; terminating."), {});
 });
+
+test("a prompt over 50K is written to a file the agent reads, and one over 200K is refused", async () => {
+  const { spillPrompt, INLINE_PROMPT_CHARS } = await import("../src/providers.mjs");
+  const { mkdtemp, readFile } = await import("node:fs/promises");
+  const cwd = await mkdtemp(path.join(tmpdir(), "solo-spill-"));
+  const small = "x".repeat(INLINE_PROMPT_CHARS);
+  assert.equal(await spillPrompt({ cwd, prompt: small, context: { stage: "a" } }), small);
+  const big = "y".repeat(INLINE_PROMPT_CHARS + 1);
+  const sent = await spillPrompt({ cwd, prompt: big, context: { stage: "repair/24" } });
+  assert.ok(sent.length < 500);
+  assert.match(sent, /\.factory\/logs\/prompt-repair-24\.md/);
+  assert.equal(await readFile(path.join(cwd, ".factory/logs/prompt-repair-24.md"), "utf8"), big);
+  await assert.rejects(spillPrompt({ cwd, prompt: "z".repeat(200_001), context: { stage: "b" } }), (e) => e.code === "prompt_too_large");
+});

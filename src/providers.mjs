@@ -500,8 +500,10 @@ function humanizeAgentEvent(event) {
   return String(event.message ?? event.type ?? "Agent event").slice(0, 500);
 }
 
-// Owner policy: no prompt over 200K characters, whatever the provider accepts. Large inputs (plans,
-// requests, reviews, transcripts) belong in files the agent reads, never inline.
+// Owner policy: no agent is ever sent more than INLINE_PROMPT_CHARS inline, because agents differ in how much context
+// they have. A longer prompt is written to a file in the agent's workspace and the agent is told to read it first
+// (progressive disclosure). The file itself is still capped at MAX_PROMPT_CHARS: past that, no agent could use it.
+export const INLINE_PROMPT_CHARS = 50_000;
 export const MAX_PROMPT_CHARS = 200_000;
 
 export function assertPromptSize(prompt, label = "agent") {
@@ -510,8 +512,17 @@ export function assertPromptSize(prompt, label = "agent") {
     { code: "prompt_too_large", details: { label, chars: prompt.length, max: MAX_PROMPT_CHARS } });
 }
 
+export async function spillPrompt({ cwd, prompt, context = {} }) {
+  if (prompt.length <= INLINE_PROMPT_CHARS) return prompt;
+  assertPromptSize(prompt, context.stage);
+  const relative = `.factory/logs/prompt-${String(context.stage ?? "agent").replace(/[^a-z0-9._-]+/gi, "-").slice(0, 80)}.md`;
+  await mkdir(path.join(cwd, ".factory/logs"), { recursive: true });
+  await writeFile(path.join(cwd, relative), prompt);
+  return `Your complete instructions are in ${relative} (too long to send inline). Read that whole file first, then carry out exactly what it says; it is addressed to you.`;
+}
+
 export function createProvider(id) {
-  const guarded = (run) => async (args) => { assertPromptSize(args.prompt, args.context?.stage); return run(args); };
+  const guarded = (run) => async (args) => run({ ...args, prompt: await spillPrompt(args) });
   if (id === "codex") return { id, run: guarded(codexRun) };
   if (id === "claude") return { id, run: guarded(claudeRun) };
   throw new Error(`Unknown provider '${id}'.`);
