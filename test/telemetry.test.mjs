@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { createProvider } from "../src/providers.mjs";
@@ -182,4 +182,13 @@ test("stage usage buckets each turn into the stage it finished in and reports th
   assert.equal(byState.building.tokens.outputTokens, 20);
   assert.deepEqual([current.label, current.durationMs, current.tokens.inputTokens], ["Repair plan", 15 * 60_000, 300]);
   assert.equal(stageUsage([], events).current, null);
+});
+
+test("concurrent event appends land whole and in call order", async () => {
+  const store = new JobStore(await mkdtemp(path.join(os.tmpdir(), "sf-events-")));
+  await mkdir(store.jobDir("j"), { recursive: true });
+  const pad = "x".repeat(200_000);
+  await Promise.all(Array.from({ length: 200 }, (_, n) => store.appendEvent("j", { type: "t", n, pad: n % 10 ? "" : pad })));
+  const lines = (await readFile(path.join(store.jobDir("j"), "events.jsonl"), "utf8")).split("\n").filter(Boolean);
+  assert.deepEqual(lines.map((line) => JSON.parse(line).n), Array.from({ length: 200 }, (_, n) => n));
 });
