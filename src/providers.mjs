@@ -366,7 +366,7 @@ export function addUsage(a, b) {
 }
 
 export function detectProviderDiagnostics(output = "") {
-  const diagnosticOutput = executionFailureText(output);
+  const { transport, commands } = executionFailureText(output);
   const rules = [
     {
       // Codex's own wording for a service outage (run 4f2dd1cf, 2026-10-14); Claude reports 5xx as api_error_status.
@@ -409,6 +409,9 @@ export function detectProviderDiagnostics(output = "") {
       code: "xcode_not_selected",
       pattern: /xcodebuild.*requires Xcode|active developer directory .*CommandLineTools/i,
       title: "Xcode is installed but not selected for command-line builds",
+      // The only rule read from a failed command's output: the others (sign-in, network, permission) also
+      // match an app's own test output, and misreading that skips the same-session resume.
+      fromCommands: true,
       action: "In Terminal, run `sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer`, confirm `xcodebuild -version` works, then resume this run. TestFlight does not change the local build-tool selection.",
     },
     {
@@ -418,13 +421,16 @@ export function detectProviderDiagnostics(output = "") {
       action: "Review the named path or command permission, correct it, then resume the preserved run.",
     },
   ];
-  const found = rules.filter((rule) => rule.pattern.test(diagnosticOutput)).map(({ pattern, ...diagnostic }) => diagnostic);
+  const found = rules
+    .filter((rule) => rule.pattern.test(transport) || (rule.fromCommands && rule.pattern.test(commands)))
+    .map(({ pattern, fromCommands, ...diagnostic }) => diagnostic);
   // An outage ends the turn, so any limit or permission text beside it came from earlier work in that turn.
   return found[0]?.code === "provider_unavailable" ? [found[0]] : found;
 }
 
 function executionFailureText(output) {
   const relevant = [];
+  const commands = [];
   for (const line of String(output).split(/\r?\n/)) {
     if (!line.trim()) continue;
     try {
@@ -435,7 +441,7 @@ function executionFailureText(output) {
         item?.type === "command_execution" &&
         (item.status === "failed" || (typeof item.exit_code === "number" && item.exit_code !== 0))
       ) {
-        relevant.push(item.aggregated_output ?? item.output ?? "");
+        commands.push(item.aggregated_output ?? item.output ?? "");
       }
       if (/failed|error/i.test(event.type ?? "") || event.is_error === true) relevant.push(event.message ?? JSON.stringify(event));
     } catch {
@@ -443,7 +449,7 @@ function executionFailureText(output) {
       relevant.push(line);
     }
   }
-  return relevant.join("\n");
+  return { transport: relevant.join("\n"), commands: commands.join("\n") };
 }
 
 function providerFailure({ provider, result, diagnostics, logPath, sessionId, autoResumes, idleTimeoutMs, hardTimeoutMs }) {

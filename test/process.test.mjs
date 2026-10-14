@@ -92,6 +92,10 @@ test("provider diagnostics distinguish limits from recoverable local blockers", 
     item: { type: "command_execution", status: "completed", exit_code: 0, aggregated_output: "Camera permission denied is an acceptance scenario." },
   });
   assert.deepEqual(detectProviderDiagnostics(successfulSpecOutput), []);
+  // A failed app test that prints these strings is the app's failure, not a sign-in or network outage.
+  const failedTest = (text) => JSON.stringify({ type: "item.completed", item: { type: "command_execution", status: "failed", exit_code: 1, aggregated_output: text } });
+  assert.deepEqual(detectProviderDiagnostics(failedTest("expected 200, got 401 Unauthorized\nconnect ETIMEDOUT 10.0.0.1:443\nEACCES: /data/x")), []);
+  assert.deepEqual(detectProviderDiagnostics(failedTest("xcodebuild requires Xcode; active developer directory '/Library/Developer/CommandLineTools'")).map((item) => item.code), ["xcode_not_selected"]);
   // The line Codex printed when a repair-plan prompt inlined a 2.4M-character prior plan.
   assert.deepEqual(detectProviderDiagnostics("turn/start failed: Input exceeds the maximum length of 1048576 characters").map((item) => item.code), ["input_too_large"]);
 });
