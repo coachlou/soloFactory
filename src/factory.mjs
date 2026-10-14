@@ -1597,7 +1597,7 @@ export class SoloFactory {
       variant: process.env.SOLOFACTORY_VARIANT || "baseline",
       harness: HARNESS,
       provider: this.provider.id,
-      codex: this.provider.id === "codex" ? { model: process.env.SOLOFACTORY_CODEX_MODEL || "gpt-5.6-sol", effort: process.env.SOLOFACTORY_CODEX_REASONING_EFFORT || "low" } : undefined,
+      codex: this.provider.id === "codex" ? { model: process.env.SOLOFACTORY_CODEX_MODEL || "gpt-6.1-sol", effort: process.env.SOLOFACTORY_CODEX_REASONING_EFFORT || "medium" } : undefined,
       sdlc: summary.strategy,
       followOn: Boolean(job.followOn),
       wallMs: Date.now() - new Date(job.startedAt ?? job.createdAt).getTime(),
