@@ -30,6 +30,7 @@ async function answers(url) {
 export class JobStore {
   constructor(project) {
     this.project = path.resolve(project);
+    this.appends = new Map();
   }
 
   async init() {
@@ -154,10 +155,16 @@ export class JobStore {
     return job;
   }
 
-  async appendEvent(id, event) {
+  // One append at a time per job: the controller and the supervision timer both log, and concurrent
+  // appends land out of order (and a large one could interleave with another).
+  appendEvent(id, event) {
     const enriched = { at: new Date().toISOString(), ...event };
-    await appendFile(path.join(this.jobDir(id), "events.jsonl"), `${JSON.stringify(enriched)}\n`);
-    return enriched;
+    const file = path.join(this.jobDir(id), "events.jsonl");
+    const write = (this.appends.get(file) ?? Promise.resolve()).then(() => appendFile(file, `${JSON.stringify(enriched)}\n`));
+    const tail = write.catch(() => {});
+    this.appends.set(file, tail);
+    tail.then(() => { if (this.appends.get(file) === tail) this.appends.delete(file); });
+    return write.then(() => enriched);
   }
 
   // Stretches of the run that were not running: after a pause/stop event until the next event, or any silence over
