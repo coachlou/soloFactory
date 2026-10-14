@@ -1045,6 +1045,7 @@ export class SoloFactory {
     job = await this.stage(job, "completed", "Application is live and verified");
     job.completedAt = new Date().toISOString();
     await this.store.writeState(job);
+    await this.settleDeployment(job);
     await this.emit(job.id, { type: "job.completed", state: "completed", message: `Working app: ${deployment.url}${job.waivedProofs?.length ? ` (owner waived ${job.waivedProofs.map((bug) => bug.id).join(", ")})` : ""}` });
     return job;
   }
@@ -1612,7 +1613,18 @@ export class SoloFactory {
       throw new FactoryError("invalid_metrics", `The app metrics endpoint failed: ${error.message}.`, { missing: [], received: undefined });
     });
     validateMetrics(metrics);
+    if (child.exitCode !== null || child.signalCode !== null) throw new FactoryError("deployment_exited", `App exited with ${child.exitCode ?? child.signalCode} right after its health check.`);
     return { mode: "local", status: "live", url, port, pid: child.pid, startedAt: new Date().toISOString() };
+  }
+
+  // The exit handler only corrects a stored "live", so an app that exited before that write landed is
+  // caught here: the handler drops the child from this.deployments synchronously on exit.
+  async settleDeployment(job) {
+    if (job.deployment?.mode !== "local" || job.deployment.status !== "live" || this.deployments.has(job.id)) return;
+    job.deployment.status = "stopped";
+    job.deployment.stoppedAt = new Date().toISOString();
+    await this.store.writeState(job);
+    await this.emit(job.id, { type: "deployment.stopped", state: job.state, message: "App process stopped right after launch." });
   }
 
   // Starts a completed run's built app again on a fresh port; only the project's newest run may, since one app runs per project.
@@ -1628,6 +1640,7 @@ export class SoloFactory {
     await mkdir(path.join(this.store.appDir(jobId), ".factory", "logs"), { recursive: true }); // gitignored, so may be absent
     job.deployment = await this.deployLocal(job, manifest, new AbortController().signal);
     await this.store.writeState(job);
+    await this.settleDeployment(job);
     await this.emit(job.id, { type: "deployment.relaunched", state: job.state, message: `App relaunched: ${job.deployment.url}` });
     return job;
   }

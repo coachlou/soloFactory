@@ -730,6 +730,38 @@ http.createServer((q, r) => { if (q.url === "/health") return r.end("ok"); r.sta
   }
 });
 
+test("an app that exits while its live record is being written is stored as stopped", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-exit-gap-"));
+  const store = new JobStore(root);
+  await store.init();
+  await writeFile(path.join(root, "app.mjs"), `import http from "node:http";
+http.createServer((q, r) => r.end(q.url === "/health" ? "ok" : JSON.stringify({ uptimeSeconds: 1, requests: { total: 0, errors: 0 }, latencyMs: { average: 0 }, routes: [] }))).listen(process.env.PORT);`);
+  const cmd = ["npm", "run", "x"];
+  await writeFile(path.join(root, "factory.json"), JSON.stringify({ version: 1, healthPath: "/health", metricsPath: "/_factory/metrics", commands: { install: cmd, test: cmd, build: cmd, start: ["node", "app.mjs"] } }));
+  const job = await store.create({ brief, transcript, provider: "fixture" });
+  Object.assign(job, { state: "completed", deployment: { mode: "local", status: "stopped", url: "http://127.0.0.1:1" } });
+  await store.writeState(job);
+  const factory = new SoloFactory({ store, provider: createFixtureProvider() });
+  // The app dies after its health check, before the "live" record lands: the old exit handler saw no live record and did nothing.
+  const writeState = store.writeState.bind(store);
+  let killed = false;
+  store.writeState = async (state) => {
+    const child = factory.deployments.get(state.id);
+    if (!killed && state.deployment?.status === "live" && child) {
+      killed = true;
+      await new Promise((resolve) => { child.once("exit", () => setImmediate(resolve)); child.kill("SIGKILL"); });
+    }
+    return writeState(state);
+  };
+  try {
+    await factory.relaunch(job.id);
+    assert.equal(killed, true);
+    assert.equal((await store.read(job.id)).deployment.status, "stopped");
+  } finally {
+    await factory.shutdown();
+  }
+});
+
 test("a set-aside follow-on that was rolled back does not block relaunching the app it restored", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-relaunch-aside-"));
   const store = new JobStore(root);
