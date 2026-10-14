@@ -505,12 +505,14 @@ export function impactedFeatures(slices, done, changed) {
 
 // ponytail: two globs overlap when one's literal directory contains the other's, so "src/*.js" and
 // "src/*.css" count as overlapping. Exact glob intersection if planners hit false rejections.
-function overlaps(a, b) {
+// A glob that can reach below its literal directory ("src/**/*.js", "src/*/x.js") can match inside a literal subdirectory.
+const deep = (pattern) => /\/|\*\*/.test(pattern.slice(stem(pattern).length));
+export function overlaps(a, b) {
   const literalA = !GLOB_RE.test(a);
   const literalB = !GLOB_RE.test(b);
   if (literalA && literalB) return writesCover([a], b) || writesCover([b], a);
-  if (literalB) return writesCover([a], b) || stem(a).startsWith(dirOf(b));
-  if (literalA) return writesCover([b], a) || stem(b).startsWith(dirOf(a));
+  if (literalB) return writesCover([a], b) || stem(a).startsWith(dirOf(b)) || (deep(a) && dirOf(b).startsWith(stem(a)));
+  if (literalA) return writesCover([b], a) || stem(b).startsWith(dirOf(a)) || (deep(b) && dirOf(a).startsWith(stem(b)));
   return stem(a).startsWith(stem(b)) || stem(b).startsWith(stem(a));
 }
 

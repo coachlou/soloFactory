@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { featureProofs, nextExecutable, orderSlices, pendingChecks, pendingObligations, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "../src/wbs.mjs";
+import { featureProofs, overlaps, nextExecutable, orderSlices, pendingChecks, pendingObligations, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "../src/wbs.mjs";
 
 const validPlan = {
   slices: [
@@ -306,4 +306,16 @@ test('a recovery final gate reruns the original built features too, with a same-
   assert.deepEqual(featureProofs(job).map(p => p.id), ['SEARCH.SEARCH-R1', 'PEOPLE.PEOPLE-1'], 'BASE-1 is superseded, SEARCH-1 replaced, UNBUILT never built');
   job.recoveryPhase.plan.slices[1].acceptance[0].cases = undefined;
   assert.deepEqual(featureProofs(job).map(p => p.id), ['BASE.BASE-1', 'SEARCH.SEARCH-R1', 'PEOPLE.PEOPLE-1']);
+});
+
+test("write overlap never misses a file two entries can both match", () => {
+  // Under-reporting is the unsafe direction: set-aside and impact selection trust these lists.
+  for (const [a, b] of [["src/*.js", "src/app.*"], ["src/**/*.js", "src/lib"], ["src/*/x.js", "src/lib"], ["src/lib", "src/lib/x.js"]]) {
+    assert.equal(overlaps(a, b), true, `${a} / ${b}`);
+    assert.equal(overlaps(b, a), true, `${b} / ${a}`);
+  }
+  for (const [a, b] of [["src/*.js", "test/*.js"], ["src/*.css", "src/app.js"], ["*.js", "src/x.js"]]) {
+    assert.equal(overlaps(a, b), false, `${a} / ${b}`);
+    assert.equal(overlaps(b, a), false, `${b} / ${a}`);
+  }
 });
