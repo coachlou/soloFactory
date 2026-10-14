@@ -16,9 +16,9 @@ async function occupy(handler) {
   return blocker;
 }
 
-async function start(port) {
+async function start(port, extra = {}) {
   const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-port-"));
-  const child = spawn(process.execPath, [serverFile], { env: { ...process.env, PORT: String(port), SOLOFACTORY_HOME: home, SOLOFACTORY_ROOT: home }, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [serverFile], { env: { ...process.env, PORT: String(port), SOLOFACTORY_HOME: home, SOLOFACTORY_ROOT: home, ...extra }, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   child.stdout.on("data", (chunk) => { output += chunk; });
   child.stderr.on("data", (chunk) => { output += chunk; });
@@ -49,4 +49,11 @@ test("a port held by a running SoloFactory exits 1 and points at it", async () =
     assert.equal(code, 1);
     assert.match(output, new RegExp(`SoloFactory is already running at http://127.0.0.1:${port}`));
   } finally { blocker.close(); }
+});
+
+test("a non-loopback HOST exits 1 before listening", async () => {
+  const { code, output } = await start(0, { HOST: "0.0.0.0" });
+  assert.equal(code, 1);
+  assert.match(output, /HOST=0\.0\.0\.0 would expose/);
+  assert.doesNotMatch(output, /is ready at/);
 });

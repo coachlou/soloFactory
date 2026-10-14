@@ -732,9 +732,17 @@ async function serveStatic(response, pathname) {
   response.end(await readFile(file));
 }
 
+// The API has no auth: it runs agents and writes files, so it must never listen beyond this machine.
+export function loopbackHost(value) {
+  const host = value || "127.0.0.1";
+  if (host === "localhost" || host === "::1" || /^127(\.\d{1,3}){3}$/.test(host)) return host;
+  throw new Error(`HOST=${host} would expose SoloFactory's unauthenticated API to the network. Use 127.0.0.1 (the default).`);
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || 4173);
-  const host = process.env.HOST || "127.0.0.1";
+  let host;
+  try { host = loopbackHost(process.env.HOST); } catch (error) { console.error(error.message); process.exit(1); }
   const app = await createSoloFactoryServer();
   app.server.on("error", async (error) => {
     if (error.code !== "EADDRINUSE") throw error;
