@@ -620,7 +620,8 @@ hang if unexplained:
 >
 > Leave that window alone from now on. Don't close it, don't type in it.
 
-It prints a line like `SoloFactory → http://127.0.0.1:4173`.
+It prints a line like `SoloFactory → http://127.0.0.1:4173`. If it instead says the port is in use, see *Port 4173 is in use* under
+**Fixing a bad install**, and use the address it gives you in the step below.
 
 > Now open your web browser and go to: **http://127.0.0.1:4173**
 >
@@ -823,7 +824,8 @@ Work these yourself. Do not read this table out loud.
 | `Run \`codex login\` and choose ChatGPT sign-in.` | Codex signed in with an API key | `codex login`, pick ChatGPT |
 | `requires a newer version of Codex` | Codex CLI is out of date | Update the Codex CLI, then restart the server |
 | Browser shows "can't connect" / "site can't be reached" | The server window was closed or `Control`+`C`'d | Restart with `cd ~/solofactory && bash start.sh` and leave it running |
-| `EADDRINUSE` | Something else is on port 4173 | Start with a different port: `cd ~/solofactory && PORT=5000 bash start.sh`, then use `http://127.0.0.1:5000` |
+| `Port 4173 is in use by another app` | Another app already uses port 4173 | Start with a different port: `cd ~/solofactory && PORT=5000 bash start.sh`, then use `http://127.0.0.1:5000` everywhere this guide says 4173 |
+| `SoloFactory is already running at …` | A factory from an earlier window is still running | Open that address; don't start a second one |
 | `ask for an invite to that repo` right after the `curl` line | No GitHub access to the private release | `gh auth login` with an account that has access, or use a zip — see **The install command** |
 | `rsync: command not found` | Ubuntu missing rsync | B2 |
 | `curl: command not found` | Ubuntu missing curl | B2 |

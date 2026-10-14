@@ -723,6 +723,15 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || 4173);
   const host = process.env.HOST || "127.0.0.1";
   const app = await createSoloFactoryServer();
+  app.server.on("error", async (error) => {
+    if (error.code !== "EADDRINUSE") throw error;
+    // A running factory answers /api/health with a workers list; anything else is another app.
+    const health = await fetch(`http://${host}:${port}/api/health`, { signal: AbortSignal.timeout(2000) }).then((r) => r.json()).catch(() => null);
+    console.error(Array.isArray(health?.workers)
+      ? `SoloFactory is already running at http://${host}:${port} — open that in your browser instead of starting another.`
+      : `Port ${port} is in use by another app. Start SoloFactory on a different port:\n  PORT=5000 bash start.sh\nthen open http://${host}:5000`);
+    process.exit(1);
+  });
   app.server.listen(port, host, () => {
     console.log(`SoloFactory is ready at http://${host}:${port}`);
   });

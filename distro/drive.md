@@ -92,7 +92,8 @@ curl -sf http://127.0.0.1:4173/api/health || bash start.sh    # from the folder 
 
 If health fails, run `start.sh` as a long-lived background command (in Claude Code, use
 `run_in_background`), because a plain `&` dies when the shell call returns. Poll `/api/health`
-until it answers. `PORT=` and
+until it answers. If `start.sh` exits saying the port is in use, restart it with `PORT=5000` and use
+that port in every URL below; if it says SoloFactory is already running, use that one. `PORT=` and
 `SOLOFACTORY_DEMO=1` pass through `start.sh`. `GET /api/config` lists `providers`, and only
 ones with `"authenticated": true` can build. In demo mode the only provider is `fixture`.
 

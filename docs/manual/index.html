@@ -54,7 +54,7 @@
   <h2 id="start">1. Start the factory</h2>
   <p>You need Node 22 or newer and a signed-in Codex or Claude Code command line. Then:</p>
   <pre><code>npm start</code></pre>
-  <p>Open <a href="http://127.0.0.1:4173">http://127.0.0.1:4173</a>. The status pill top right reads <em>Factory ready</em> when a provider is signed in. No API key is ever asked for or stored; the agents run under your subscription.</p>
+  <p>Open <a href="http://127.0.0.1:4173">http://127.0.0.1:4173</a>. The status pill top right reads <em>Factory ready</em> when a provider is signed in. No API key is ever asked for or stored; the agents run under your subscription. If another app already uses port 4173, the factory says so and stops; start it on a free port with <code>PORT=5000 npm start</code> and open <a href="http://127.0.0.1:5000">http://127.0.0.1:5000</a> instead.</p>
 
   <h2 id="projects">2. Projects</h2>
   <p>A project is the folder the factory builds into. The first selector in the header switches between them; <em>New project…</em> asks for a name in a small dialog. Each project is its own git repository with the app at the root, a <code>.aai/</code> folder of project context you can edit, and a run history.</p>
