@@ -175,7 +175,11 @@ export class RunMonitor {
 // ponytail: pid reuse can keep an unrelated process "alive"; that errs toward parking, never a second writer.
 export function workerAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; }
+  // Workers lead their own process group (pgid = pid), so a surviving grandchild still counts as alive.
+  for (const target of [-pid, pid]) {
+    try { process.kill(target, 0); return true; } catch (error) { if (error.code === "EPERM") return true; }
+  }
+  return false;
 }
 
 const clip = (text, max = 400) => {
