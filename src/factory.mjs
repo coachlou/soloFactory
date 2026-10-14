@@ -1327,6 +1327,8 @@ export class SoloFactory {
     await this.store.writeState(job);
     const failureRelative = `.factory/last-failure-${job.attempt}.txt`;
     await writeFile(path.join(this.store.appDir(job.id), failureRelative), failure.details?.output ?? failure.message);
+    // ponytail: a big slice is read from this file (same one the build prompt uses) so the repair prompt stays under the cap.
+    if (slice) await writeFile(path.join(this.store.appDir(job.id), ".factory/logs/feature.json"), JSON.stringify(slice, null, 2));
     job = await this.stage(job, "repairing", `Repairing failed ${failure.details?.gate ?? "unknown"} gate`);
     await this.invoke(job, `repair-${job.attempt}`, repairPrompt(failureRelative, slice, bugs), signal);
     return job;

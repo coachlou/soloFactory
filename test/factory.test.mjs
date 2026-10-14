@@ -46,6 +46,14 @@ test("every worker prompt keeps owner data in data/ and tests out of it", () => 
   }
 });
 
+test("a repair prompt reads an oversized slice from its file instead of inlining it", () => {
+  const big = { id: "S1", title: "Big", dependsOn: [], acceptance: ["x".repeat(70_000)] };
+  const prompt = repairPrompt(".factory/logs/x.log", big);
+  assert.ok(prompt.length < 10_000);
+  assert.match(prompt, /read \.factory\/logs\/feature\.json/);
+  assert.match(repairPrompt(".factory/logs/x.log", { ...big, acceptance: ["small"] }), /small/);
+});
+
 test("the final review is scoped to integration and deploy readiness only after feature reviews", () => {
   const scoped = reviewPrompt({ featureReviewed: true });
   assert.match(scoped, /cross-feature/);

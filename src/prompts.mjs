@@ -238,13 +238,13 @@ ready for deterministic controller verification.
 ${DATA_RULE}`;
 }
 
-export function repairPrompt(failurePath, slice = null, bugs = []) {
+export function repairPrompt(failurePath, slice = null, bugs = [], featureFile = ".factory/logs/feature.json") {
   const sliceLines = slice
     ? `
 The failure is inside slice ${slice.id} (${slice.title}), given in full below: do not read the plan file.
 Earlier completed slices must be preserved — fix only what this slice's acceptance criteria need.${slice.writes ? ` Change
 only the files its writes list; any other changed file fails its checks.` : ""}
-${JSON.stringify(slice, null, 2)}`
+${featureBlock("Slice", JSON.stringify(slice, null, 2), featureFile)}`
     : "";
   const bugLines = bugs.length
     ? `
@@ -511,7 +511,7 @@ ${blockers.map((item) => `- ${item}`).join("\n")}`;
 
 // Seen live: PEOPLE-LINKS (52 cases, ~210K chars) pushed both feature prompts past MAX_PROMPT_CHARS.
 // ponytail: a feature past this size is read from featureFile (the controller writes it); smaller ones stay inline.
-const INLINE_FEATURE_CHARS = 60_000;
+const INLINE_FEATURE_CHARS = 20_000;
 const featureBlock = (heading, body, featureFile) => body.length > INLINE_FEATURE_CHARS
   ? `The feature is too large to inline: read ${featureFile} (the whole feature, each proof with its full command) before starting.`
   : `${heading}:\n${body}`;
