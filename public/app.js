@@ -900,7 +900,7 @@ function renderStop(stops, selected, showHealth, health) {
   const usage = repairUsage(job);
   if (stop.status === "done") {
     tone.className = "ok"; tone.textContent = "Verified";
-    status.append(tone, stop.reviews || stop.repairs || stop.ms ? ` · ${minutesLabel(stop.ms)} · ${stop.repairs ? plural(stop.repairs, "repair") : "no repairs"}${stop.reviews ? ` · review passed ${stop.reviews <= 1 ? "first try" : `on pass ${stop.reviews}`}` : ""}` : "");
+    status.append(tone, stop.reviews || stop.repairs || stop.ms ? ` · ${formatSpan(stop.ms)} · ${stop.repairs ? plural(stop.repairs, "repair") : "no repairs"}${stop.reviews ? ` · review passed ${stop.reviews <= 1 ? "first try" : `on pass ${stop.reviews}`}` : ""}` : "");
   } else if (stop.status === "current") {
     tone.className = "warn"; tone.textContent = job.stage.split(" — ")[0];
     status.append(tone, ` · ${minutesLabel(stop.ms)} so far${usage ? ` · ${usage.feature[0]} of ${usage.feature[1]} repairs used` : ""}`);
