@@ -56,7 +56,7 @@ solofactory", "what can I do", "how's my app"), or reply with a bare number, run
 | No projects, or none with a run | Start my first app · How does this work? | step 2 (new project) + step 3 · a 3-line explanation: you describe it, you approve the plan, it builds and checks it |
 | A completed app, nothing running | Add or change features · Start a new app · Open it | follow-on build (below) · step 2 + 3 · give `deployment.url`, `POST /relaunch` first if it doesn't load |
 | A card in `queued`…`deploying` | How far along is it? · Show me the plan · Pause it · Stop it | stage + `slices.done/total` in words · `artifacts/plan` summarized · `/pause` · `/cancel`, both after a yes |
-| A card in `parked` | What went wrong? · Pick up where it stopped · Go back to an earlier feature · Set it aside | read `recovery-packet`, explain it plainly · `/resume` (only if `recovery.canResume`) · `/restart` with a completed slice · `/dismiss`, all after a yes. Before a set-aside or start over, on an app that already shipped, say the half-built changes will be dropped; resume keeps them |
+| A card in `parked` | What went wrong? · Pick up where it stopped (or the step `nextAction` names) · Go back to an earlier feature · Start over · Set it aside | read `recovery-packet`, explain it plainly · `/resume` (only if `nextAction.action` is `resume`), else section 5 · `/restart` with a completed slice · `/retry` · `/dismiss`, all after a yes. Before a set-aside or start over, on an app that already shipped, say the half-built changes will be dropped; resume keeps them |
 | A queued card with `blockedBy` | lead with "It's waiting behind a stopped build", then the `parked` row for that build | |
 | Two or more projects with runs | Which app? (list names) · Start a new app | `POST /api/projects/select`, then re-read the row |
 
@@ -156,58 +156,51 @@ this. Don't cancel anything on your own to unblock it.
 
 ## 5. When a run parks
 
-Parked states are `failed`, `interrupted`, `cancelled`, and `paused`. Ask the owner before any
-of these actions:
+Parked states are `failed`, `interrupted`, `cancelled`, and `paused`. Read `job.nextAction`
+(`{action, label, endpoint, reason}`) and offer only that; the server refuses the others with 409
+and the same `nextAction`. Ask the owner before any of these actions:
+
+| `nextAction.action` | Meaning |
+|---|---|
+| `resume` | `POST /resume` continues from the preserved files (`recovery.canResume` is true only for this). Optional `{"features":N}` batches an approved running repair plan |
+| `prepare-plan` / `retry-plan` / `revise-inputs` | `POST /recovery-plan`: the repair budget is spent, a review hit its cap, a failure repeated on unchanged code, or the specs changed. Resume cannot help |
+| `approve-plan` | a Pause left a reviewed plan unstarted: `POST /recovery-start {"planDigest":"…"}` |
+| `amend-plan` | automatic plan corrections ran out: `GET /recovery-plan-packet`, then `POST /recovery-review {"phaseId","plan"}` |
+| `stop-worker` | a worker from before a restart is still alive; wait or stop that process, then re-read |
+| `factory-fix` | the factory built an over-size prompt (limit 200,000 characters). Retrying cannot help until a fixed factory build runs; report it |
+| `none` | `cancelled` (start over), dismissed, or a worker already running |
 
 | Endpoint (POST unless noted) | Does |
 |---|---|
-| `/api/jobs/<id>/resume` | continues from the last good point (when `job.recovery.canResume`) |
-| `/api/jobs/<id>/restart` `{"fromSlice":"<slice id>"}` | re-runs from a completed slice onward |
+| `/api/jobs/<id>/restart` `{"fromSlice":"<slice id>"}` | re-runs from a completed slice onward (not the first; that is start over); keeps the repair count, drops stale sessions and repair plans |
+| `/api/jobs/<id>/retry` | start over: a fresh run from the same brief; the parked one is rolled back and dismissed |
 | `/api/jobs/<id>/dismiss` | sets the run aside and unblocks the project's queue; if the app shipped before, puts it back to that release (its `data/` is kept) |
 | `/api/jobs/<id>/pause`, `/cancel` | pauses or stops an active run, or dequeues a queued one |
 | `/api/jobs/<id>/relaunch` | restarts a completed app whose server stopped |
+| `/api/jobs/<id>/inputs?name=<file>` (raw body) | adds a spec file (md, txt, json, html, yaml, csv, pdf, image) to an idle parked run |
 | GET `/api/jobs/<id>/recovery-packet` | the diagnosis to read before suggesting a fix |
 
-## Feature recovery within a preserved run
+Ask before each.
 
-For an unresolved parked run with a matching failed review, choose **Plan feature
-recovery**. An active run must first reach a safe stop through Pause. Planning
-preserves the source, original contract and completed work, and produces a separate
-execution plan mapping every unfinished MH/SC check to an owning feature slice.
-Review the plan, then choose **Approve and start feature recovery**. Approval is
-bound to the plan digest, source baseline, source review, and frozen contract.
-A changed baseline rejects stale approval; regenerate the plan before starting.
+## Features and repairs
 
-Each feature runs deterministic gates and a scoped evidence review of both its
-acceptance checks and the full original checks it owns. Completed features are
-recorded durably; Resume continues at the unfinished feature. There are up to two
-repairs per feature and two for final integration, bounded by the approved phase.
-Recovery resumes do not replenish consumed budgets. The original full-contract
-review still gates deployment. The run ID and original strategy are unchanged;
-source reviews, feature reviews and prior phase histories remain available.
+Each planned feature declares the files it `writes`; a feature that changes others fails its
+checks. Each gets 2 repairs, and final integration gets 2 more. A feature that exhausts its
+budget is **set aside** when independent features remain: its dependents wait, the rest keep
+building, and the run then parks with the set-aside work restored. It resumes with its
+unspent repairs. Resume never renews a spent budget.
 
-`POST /api/jobs/:id/recovery-plan` starts planning through the project scheduler.
-Read the resulting plan at `GET /api/jobs/:id` under `job.recoveryPhase`.
-`POST /api/jobs/:id/recovery-start` with `{"planDigest":"…"}` approves that exact
-plan and queues execution. These controls reject active/queued project writers.
-The run card shows planned/current/verified features, acceptance checks and budgets.
-The Guide can explain this state; chat text alone does not execute recovery.
+When repairs run out, `prepare-plan` plans features for the unfinished checks. Once that plan
+passes independent review, **repairs start on their own**: the owner approves nothing. Pause
+before the next feature stops them; the plan stays `ready` and `approve-plan` restarts it. Read
+the plan at `GET /api/jobs/<id>` under `job.recoveryPhase`. Plan or start requires an idle parked
+run, so Pause an active one first. `/recovery-plan` takes optional `guidance` (up to 6000
+characters) to revise a plan; the old one then can't be approved. The original full-contract
+review still gates deployment. The Guide can explain this state; chat text does not run it.
 
-Do not loop broad Resume after repeated review rejection. Use feature recovery
-when unfinished checks need separate implementation turns. Inspect and show the
-concrete recovery plan before approving its digest. Existing explicit owner
-authorization to execute the recovery remains valid; do not ask again merely
-because planning produced the implementation detail.
+Do not loop Resume after repeated review rejection; follow `nextAction`.
 
-**Recovery safeguards.** These hold even when the owner asks for a shortcut. A plan the
-factory will not move forward is changed through its own endpoints (an owner-submitted
-corrected plan, or a real spec change), not by editing state:
-- Never mark a live plan failed manually.
-- Never fake an input change (touching specs, uploads or guidance) to unlock planning.
-- Never reset spent corrections or repair budgets.
-- Preserve completed work, evidence and approval history: prior phases, plan files, reviews,
-  approved candidates and checkpoint commits.
-
-To revise a ready plan, enter feedback and choose Plan feature recovery again.
-The planning endpoint accepts optional `guidance` text (up to 6000 characters);
-prior candidate/history are preserved and old approval becomes invalid.
+**Safeguards** hold even when the owner asks for a shortcut:
+- Never mark a live plan failed, fake an input change to unlock planning, or reset spent repair
+  budgets.
+- Preserve completed work, evidence and approval history.

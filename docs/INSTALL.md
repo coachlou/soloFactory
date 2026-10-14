@@ -824,6 +824,8 @@ Work these yourself. Do not read this table out loud.
 | `Run \`codex login\` and choose ChatGPT sign-in.` | Codex signed in with an API key | `codex login`, pick ChatGPT |
 | `requires a newer version of Codex` | Codex CLI is out of date | Update the Codex CLI, then restart the server |
 | Browser shows "can't connect" / "site can't be reached" | The server window was closed or `Control`+`C`'d | Restart with `cd ~/solofactory && bash start.sh` and leave it running |
+| Run parks as *Repair budget exhausted* | A gate kept failing after its repairs were spent | In the run view choose **Prepare repair plan**; once the independent review passes, repairs start on their own. Resume alone does not renew the budget |
+| Run fails with `prompt_too_large` ("over SoloFactory's 200000-character prompt limit") | A factory defect: the input cannot fit, so retrying cannot help and no agent was started | Do not retry. Have the owner use **Report this run** (or Feedback) in the top bar |
 | `Port 4173 is in use by another app` | Another app already uses port 4173 | Start with a different port: `cd ~/solofactory && PORT=5000 bash start.sh`, then use `http://127.0.0.1:5000` everywhere this guide says 4173 |
 | `SoloFactory is already running at …` | A factory from an earlier window is still running | Open that address; don't start a second one |
 | `ask for an invite to that repo` right after the `curl` line | No GitHub access to the private release | `gh auth login` with an account that has access, or use a zip — see **The install command** |

@@ -154,6 +154,18 @@ only complete output records, so source code in a successful command's output (f
 an `UNAUTHORIZED` constant) cut at the 200K output cap is never mistaken for a sign-in
 failure and never suppresses the bounded idle resume.
 
+No agent prompt may exceed 200,000 characters (`MAX_PROMPT_CHARS`, set by the owner; most are
+far smaller). The check sits at the provider boundary, so the interview chat is covered too, and
+an oversized prompt is refused before any agent starts with `prompt_too_large` (`agent.started`
+records `promptChars`). Large planner and repair-planner inputs are written to files under
+`.factory/` and referenced, not inlined; the provider's own `input_too_large` is classified the
+same way. Because the same factory build rebuilds the same prompt from the same saved inputs,
+such a run parks with the action "install a SoloFactory fix": Resume is refused
+(`factory_fix_required`) until a different build ID is running. Build ID is the package version
+plus commit; an installed copy takes the commit from its `VERSION` stamp
+(`solofactory <version> (<sha>) ...`) because the enclosing repository's HEAD is the owner's
+project, not the factory.
+
 ## 5. Output application contract
 
 Every generated app must be a self-contained Node project with:
@@ -294,6 +306,13 @@ Only one job may be active because the target user does not benefit from resourc
 
 ## 9. HTTP surface
 
+Process behavior: the server listens on `PORT` (default 4173), a fixed port the guides and the
+manual assume, and never picks another. If the port is taken it exits with status 1 and a plain
+message: "SoloFactory is already running at <url>" when `/api/health` there answers with a
+`workers` list, otherwise the `PORT=5000 bash start.sh` command to use instead. On SIGINT or
+SIGTERM it cancels active runs, drops idle connections and force-closes remaining ones after a
+1-second grace, so one stalled request cannot keep it alive; it exits after 10 seconds regardless.
+
 - `GET /manual` — the self-contained HTML user manual (`docs/manual/index.html`), linked from the header.
 - `GET /api/health` — factory health, active project, busy run, `activeRuns`, `maxActiveRuns`, and
   `workers` (each active run's supervision snapshot: server alive is not worker progressing).
@@ -380,8 +399,13 @@ carry a strategy forward.
    every original check closed by exactly one feature and referenced by one of its
    obligations; no unknown or duplicate owners; a prerequisite feature (empty `closes`) has
    its own proof and a later closing dependent; every proof an `npm`/`node`/`npx` argv; no
-   unresolved compatibility entry. Planning turns may not change app source or the frozen
-   contract (`plan_mutation`).
+   unresolved compatibility entry. Each feature also declares `writes` (app-relative paths,
+   directories or globs it creates or edits, tests included): the validator keeps independent
+   features' writes apart and reserves `package.json` and `factory.json` for foundation
+   features (a feature with dependencies may not write them). `writes` is optional in the
+   validator so plans and saved runs from before it still build, but a feature without it
+   gets none of the writes-based safeguards below. Planning turns may not change app source or
+   the frozen contract (`plan_mutation`).
 3. **Approve.** A fresh reviewer writes `.factory/plan-review-result.json` copying the
    request's token, contract digest and plan digest. Only an `approve` verdict bound to the
    exact plan approves it; a malformed, stale or mismatched verdict, or a reviewer that edits
@@ -394,16 +418,59 @@ carry a strategy forward.
    obligations, bound to a hash of the candidate source; a reviewer that edits source voids
    its verdict and forces fresh checks; capped at 4 reviews, `review_unstable`) → committing
    (a durable checkpoint commit; failure is `checkpoint_failed` and nothing advances) →
-   verified. Only then does the feature enter `sliceDone`. Each feature's checks re-confirm
+   verified. Only then does the feature enter `sliceDone`. Gate logs are named per feature
+   and attempt (`.factory/logs/<gate>-<feature>-<attempt>.log`), so a later clean feature
+   cannot overwrite an earlier one's evidence and reviewers read the right output. A feature's
+   build turn and its same-stage continuation share one agent session, found by exact label
+   (an API feature never resumes API-AUTH's session). Each feature's checks re-confirm
    the approved plan and contract are unchanged (`stale_plan`) and its supplied inputs are
    unchanged (`inputs_changed`). Proofs marked `pending: "integration"` are skipped here and
    run before the final review; the checks they prove stay pending until then.
+   A large feature is not inlined: past 60,000 characters the controller writes it to the
+   gitignored `.factory/logs/feature.json` and the build and review prompts tell the agent to
+   read that file. Normal-sized features stay inline.
+   - **Declared writes are enforced.** The `writes` gate fails a feature that changed any file
+     outside its list, naming the files. It diffs against the feature's start commit
+     (`featureCursor.base`) plus untracked files, so a stray file the agent committed itself is
+     still caught. A cursor saved without a base falls back to the uncommitted tree.
+   - **Earlier proofs rerun when a later feature reaches them.** A feature's checks also run
+     the proofs of every built feature whose own or dependencies' writes cover a file the
+     feature changed since the last verified feature's commit (`slice.impact` event). Plans are
+     told not to write cumulative regression proofs. If any built feature has no `writes`,
+     impact selection returns nothing and no earlier proofs rerun. Recovery phases do not do
+     this per-feature rerun (see below).
+   - **Independent features keep building past a blocked one.** When a feature fails
+     `quality_gate_failed`, `review_rejected` or `review_unstable`, every feature in the plan has
+     `writes`, and some unbuilt feature does not depend on it, the controller commits its work
+     (`factory: set aside <id>`), records `refs/factory/set-aside/<id>`, saves the entry (with
+     the feature's cursor and unspent repairs) to `job.setAside`, resets the tree to the
+     feature's base and continues (`slice.set_aside`). The feature and everything depending on it
+     wait (`slice.waiting`). After the independent features are built the run parks once, with
+     the first set-aside feature's files inside its declared writes restored from the ref
+     (files it wrote outside its writes are not restored), its unspent repairs restored on top of
+     the shared attempt counter, and its original error code, so Resume, repair planning and
+     restart behave as for any blocked feature. Only the main feature plan does this.
 5. **Budgets.** 2 corrections per plan (more while each review finds fewer blockers than the one
    before, at most 3× the base), 2 repairs per feature, 2 for final integration. Each is
-   set once and never refilled by resume.
+   set once and never refilled by resume. Restart from a slice keeps the run-wide repair counter
+   (so repair logs never overwrite the parked run's) and re-derives each rebuilt feature's budget
+   from it; it clears agent sessions, set-aside entries, recorded release-QA bug proofs and any
+   in-flight repair plan (archived as `discarded`), which all describe the discarded work.
 6. **Final review and deployment** are the same whole-app gates and contract review as before,
    plus every outstanding `pending: "integration"` proof (from this and every earlier plan of the
-   run) as a gate and as a review check.
+   run) as a gate and as a review check. Final integration also reruns the proofs of every built
+   feature (the original plan's; in a recovery a repair feature with the same id replaces its
+   original), every release-QA bug proof recorded so far and every `qa/*.test.*` file in the
+   tree, so a later repair or follow-on release cannot quietly bring back a fixed bug. Features
+   built by an earlier recovery phase are not carried into this rerun.
+   **Release QA.** The final reviewer reports defects instead of fixing feature code: for each
+   defect it writes a failing `node:test` file under `qa/` and lists `{test, files, description}`
+   under `bugs` in `review-result.json`. A review that lists any bug blocks even if its verdict
+   says pass. The controller assigns each bug to the latest feature whose declared writes cover
+   the faulty files and repairs it under that feature's writes gate with the finding's test as
+   evidence (`review.bug`); bugs no feature owns, or whose tests already pass, get the unscoped
+   repair. Bug items share the final-stage budget. A repair prompt carries its feature, its
+   writes and the QA findings inline instead of telling the agent to reread the whole plan.
 
 Pause and resume continue at the cursor's substage: a pause after checks resumes at review,
 with no rebuild and no duplicate `slice.completed`. Restart-from-slice rewinds to the prior
@@ -591,6 +658,23 @@ bound to the application source. Source changes invalidate it; integration verif
 reruns all non-superseded proofs even if they passed before, so repairs cannot reuse stale
 evidence. Input-driven reopening supersedes the replaced feature's proofs. Every feature
 still needs at least one proof that runs when it is built.
+
+Recovery features run the same writes gate (against the cursor's start commit, which recovery
+cursors now record) and the same file-for-large-features rule. Every freshly drafted or
+owner-submitted repair plan must be a version 2 feature plan with `writes` on every feature;
+repair plans saved by earlier releases still load. Not yet implemented: set-aside of a blocked
+recovery feature, and the per-feature rerun of earlier features' proofs on a reached file
+(recovery reruns them only at final integration, above).
+
+A replacement plan (an owner amendment or a consolidation of a reviewed plan) must keep every
+reviewed obligation. A kept obligation id may not change its behavior, expected result or proof
+command, nor drop or alter its cases; a change of meaning must instead be a new case that
+`supersedes` the original, which the reviewer then compares against it.
+
+A feature that exhausts its review limit (4 reviews, `review_unstable`) parks with **Prepare
+repair plan** as its action, not Resume, which would hit the same limit. Planning proceeds from
+the feature's unfinished checks the way a spent gate does (no failed review to bind), with the
+cap message as its blocker.
 
 A recovery phase parked mid-feature by an older version (no substage cursor) resumes
 at checks for that feature, keeping its consumed budget, rather than rebuilding it.

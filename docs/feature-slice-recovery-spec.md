@@ -1,6 +1,8 @@
 # Feature and slice recovery within a preserved run
 
-Status: first implementation verified (124 tests pass), 2026-10-07. Requested by Lou.
+Status: first implementation verified (124 tests pass), 2026-10-07. Requested by Lou. Updated 2026-10-13 to match
+HEAD of `wip/feature-slice-recovery`; SPEC.md (Feature recovery within a preserved run) is the source of truth.
+The branch is not merged or released until Lou accepts a real-provider recovery smoke.
 
 The first version supports parked runs with matching failed review checks. Pause an
 active run with the existing Pause control before planning. It does not automatically
@@ -44,14 +46,27 @@ contract or declare the original run complete with requirements deferred.
    Identify already verified behavior to preserve and any real external blocker.
 4. Show the owner the slices, acceptance checks, preserved baseline, and bounded
    repair budget. Planning and execution use subscription quota; starting a
-   plan does not authorize execution of an unreviewed plan.
-5. On approval, execute one recovery slice at a time through the existing
+   plan does not authorize execution of an unreviewed plan. As implemented, the
+   independent review is the approval: a plan that passes it starts executing on its
+   own, bound to the exact plan digest, and the owner is asked only when corrections
+   stall (they continue past the base budget while each review finds fewer blockers,
+   up to 3x) or run out. A Pause during planning parks the plan `ready` for explicit
+   approval (`recovery-start` with the plan digest).
+5. Once approved, execute one recovery slice at a time through the existing
    provider, gate, queue, and project-lock mechanisms. Scope each repair to the
    current slice. Record a checkpoint only after its acceptance checks pass.
    Before a slice's first build turn, run its checks: a slice that already
    passes goes straight to its scoped review; a failure is handed to the
    builder. This check spends no repair budget. A reviewer's blockers on a
    pre-verified slice start its build turn, not a repair.
+   Each slice is held to the same safeguards as a new-run feature: the `writes` gate
+   (every freshly drafted or submitted repair plan must declare `writes` per feature;
+   changes outside them fail the slice, measured against the slice's start commit so a
+   file the agent committed itself is still caught), gate logs named per feature,
+   a build session resumed only by its exact label, and large slices read from
+   `.factory/logs/feature.json` rather than inlined (past 60,000 characters).
+   A slice that exhausts its review limit (`review_unstable`) goes to Prepare repair plan,
+   not Resume.
    The owner may set a batch (`features: N` on `recovery-plan`, `recovery-start` or
    `resume`): the run parks as paused after N more slices, with its cursor,
    budgets and evidence kept. A plain resume keeps an unfinished batch's end.
@@ -59,7 +74,11 @@ contract or declare the original run complete with requirements deferred.
    verified slices. Reuse prior evidence only when it still applies to the
    current code and contract.
 7. After the last recovery slice, run whole-project regression gates and fresh
-   structured review against every original requirement. Deploy or mark the
+   structured review against every original requirement. The gates also rerun the
+   original plan's built-feature proofs (a repair slice with the same id replaces its
+   original), every release-QA bug proof and `qa/` test, and all non-superseded
+   integration proofs. The final reviewer reports defects as failing `qa/` tests, which
+   are routed to the slice owning the faulty files; it does not fix feature code. Deploy or mark the
    run completed only after those gates pass.
 
 ## Plan and evidence boundaries
@@ -79,6 +98,10 @@ contract or declare the original run complete with requirements deferred.
   Use distinct recovery-phase/slice attempt identities so new attempts cannot
   overwrite old artifacts. Do not mark an original failed check as passed just
   because a recovery slice's narrower test passed.
+- A replacement plan may not change what a kept obligation asserts: under the same id,
+  its behavior, expected result and proof command stay and its cases may not be dropped
+  or altered. A change of meaning is a new case that supersedes the original, which the
+  reviewer compares against it.
 - Apply bounded repairs per recovery slice and a visible bound for the approved
   recovery phase. Exhaustion parks the run; automatic retries cannot replenish
   the budget or silently replan.
@@ -106,6 +129,9 @@ The existing run card gains a recovery section: approved plan, current feature,
 verified/remaining counts, blockers, acceptance evidence, and remaining attempts.
 The Guide receives this controller state and can explain it. Chat text alone
 must not claim to have changed the execution plan or started a worker.
+
+Run view (see `run-board-and-controls-spec.md`, Part C): the run's plan is drawn as a metro
+map with per-step time and tokens; it shows the repair plan's features when a recovery phase exists.
 
 Treat per-feature live previews as a separate extension. Verified feature
 checkpoints do not by themselves make the whole app production-ready. This first
@@ -148,11 +174,21 @@ without recovery-phase fields readable and resumable through existing controls.
     remaining attempts, and evidence. The Guide's account matches this state.
 11. Older jobs still load and use ordinary Resume without a recovery migration.
 
+## Not yet implemented
+
+- Setting aside a blocked recovery slice so independent slices keep building. The main
+  feature plan does this (SPEC.md section 12); recovery phases park on the first blocked slice.
+- Rerunning earlier features' proofs when a recovery slice changes files they own. Recovery
+  reruns them only at final integration.
+- Per-feature live previews and new requirements during recovery (as before).
+
 ## Delivery boundary
 
 Implement and test in the SoloFactory dev repo, then regenerate the installed
 distribution. Do not replace the running factory while its current photo-library
 recovery has an active worker. This note does not change or pause that run.
+(2026-10-07 wording, kept as written. The release gate is now the real-provider recovery
+smoke noted under Status.)
 
 Prerequisite-only recovery slices may use an empty `checks` array, but still
 require executable acceptance criteria. Every unfinished original check must

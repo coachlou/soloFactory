@@ -33,11 +33,11 @@ recovery packet to explain the named requirements and ALL unfinished checks in p
 Read .factory/review-request.json, review-result.json and REVIEW.md when needed to resolve IDs.
 Distinguish missing behavior from missing acceptance evidence. Do not invent external blockers.
 The Guide runs read-only: it cannot repair the app or resume the controller. Explain that
-Resume is on the existing run card; chatting alone does not resume it. Do not claim you have
-resumed, repaired or queued anything. Do not automatically interview a new feature or declare
-ready in response to a blocked-run diagnostic. An explicit owner resume re-enters review and grants another bounded repair cycle; it
-retains the same files and frozen contract. Broad missing scope may still require a revised
-execution plan rather than repeated blind resumes. Preserve the frozen requirements; ask about a new release only if requested.
+The run card offers the one step the controller allows (its nextAction); chatting alone does
+not take it. Do not claim you have resumed, repaired or queued anything. Do not automatically
+interview a new feature or declare ready in response to a blocked-run diagnostic. Resume keeps
+the same files and frozen contract but does not renew a spent repair budget; when the budget is
+spent the step is Prepare repair plan. Preserve the frozen requirements; ask about a new release only if requested.
 
 For an actual follow-on feature request, read the existing PRD/ACCEPTANCE, preserve proven
 behavior and scope the requested increment. Carry unresolved requirements explicitly into any
@@ -85,11 +85,13 @@ The brief must contain strings or string arrays for: `workingName`, `promise`, `
 
 ## Feature recovery controls
 
-For a matching blocked review, explain Plan feature recovery on the existing run.
-For an active run, Pause first and wait for it to park. Planning spends subscription
-quota but does not authorize execution. Review the prepared plan, then use Approve
-and start feature recovery. Stale approval requires regeneration. Completed recovery
-features are preserved on Resume. Recovery budgets are durable and are not renewed
-by Resume. The full original contract must still pass before deployment. New scope
-belongs in a separately approved follow-on release. Use the supplied controller
-featureRecovery snapshot for current/verified/remaining work; do not invent progress.
+Each feature declares the files it writes. A feature that exhausts its repairs is set aside
+when independent features remain; its dependents wait and the rest keep building. For a
+matching blocked review, explain Prepare repair plan on the existing run. For an active run,
+Pause first and wait for it to park. Planning spends subscription quota. Once the plan
+passes independent review, repairs start on their own; only a Pause leaves a ready plan
+waiting for Approve and continue repairs. Completed features are preserved on Resume.
+Repair budgets are durable and Resume does not renew them. The full original contract must
+still pass before deployment. New scope belongs in a separately approved follow-on release.
+Use the supplied controller featureRecovery snapshot for current/verified/remaining work; do
+not invent progress.

@@ -1,6 +1,6 @@
 # Run board and run controls — spec
 
-**Status: implemented in 0.7.0.** Kept as design record; SPEC.md §4 (Owner controls), §6 and §9 are the source of truth.
+**Status: implemented in 0.7.0; Part C added 2026-10-13 for the run view on `wip/feature-slice-recovery`.** Kept as design record; SPEC.md §4 (Owner controls), §6 and §9 are the source of truth.
 
 Companion to `run-queue-spec.md`. Part A (the board) depends on nothing and can ship
 first. Part B (controls) depends on the scheduler from the queue spec.
@@ -79,6 +79,35 @@ project" is what makes them safe.
 **Not in this spec.** Restart from an earlier *release* (an earlier job). It is a reset
 across run boundaries that invalidates every later run's evidence. Wait for the demand;
 if it comes, it is the same reset with a confirm that names the superseded runs.
+
+## Part C — the run view (run map)
+
+Not part of the 0.7.0 design. It replaces the run view's status and evidence cards (`public/app.js`
+`renderMap`, `public/index.html`, `public/styles.css`). Nothing new is stored; it reads the job
+record, its event log and the telemetry summary.
+
+- **Metro map.** The plan is an SVG line of numbered stops: the recovery phase's repair plan if one
+  exists, else the approved feature plan, else the five pipeline stages (SPEC, BUILD, GATES,
+  REVIEW, DEPLOY) for older runs. Stops are done, current, blocked (run parked) or queued; a
+  moving "train" shows the current stop's time; a dashed spur marks the selected stop's
+  dependencies. Long plans wrap into rows (9 per row, 5 on a narrow view). Click or keyboard to
+  select a stop. Redrawn only when its visible signature changes, so animation and focus survive polling.
+- **Health pill.** Driven by activity, not the event log alone: the agent's streamed tool use and
+  supervision heartbeats, or a running workspace command (shown as "Running <gate>"). Green under
+  10 minutes quiet, amber to 30, red beyond or when the run stops; paused and queued are neutral.
+- **Selected stop.** Status, time and repairs used; a verified feature shows its exact time
+  (`formatSpan`: `45s`, `12m 05s`, `2h 05m`, so a sub-minute step is not "0m") and review passes.
+  A feature's time is wall time since the previous feature was verified (pauses count).
+- **Four answers.** Moving, Healthy, How far (verified of total, a time-left estimate from the
+  plan's average, run time and tokens), Needs you (the continuation policy's next action).
+- **Step time and tokens.** The header leads with the current step's time and tokens, with the
+  run total beneath; each progress segment shows its stage's time and tokens in/out. No dollar
+  figure is shown (members run on subscriptions).
+- **Activity stream.** Last 300 events, newest first, filterable (All, Agent, Files, Gates, Stages).
+- **Scroll-preserving polling.** The view polls every 1.5s. It patches existing nodes in place
+  (`patchChildren`) instead of replacing the stop panel and answers, and rebuilds the stream only
+  when new events arrived, so the page does not jump when text changes height.
+- Not implemented: paging back past the last 300 events; per-phase queue depth (as in Part A).
 
 ## Implementation steps (each ≤ 3 files)
 

@@ -10,7 +10,7 @@ It does not request or store an OpenAI or Anthropic API key.
 
 ## Requirements
 
-- Node.js 22 or newer.
+- Node.js 22 or newer; Node 24 LTS is the recommended version. The installer warns on Node 25 and up, because some packages the factory builds with ship no prebuilt files for it yet.
 - Codex CLI signed in with ChatGPT (`codex login status` should say `Logged in using ChatGPT`),
   or Claude Code signed in with a subscription account.
 - npm, available on `PATH`.
@@ -21,7 +21,7 @@ It does not request or store an OpenAI or Anthropic API key.
 npm start
 ```
 
-Open <http://127.0.0.1:4173>. The **Manual** button in the header opens the illustrated user
+Open <http://127.0.0.1:4173>. If that port is taken, the server says whether it is another SoloFactory (open that one) or another app (start with `PORT=5000 npm start`). The **Manual** button in the header opens the illustrated user
 manual (`docs/manual/index.html`, also served at `/manual`). Answer the Factory Guide one turn at a time, review the
 compiled brief, and choose **Queue for the factory**. **Attach files** drops an existing spec
 (markdown, text, JSON, YAML, CSV) straight into the conversation and lets the Guide open a
@@ -138,7 +138,7 @@ file never leaves your machine; `GET /api/errors?limit=50` returns the latest en
 
 ## Operational boundaries
 
-- SoloFactory binds to `127.0.0.1` by default and handles one active build at a time.
+- SoloFactory binds to `127.0.0.1` by default (`HOST` overrides) and runs one active build at a time unless `SOLOFACTORY_MAX_ACTIVE_RUNS` is raised (runs in one project always go one after another).
 - Generated code runs with your local OS permissions. The command allowlist prevents shell
   interpolation but is not a hostile-code sandbox.
 - Never place credentials or production customer records in the interview.
@@ -169,6 +169,7 @@ file never leaves your machine; `GET /api/errors?limit=50` returns the latest en
 - If the server restarts while a worker it launched is still running, the run parks with
   **Stop worker** and its pid; Resume appears once that process has exited. A worker that
   started before this version recorded no pid, so its liveness cannot be checked.
+- No agent prompt exceeds 200K characters; larger inputs (plans, reviews, transcripts) go in files the agent reads. A prompt that still would not fit fails with `prompt_too_large` before any agent starts, and the dashboard offers no Retry for it: it is a factory defect to report.
 - Usage limits, authentication errors, network failures, toolchain failures, and permissions
   are never blindly retried. The dashboard explains the blocker and preserves a recovery
   packet that can be pasted into Codex for human-guided recovery. Diagnostics read
