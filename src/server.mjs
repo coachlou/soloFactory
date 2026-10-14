@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { JobStore } from "./store.mjs";
 import { withReviewDiagnostics } from "./review.mjs";
 import { amendmentPacket, assertBatch, validateRecoveryApproval } from "./feature-recovery.mjs";
-import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, assertPlanInputsRevised, assertPlanReviewable, buildRecovery, buildRecoveryPacket, continuationAction, SoloFactory, withContinuation } from "./factory.mjs";
+import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, admitsPlanning, assertPlanInputsRevised, assertPlanReviewable, buildRecovery, buildRecoveryPacket, continuationAction, SoloFactory, withContinuation } from "./factory.mjs";
 import { watchConfig } from "./watchdog.mjs";
 import {
   INTERVIEW_RESPONSE_SCHEMA,
@@ -93,17 +93,21 @@ export async function createSoloFactoryServer(options = {}) {
   let closing = false;
 
   // A project's queue waits while its most recently started run is parked and unresolved:
-  // the tree may be mid-repair, and the next release must not build on it.
+  // the tree may be mid-repair, and the next release must not build on it. A queued resume of that run
+  // does not release it: the start would run first, or beside the repair.
   async function blockerFor(projectId) {
     const started = (await storeFor(projectId).list()).filter((job) => job.startedAt);
     const last = started.sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
-    return last && PARKED.has(last.state) && !last.dismissed && !queue.some((entry) => entry.jobId === last.id) ? last.id : null;
+    return last && PARKED.has(last.state) && !last.dismissed ? last.id : null;
   }
 
   async function drainOnce() {
     for (let i = 0; i < queue.length && runs.size < maxActiveRuns && !closing; ) {
       const entry = queue[i];
-      if (runs.has(entry.projectId) || (entry.mode === "start" && (await blockerFor(entry.projectId)))) { i += 1; continue; }
+      const blocked = runs.has(entry.projectId) || (entry.mode === "start" && (await blockerFor(entry.projectId)));
+      // enqueue may unshift during that await: find this entry again rather than trust the old index.
+      i = queue.indexOf(entry);
+      if (blocked) { i += 1; continue; }
       queue.splice(i, 1);
       const projectStore = storeFor(entry.projectId);
       await projectStore.init();
@@ -137,6 +141,9 @@ export async function createSoloFactoryServer(options = {}) {
     console.error(`scheduler: ${error.message}`);
     return logError({ source: "scheduler", code: error.code, message: error.message });
   }));
+
+  // Runs fn on the drainer's chain, so no queued entry launches between fn's checks and its writes.
+  const exclusive = (fn) => { const result = draining.then(fn); draining = result.catch(() => {}); return result; };
 
   function enqueue(projectId, jobId, mode = "start", { front = false, ...extra } = {}) {
     jobProject.set(jobId, projectId);
@@ -211,7 +218,7 @@ export async function createSoloFactoryServer(options = {}) {
             repairs: Object.values(job.sliceStats ?? {}).reduce((sum, s) => sum + (s.repairs ?? 0), 0),
           };
         }
-        if (job.recoveryPhase?.plan) card.slices = { done: job.recoveryPhase.done.length, total: job.recoveryPhase.plan.slices.length, current: job.recoveryPhase.current ?? null, repairs: 0 };
+        if (job.recoveryPhase?.plan) card.slices = { done: job.recoveryPhase.done.length, total: job.recoveryPhase.plan.slices.length, current: job.recoveryPhase.current ?? null, repairs: 0, remainingRepairs: Math.max(0, (job.repairBudgetLimit ?? 0) - (job.attempt ?? 0)) };
         if (job.blockedBy) card.blockedBy = job.blockedBy;
         columns[column].push(card);
       }
@@ -291,7 +298,9 @@ export async function createSoloFactoryServer(options = {}) {
         const runContext = current ? {
           project: active.id, jobId: current.id, state: current.state, strategy: current.sdlc ?? "single",
           repairAttempts: current.attempt ?? 0,
-          featureRecovery: current.recoveryPhase ? { status: current.recoveryPhase.status, done: current.recoveryPhase.done, current: current.recoveryPhase.current, plan: current.recoveryPhase.plan, gaps: current.recoveryPhase.request?.checks ?? [], planBlockers: current.recoveryPhase.planBlockers ?? [], remainingRepairs: Math.max(0, (current.repairBudgetLimit ?? 0) - current.attempt) } : null,
+          featureRecovery: current.recoveryPhase ? { status: current.recoveryPhase.status, done: current.recoveryPhase.done, current: current.recoveryPhase.current,
+            // The plan stays on disk (up to MAX_AMENDED_PLAN_BYTES); the guide reads it from the project when it needs it.
+            planFile: current.recoveryPhase.planFile ?? null, features: current.recoveryPhase.plan?.slices.length ?? 0, gaps: current.recoveryPhase.request?.checks ?? [], planBlockers: current.recoveryPhase.planBlockers ?? [], remainingRepairs: Math.max(0, (current.repairBudgetLimit ?? 0) - current.attempt) } : null,
           recoveryPacket: PARKED.has(current.state) ? buildRecoveryPacket({ ...current, recovery: current.recovery ?? buildRecovery(current, active.dir) }) : null,
         } : { project: active.id, state: "no-runs" };
         const result = await providerFactory(provider).run({
@@ -414,16 +423,23 @@ export async function createSoloFactoryServer(options = {}) {
       }
       const dismissMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/dismiss$/);
       if (request.method === "POST" && dismissMatch) {
-        // Owner accepts a parked run as-is, which releases its project's queue.
-        const jobStore = storeOfJob(dismissMatch[1]);
-        const job = await jobStore.read(dismissMatch[1]);
-        if (!PARKED.has(job.state)) return json(response, 409, { error: "Only a parked run can be dismissed." });
-        await rollBack(job, jobStore);
-        job.dismissed = true;
-        await jobStore.writeState(job);
-        await jobStore.appendEvent(job.id, { type: "job.dismissed", state: job.state, message: "Dismissed by owner; queued runs may proceed" });
-        await drain();
-        return json(response, 202, { job });
+        // Owner accepts a parked run as-is, which releases its project's queue. The rollback is a hard reset,
+        // so it never runs beside a writer: a live run, or a queued resume or recovery of this project.
+        const id = dismissMatch[1];
+        const projectId = jobProject.get(id) ?? active.id;
+        const jobStore = storeOfJob(id);
+        const outcome = await exclusive(async () => {
+          const job = await jobStore.read(id);
+          if (!PARKED.has(job.state)) return { status: 409, body: { error: "Only a parked run can be dismissed." } };
+          if (runs.has(projectId) || queue.some((entry) => entry.projectId === projectId && entry.mode !== "start")) return { status: 409, body: { error: "This project has a running or queued writer; dismiss it after that writer parks." } };
+          await rollBack(job, jobStore);
+          job.dismissed = true;
+          await jobStore.writeState(job);
+          await jobStore.appendEvent(job.id, { type: "job.dismissed", state: job.state, message: "Dismissed by owner; queued runs may proceed" });
+          return { status: 202, body: { job } };
+        });
+        if (outcome.status === 202) await drain();
+        return json(response, outcome.status, outcome.body);
       }
       const featureRecoveryMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/recovery-(plan|start)$/);
       if (request.method === "POST" && featureRecoveryMatch) {
@@ -434,6 +450,7 @@ export async function createSoloFactoryServer(options = {}) {
         const next = continuationAction(job, { maxRepairs, busy: runs.has(projectId) || queue.some(entry => entry.jobId === id) });
         if (!PARKED.has(job.state) || job.dismissed || runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start")) return json(response, 409, { error: "Feature recovery requires an idle, unresolved parked run. Pause an active run first.", nextAction: next });
         if (next.action === "none") return json(response, 409, { error: next.reason, nextAction: next });
+        if (action === "plan" && !admitsPlanning(next)) return json(response, 409, { error: `Prepare repair plan is not the next step: ${next.reason}`, nextAction: next });
         const body = await readJson(request);
         if (action === "start") {
           try { await validateRecoveryApproval({ store: jobStore }, job, body.planDigest); }

@@ -108,7 +108,7 @@ function boardCard(card) {
     if (card.slices.repairs && bar.lastChild) bar.children[Math.max(0, card.slices.done - 1)].classList.add("repaired");
     // Feature status: verified, then the cursor's substage (or blocked when parked), then planned.
     const status = card.slices.current ? ` · ${card.slices.current} ${PARKED.includes(card.state) ? "blocked" : card.slices.substage ?? "planned"}` : "";
-    bar.title = `${card.slices.done}/${card.slices.total} features verified${status}${card.slices.repairs ? ` · ${card.slices.repairs} repair${card.slices.repairs === 1 ? "" : "s"}` : ""}`;
+    bar.title = `${card.slices.done}/${card.slices.total} features verified${status}${card.slices.repairs ? ` · ${card.slices.repairs} repair${card.slices.repairs === 1 ? "" : "s"}` : ""}${card.slices.remainingRepairs != null ? ` · ${card.slices.remainingRepairs} repair${card.slices.remainingRepairs === 1 ? "" : "s"} left` : ""}`;
     button.append(bar);
   }
   if (card.blockedBy) button.append(Object.assign(document.createElement("small"), { className: "blocked", textContent: `waiting on recovery of ${card.blockedBy}` }));
@@ -476,7 +476,6 @@ function showRun() {
   document.querySelector('[data-stage="interview"]').classList.add("done");
   $("#run-id").textContent = state.job.id;
   $("#run-title").textContent = state.job.brief.workingName || "Building your app";
-  $("#agent-name").textContent = state.job.provider;
   renderJob();
 }
 
@@ -499,42 +498,18 @@ async function poll() {
 
 function renderJob() {
   const job = state.job;
-  $("#run-state").textContent = job.state;
-  $("#current-stage").textContent = job.stage;
   $("#run-subtitle").textContent = job.blockedBy
     ? `Waiting on recovery of run ${job.blockedBy}: resume it, start it over, or dismiss it.`
     : job.queuePosition
       ? `Queued #${job.queuePosition}${job.queuedFor === "resume" ? " to resume" : ""}; starts when this project's current run finishes.`
       : job.error?.message || statusCopy(job.state);
-  $("#repair-count").textContent = `${job.attempt} / ${job.repairBudgetLimit ?? 2}`;
-  $("#gate-count").textContent = String(state.events.filter((event) => event.type === "gate.passed").length);
-  const feature = job.featureCursor;
-  $("#strategy-label").textContent = sdlcOption(job.sdlc).label + (feature ? ` · ${feature.id} ${PARKED.includes(job.state) ? "blocked" : feature.substage}` : "");
-  const elapsedUntil = job.completedAt ? new Date(job.completedAt).getTime() : Date.now();
-  const stages = state.telemetry?.summary?.stages;
-  const runLine = `${formatSpan(elapsedUntil - new Date(job.startedAt || job.createdAt).getTime())} elapsed${usageLine(state.telemetry?.summary?.tokens?.total)}`;
-  // The current step leads; the whole run is secondary.
-  $("#elapsed").textContent = stages?.current ? `${formatSpan(stages.current.durationMs)} this step${usageLine(stages.current.tokens)}` : runLine;
-  $("#run-total").textContent = stages?.current ? `Run total: ${runLine}` : "";
   const progressState = PARKED.includes(job.state) ? job.failedState : job.state;
-  const currentIndex = Math.max(0, stageOrder.indexOf(progressState));
-  $("#stage-bars").replaceChildren(...stageOrder.slice(0, -1).map((stage, index) => {
-    const segment = document.createElement("div");
-    segment.className = "stage-seg";
-    const bar = document.createElement("span");
-    bar.className = `stage-bar ${index < currentIndex || job.state === "completed" ? "done" : index === currentIndex ? "active" : ""}`;
-    bar.title = stage;
-    const spent = stages?.byState?.[stage];
-    const caption = Object.assign(document.createElement("small"), { textContent: spent ? `${formatSpan(spent.durationMs)}${usageLine(spent.tokens, true)}` : "" });
-    segment.append(bar, caption);
-    return segment;
-  }));
   document.querySelectorAll(".stages li").forEach((item) => item.classList.remove("active"));
   const railStage = progressState === "repairing" ? "verifying" : progressState;
   const activeRail = document.querySelector(`[data-stage="${railStage}"]`);
   if (activeRail) activeRail.classList.add("active");
   renderSupervision();
-  renderEvents();
+  renderMap();
   renderArtifacts();
   renderAppMetrics();
   renderRecovery();
@@ -585,9 +560,18 @@ function renderSupervision() {
     + ` · ${state.job.attempt ?? 0} repairs, ${used} automatic continuation${used === 1 ? "" : "s"} used · ${watch.monitoring ? "monitored while the factory server runs" : "not monitored while parked"}`;
 }
 
-// Mirrors pendingProofs / pendingProofFailure in src/wbs.mjs.
+// job.attempt counts every repair since the run began; recovery limits are points on that counter.
+// Per feature: cursor.attemptBefore is where the feature started (src/feature-recovery.mjs). Per plan:
+// totalRepairLimit = start + maxRepairs × (features + 1), and maxRepairs is the feature's own window.
+// ponytail: the derived plan cap is low if the plan limit clipped the last feature's window; send maxRepairs if that matters.
+const repairUsage = (job) => {
+  const phase = job.recoveryPhase, start = phase?.cursor?.attemptBefore;
+  if (phase?.totalRepairLimit === undefined || start === undefined || job.repairBudgetLimit == null) return null;
+  const perFeature = job.repairBudgetLimit - start, planCap = perFeature * (phase.plan.slices.length + 1);
+  return { feature: [job.attempt - start, perFeature], plan: [Math.max(0, planCap - (phase.totalRepairLimit - job.attempt)), planCap] };
+};
+// Mirrors pendingProofs in src/wbs.mjs.
 const pendingProofs = (job) => (job.outstandingProofs ?? []).filter((entry) => entry.status === "pending");
-const failedProof = (job) => job.error?.code === "quality_gate_failed" && pendingProofs(job).some((entry) => Array.isArray(job.error.details?.proofKeys) ? job.error.details.proofKeys.includes(entry.key) : job.error.details?.command ? JSON.stringify(entry.obligation.proof.command) === JSON.stringify(job.error.details.command) : entry.gate === job.error.details?.gate);
 
 // Bounded like MAX_AMENDED_PLAN_BYTES in src/factory.mjs; the server repeats every check.
 const MAX_AMENDED_PLAN_BYTES = 4_000_000;
@@ -660,7 +644,8 @@ function renderRecovery() {
   const next = state.job.nextAction;
   if (next?.action === "amend-plan" && phase) renderAmendment(features, next, phase, action);
   else if (next?.action === "retry-plan" || next?.action === "revise-inputs") action(next.label, "recovery-plan");
-  else if (next?.action === "prepare-plan" || (!["none", "factory-fix"].includes(next?.action) && PARKED.includes(state.job.state) && !state.job.dismissed && (!phase || ["ready", "running", "built"].includes(phase.status)) && (state.job.reviewRequest || state.job.featureCursor?.reviewRequest || state.job.error?.code === "inputs_changed" || failedProof(state.job)))) action("Prepare repair plan", "recovery-plan");
+  // The same admission the server applies: only the policy's planning steps (and revising a ready plan) offer the planner.
+  else if (next?.action === "prepare-plan" || next?.action === "approve-plan") action("Prepare repair plan", "recovery-plan");
   if (next?.action === "approve-plan" && phase && next.alternatives?.some((item) => item.action === "amend-plan")) renderAmendment(features, next, phase, action);
   // Owner-added specs join the run's inputs; the next plan, review or Resume sees them.
   if (next && !["none", "factory-fix"].includes(next.action)) {
@@ -677,27 +662,51 @@ function renderRecovery() {
     });
     features.append(label, file);
   }
-  const list = (title, rows) => {
+  // Reference lists fold to one counted row and always start collapsed.
+  // Polling redraws this card, so the owner's open/closed choice is kept per title.
+  state.recoveryFolds ??= {};
+  const fold = (title) => {
+    const details = document.createElement("details"); details.className = "recovery-fold";
+    details.open = state.recoveryFolds[title] ?? false;
+    details.addEventListener("toggle", () => { state.recoveryFolds[title] = details.open; });
+    return details;
+  };
+  const list = (title, rows, folded = false) => {
     if (!rows.length) return;
-    const heading = document.createElement("h3"); heading.textContent = title;
     const items = document.createElement("ol");
     items.append(...rows.map((text) => { const row = document.createElement("li"); row.textContent = text; return row; }));
-    features.append(heading, items);
+    if (!folded) { const heading = document.createElement("h3"); heading.textContent = title; features.append(heading, items); return; }
+    const details = fold(title);
+    const summary = document.createElement("summary"); summary.textContent = `${title} `;
+    summary.append(Object.assign(document.createElement("span"), { textContent: rows.length }));
+    details.append(summary, items); features.append(details);
+    items.scrollTop = state.recoveryFolds[`${title}:scroll`] ?? 0;
+    items.addEventListener("scroll", () => { state.recoveryFolds[`${title}:scroll`] = items.scrollTop; });
   };
   const incident = state.job.watch?.incident;
   if (incident && PARKED.includes(state.job.state)) list("Incident", [`Observed: ${incident.observed}`, `Uncertain: ${incident.uncertain}`, `Tried: ${incident.tried}`, `Preserved: ${incident.preserved}`, `Next: ${state.job.nextAction?.label ?? state.job.nextAction?.reason ?? incident.nextAction}`, ...incident.logs.map((log) => `Log: ${log}`)]);
   if (phase?.status === "plan_failed") list("Plan review blockers", phase.planBlockers ?? []);
   if (phase?.plan) {
-    list("Remaining gaps", (phase.request?.checks ?? []).map((check) => `${check.id}: ${check.text}${check.reason ? ` — ${check.reason}` : ""}`));
+    const status = (slice) => phase.done.includes(slice.id) ? "verified" : phase.current === slice.id ? "current" : "queued";
+    const strip = document.createElement("div"); strip.className = "recovery-strip"; strip.style.gridTemplateColumns = `repeat(${phase.plan.slices.length}, minmax(0, 1fr))`;
+    strip.append(...phase.plan.slices.map((slice, index) => Object.assign(document.createElement("i"), { className: status(slice), title: `${index + 1}. ${slice.id} — ${slice.title}` })));
+    features.append(strip);
+    const currentIndex = phase.plan.slices.findIndex((slice) => slice.id === phase.current);
+    if (currentIndex >= 0) {
+      const now = document.createElement("p"); now.className = "recovery-now";
+      now.append(Object.assign(document.createElement("strong"), { textContent: `Now · ${currentIndex + 1}` }), ` ${phase.current} — ${phase.plan.slices[currentIndex].title}`);
+      features.append(now);
+    }
+    list("Remaining gaps", (phase.request?.checks ?? []).map((check) => `${check.id}: ${check.text}${check.reason ? ` — ${check.reason}` : ""}`), true);
     // Mirrors pendingChecks in src/wbs.mjs: a check is not verified with its feature while any pending
     // obligation in this plan, or outstanding from an earlier one, still supports it.
     const refs = new Set([...phase.plan.slices.flatMap((slice) => slice.acceptance.filter((item) => item.proof?.pending && !(state.job.outstandingProofs ?? []).some(entry => entry.planDigest === phase.planDigest && entry.feature === slice.id && entry.obligation.id === item.id && entry.status !== "pending"))), ...pendingProofs(state.job).map((entry) => entry.obligation)].flatMap((item) => item.refs ?? []));
     const awaiting = (slice) => (slice.closes ?? []).filter((id) => refs.has(id));
-    list("Proposed features", phase.plan.slices.map((slice) => `${phase.done.includes(slice.id) ? "Verified" : phase.current === slice.id ? "Current" : "Pending"}: ${slice.title} (${(slice.closes ?? slice.checks).join(", ")})${awaiting(slice).length ? `; ${awaiting(slice).join(", ")} pending integration proof` : ""}`));
+    list("Features", phase.plan.slices.map((slice) => `${phase.done.includes(slice.id) ? "Verified" : phase.current === slice.id ? "Current" : "Pending"}: ${slice.title} (${(slice.closes ?? slice.checks).join(", ")})${awaiting(slice).length ? `; ${awaiting(slice).join(", ")} pending integration proof` : ""}`), true);
     list("Outstanding integration proofs", pendingProofs(state.job).map((entry) => `${entry.key}: ${entry.obligation.behavior} — ${entry.obligation.proof.command.join(" ")}`));
-    list("Verification checks", phase.plan.slices.flatMap((slice) => slice.acceptance.map((item) => typeof item === "string" ? item : `${item.id}: ${item.behavior} — ${item.proof.command.join(" ")}${item.proof.pending ? " (runs at integration)" : ""}`)));
+    list("Verification checks", phase.plan.slices.flatMap((slice) => slice.acceptance.map((item) => typeof item === "string" ? item : `${item.id}: ${item.behavior} — ${item.proof.command.join(" ")}${item.proof.pending ? " (runs at integration)" : ""}`)), true);
     if (phase.status === "ready") { const allowance = document.createElement("p"); allowance.textContent = `Repair allowance: up to ${2 * (phase.plan.slices.length + 1)} attempts (2 per feature plus 2 for the full final review).`; features.append(allowance); }
-    const details = document.createElement("details"); const summary = document.createElement("summary"); summary.textContent = "Full plan with sources and dependencies";
+    const details = fold("Full plan"); const summary = document.createElement("summary"); summary.textContent = "Full plan with sources and dependencies";
     const pre = document.createElement("pre"); pre.style.whiteSpace = "pre-wrap"; pre.textContent = JSON.stringify(phase.plan, null, 2); details.append(summary, pre); features.append(details);
     if (phase.status === "ready") {
       const label = document.createElement("label"); label.htmlFor = "recovery-plan-feedback"; label.textContent = "Changes for the repair plan (optional)";
@@ -705,7 +714,8 @@ function renderRecovery() {
       feedback.addEventListener("input", () => { state.recoveryPlanFeedback = feedback.value; }); features.append(label, feedback);
     }
     if (phase.status === "ready") action("Approve and continue repairs", "recovery-start", { planDigest: phase.planDigest });
-    if (phase.totalRepairLimit !== undefined) { const budget = document.createElement("p"); budget.textContent = `Repair attempts remaining: ${Math.max(0, (state.job.repairBudgetLimit ?? 0) - state.job.attempt)} for this step; ${Math.max(0, phase.totalRepairLimit - state.job.attempt)} across this recovery phase.`; features.append(budget); }
+    const usage = repairUsage(state.job);
+    if (usage) { const budget = document.createElement("p"); budget.textContent = `Repair attempts used: This feature: ${usage.feature[0]} of ${usage.feature[1]} · Plan: ${usage.plan[0]} of ${usage.plan[1]}`; features.append(budget); }
   }
   $("#recovery-title").textContent = recovery.title;
   $("#recovery-summary").textContent = recovery.summary;
@@ -714,6 +724,8 @@ function renderRecovery() {
     item.textContent = action;
     return item;
   }));
+  // Static reassurance only matters once the run has stopped.
+  $(".recovery-meta").classList.toggle("hidden", !PARKED.includes(state.job.state));
   $("#recovery-workspace").textContent = recovery.workspace;
   $("#recovery-retry").textContent = recovery.automaticRetry;
   const restartable = (state.job.sliceDone ?? []).slice(1);
@@ -741,17 +753,228 @@ async function restartFromSlice(sliceId) {
   }
 }
 
-function renderEvents() {
-  $("#events").replaceChildren(...state.events.slice().reverse().map((entry) => {
+// The run map: the plan as a metro line, the selected stop, four status answers and the activity
+// stream. Everything is read from the job record and its event log; nothing here is a second source of truth.
+const PIPELINE_STOPS = [["specifying", "SPEC", "Write the PRD, plan and acceptance contract"], ["building", "BUILD", "Build the application"], ["verifying", "GATES", "Run the deterministic quality gates"], ["reviewing", "REVIEW", "Review against the frozen contract"], ["deploying", "DEPLOY", "Launch and check the application"]];
+const MAP_KINDS = { all: "All", agent: "Agent", file: "Files", gate: "Gates", stage: "Stages" };
+const QUIET_WARN_MS = 10 * 60_000, QUIET_BAD_MS = 30 * 60_000;
+const minutesLabel = (ms) => { const m = Math.floor(ms / 60_000); return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}` : `${m}m`; };
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function mapPlan(job) {
+  const phase = job.recoveryPhase, approved = job.approvedPlan;
+  if (phase?.plan?.slices) return { label: "Repair plan", slices: phase.plan.slices, done: phase.done ?? [], current: phase.current, stats: phase.stats ?? {}, start: phase.approvedAt };
+  if (approved?.plan?.slices) {
+    const slices = approved.plan.slices;
+    return { label: "Feature plan", slices, done: job.sliceDone ?? [], current: job.featureCursor?.id ?? slices[job.sliceIndex ?? 0]?.id, stats: job.sliceStats ?? {}, start: approved.approvedAt };
+  }
+  return null;
+}
+
+function mapStops(job) {
+  const parked = PARKED.includes(job.state), finished = job.state === "completed";
+  const live = (on) => !on ? "queued" : parked ? "blocked" : "current";
+  const plan = mapPlan(job);
+  if (!plan) {
+    const at = PIPELINE_STOPS.findIndex(([stage]) => stage === (parked ? job.failedState : job.state === "repairing" ? "verifying" : job.state));
+    const spent = state.telemetry?.summary?.stages?.byState ?? {};
+    return { label: `${sdlcOption(job.sdlc).label} · ${job.provider}`, stops: PIPELINE_STOPS.map(([stage, id, title], index) => ({ id, title, deps: [], ms: spent[stage]?.durationMs ?? 0, status: finished || (at >= 0 && index < at) ? "done" : live(index === at) })) };
+  }
+  let last = Date.parse(plan.start) || null;
+  const stops = plan.slices.map((slice) => {
+    const stat = plan.stats[slice.id] ?? {}, done = plan.done.includes(slice.id), current = !done && !finished && slice.id === plan.current;
+    // ponytail: wall time since the previous feature was verified, so pauses count too; sum its stages if that misleads.
+    const ended = done ? Date.parse(stat.verifiedAt) : current ? (parked ? Date.parse(job.updatedAt) : Date.now()) : null;
+    const ms = ended && last ? Math.max(0, ended - last) : 0;
+    if (done && stat.verifiedAt) last = Date.parse(stat.verifiedAt);
+    return { id: slice.id, title: slice.title, deps: (slice.dependsOn ?? []).map((dep) => plan.slices.findIndex((other) => other.id === dep)).filter((index) => index >= 0), ms, reviews: stat.reviews ?? 0, repairs: stat.repairs ?? 0, status: done ? "done" : live(current) };
+  });
+  return { label: `${plan.label} · ${plural(stops.length, "feature")} · ${job.provider}`, stops, features: true };
+}
+
+// Health watches activity, not the event log alone: the agent's streamed tool use and the workspace
+// commands it runs both count, so a long silent stretch means nothing is happening at all.
+function mapHealth(job) {
+  if (job.state === "completed") return { tone: "ok", text: "Finished" };
+  if (job.state === "queued") return { tone: "idle", text: "Queued" };
+  if (job.state === "paused") return { tone: "idle", text: "Paused" };
+  if (PARKED.includes(job.state)) return { tone: "bad", text: "Stopped · needs you" };
+  const worker = job.supervision?.worker;
+  if (worker?.kind === "command") return { tone: "ok", text: `Running ${worker.gate ?? "a check"} · ${formatSpan(worker.ageMs)}` };
+  const quiet = lastActivityAge(job);
+  if (quiet == null) return { tone: "warn", text: "No activity seen yet" };
+  const tone = quiet < QUIET_WARN_MS ? "ok" : quiet < QUIET_BAD_MS ? "warn" : "bad";
+  return { tone, text: `${tone === "ok" ? "Alive" : "Quiet"} · last activity ${formatSpan(quiet)} ago` };
+}
+
+function lastActivityAge(job) {
+  const at = Math.max(Date.parse(job.supervision?.lastActivityAt ?? "") || 0, Date.parse(state.events.at(-1)?.at ?? "") || 0);
+  return at ? Date.now() - at : null;
+}
+
+const eventKind = (entry) => entry.type.startsWith("gate.") ? "gate"
+  : /^(agent|item|turn|thread|supervision)\./.test(entry.type) ? (/Completed (Write|Edit|MultiEdit|NotebookEdit)\b/.test(entry.message ?? "") ? "file" : "agent")
+  : "stage";
+
+function renderMap() {
+  const job = state.job, { label, stops, features } = mapStops(job);
+  const live = stops.findIndex((stop) => stop.status === "current" || stop.status === "blocked");
+  const picked = state.mapPick?.job === job.id ? state.mapPick.stop : null;
+  const chosen = stops.findIndex((stop) => stop.id === picked);
+  const selected = picked === "health" ? -1 : chosen >= 0 ? chosen : live >= 0 ? live : Math.max(0, stops.map((stop) => stop.status).lastIndexOf("done"));
+  $("#map-title").textContent = label;
+  const health = mapHealth(job);
+  $("#health").className = `health-pill ${health.tone}`;
+  $("#health").setAttribute("aria-pressed", String(picked === "health"));
+  $("#health-text").textContent = health.text;
+  renderMetro(stops, selected, live);
+  renderStop(stops, selected, picked === "health", health);
+  renderAnswers(stops, live, features);
+  renderStream();
+}
+
+function renderMetro(stops, selected, live) {
+  const svg = $("#metro"), narrow = svg.clientWidth > 0 && svg.clientWidth < 520, width = narrow ? 340 : 680;
+  const perRow = Math.min(stops.length, narrow ? 5 : 9), rows = Math.ceil(stops.length / perRow), step = perRow > 1 ? (width - 100) / (perRow - 1) : 0;
+  const train = live >= 0 ? minutesLabel(stops[live].ms) : "";
+  // Rebuilt only when something visible changes, so the train's animation and keyboard focus survive polling.
+  const signature = `${perRow}|${state.job.id}|${stops.map((stop) => stop.status).join()}|${selected}|${train}`;
+  if (svg.dataset.signature === signature) return;
+  svg.dataset.signature = signature;
+  const focused = svg.contains(document.activeElement) ? document.activeElement.dataset.index : null;
+  const at = (index) => { const row = Math.floor(index / perRow), col = index % perRow; return [row % 2 ? width - 50 - col * step : 50 + col * step, 44 + row * 80]; };
+  const node = (parent, tag, attrs, text) => {
+    const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
+    if (text != null) element.textContent = text;
+    parent.append(element); return element;
+  };
+  svg.setAttribute("viewBox", `0 0 ${width} ${44 + (rows - 1) * 80 + 40}`);
+  svg.replaceChildren();
+  const spurs = node(svg, "g", {}), line = node(svg, "g", {});
+  stops.slice(0, -1).forEach((stop, index) => {
+    const [x0, y0] = at(index), [x1, y1] = at(index + 1), dx = x0 > width / 2 ? 56 : -56;
+    node(line, "path", { class: `track${stop.status === "done" && stops[index + 1].status !== "queued" ? " done" : ""}`, d: y0 === y1 ? `M${x0} ${y0} L${x1} ${y1}` : `M${x0} ${y0} C${x0 + dx} ${y0} ${x1 + dx} ${y1} ${x1} ${y1}` });
+  });
+  const deps = new Set(stops[selected]?.deps ?? []);
+  for (const dep of deps) {
+    const [x, y] = at(selected), [dx, dy] = at(dep);
+    node(spurs, "path", { class: "spur", d: `M${x} ${y} Q${(x + dx) / 2} ${y === dy ? y + 40 : (y + dy) / 2} ${dx} ${dy}` });
+  }
+  stops.forEach((stop, index) => {
+    const [x, y] = at(index);
+    const group = node(line, "g", { class: `stop ${stop.status}${index === selected ? " selected" : ""}${deps.has(index) ? " dep" : ""}`, tabindex: 0, role: "button", "data-index": index, "aria-pressed": String(index === selected), "aria-label": `${index + 1}. ${stop.id}, ${stop.status === "done" ? "verified" : stop.status}` });
+    node(group, "circle", { cx: x, cy: y, r: 12 });
+    node(group, "text", { x, y: y + 4 }, index + 1);
+    const pick = () => { state.mapPick = { job: state.job.id, stop: stop.id }; renderMap(); };
+    group.addEventListener("click", pick);
+    group.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); pick(); } });
+  });
+  if (live >= 0) {
+    const [x, y] = at(live), status = stops[live].status;
+    node(line, "text", { class: `stop-name ${status}`, x, y: y - 20 }, stops[live].id);
+    const car = node(line, "g", { class: `train ${status}` });
+    node(car, "rect", { x: x + 16, y: y - 9, width: 34, height: 18, rx: 6 });
+    node(car, "text", { x: x + 33, y: y + 4 }, train);
+  }
+  if (focused != null) svg.querySelector(`[data-index="${focused}"]`)?.focus();
+}
+
+function renderStop(stops, selected, showHealth, health) {
+  const job = state.job;
+  const title = document.createElement("strong"), about = document.createElement("p"), status = document.createElement("p");
+  status.className = "stop-status";
+  if (showHealth) {
+    title.textContent = "Health";
+    about.textContent = "Watches the agent's streamed tool use, the commands it runs and the controller's events.";
+    const quiet = lastActivityAge(job);
+    status.textContent = `${health.text}${job.supervision ? ` · supervision: ${job.supervision.status}` : ""}${quiet != null ? ` · quiet ${formatSpan(quiet)}` : ""} · green under ${QUIET_WARN_MS / 60_000} minutes quiet, amber to ${QUIET_BAD_MS / 60_000}, red past that or when the run stops.`;
+    $("#stop").replaceChildren(title, about, status);
+    return;
+  }
+  const stop = stops[selected];
+  if (!stop) { $("#stop").replaceChildren(); return; }
+  title.textContent = `${selected + 1} · ${stop.id}`;
+  about.textContent = stop.title;
+  const tone = document.createElement("span");
+  const usage = repairUsage(job);
+  if (stop.status === "done") {
+    tone.className = "ok"; tone.textContent = "Verified";
+    status.append(tone, stop.reviews || stop.repairs || stop.ms ? ` · ${minutesLabel(stop.ms)} · ${stop.repairs ? plural(stop.repairs, "repair") : "no repairs"}${stop.reviews ? ` · review passed ${stop.reviews <= 1 ? "first try" : `on pass ${stop.reviews}`}` : ""}` : "");
+  } else if (stop.status === "current") {
+    tone.className = "warn"; tone.textContent = job.stage.split(" — ")[0];
+    status.append(tone, ` · ${minutesLabel(stop.ms)} so far${usage ? ` · ${usage.feature[0]} of ${usage.feature[1]} repairs used` : ""}`);
+  } else if (stop.status === "blocked") {
+    tone.className = "bad"; tone.textContent = job.state === "paused" ? "Paused" : "Stopped";
+    status.append(tone, ` · ${job.error?.message ?? statusCopy(job.state)}`);
+  } else {
+    const waiting = stop.deps.filter((dep) => stops[dep].status !== "done").map((dep) => `${dep + 1} ${stops[dep].id}`);
+    tone.className = "muted"; tone.textContent = "Queued";
+    status.append(tone, waiting.length ? ` · waits on ${waiting.join(", ")}` : " · ready when the line reaches it");
+  }
+  $("#stop").replaceChildren(title, about, status);
+}
+
+function renderAnswers(stops, live, features) {
+  const job = state.job, parked = PARKED.includes(job.state), quiet = lastActivityAge(job);
+  const recent = state.events.findLast((entry) => eventKind(entry) !== "stage");
+  const moving = job.state === "completed" ? ["ok", "No; the run is finished."]
+    : job.state === "queued" ? ["muted", "Not yet; it is waiting in the queue."]
+      : parked ? ["bad", `No. ${job.state === "paused" ? "Paused on request." : job.error?.message ?? "The run stopped."}`]
+        : quiet != null && quiet >= QUIET_WARN_MS ? [quiet >= QUIET_BAD_MS ? "bad" : "warn", `Quiet for ${formatSpan(quiet)}. ${job.supervision?.status ?? ""}; the safety cap still bounds this turn.`]
+          : ["ok", `Yes. ${recent ? `${recent.message || recent.type}, ${formatSpan(Date.now() - Date.parse(recent.at))} ago.` : job.stage}`];
+  const usage = repairUsage(job), cases = Object.values(job.caseResults ?? {});
+  const passed = cases.filter((entry) => entry.status === "passed").length;
+  const repairs = usage ? `${usage.feature[0]} of ${usage.feature[1]} repairs used on this feature, ${usage.plan[0]} of ${usage.plan[1]} in the plan` : plural(job.attempt ?? 0, "repair");
+  const healthy = [job.supervision?.status === "Progress needs checking" ? "warn" : usage && usage.feature[0] >= usage.feature[1] ? "warn" : "ok", `${repairs}.${cases.length ? ` ${passed} of ${cases.length} acceptance cases pass.` : ""}`];
+  const verified = stops.filter((stop) => stop.status === "done");
+  const timed = verified.filter((stop) => stop.ms > 0), average = timed.length ? timed.reduce((sum, stop) => sum + stop.ms, 0) / timed.length : 0;
+  const left = stops.length - verified.length;
+  const elapsed = (job.completedAt ? Date.parse(job.completedAt) : Date.now()) - Date.parse(job.startedAt || job.createdAt);
+  const far = ["", `${verified.length} of ${stops.length} ${features ? "features verified" : "steps done"}${live >= 0 ? `; ${features ? "feature" : "step"} ${live + 1} is ${stops[live].status === "blocked" ? "stopped" : "underway"}` : ""}.${features && average && left ? ` About ${formatSpan(average * left)} left at this plan's ${minutesLabel(average)} average.` : ""} Run: ${formatSpan(elapsed)}${usageLine(state.telemetry?.summary?.tokens?.total)}.`];
+  const next = job.nextAction;
+  const needs = parked && next && !["none", "factory-fix"].includes(next.action) ? ["bad", `Yes: ${next.label}${next.reason ? `. ${next.reason}` : ""}`]
+    : job.recoveryPhase?.status === "ready" ? ["warn", "Yes: review and approve the repair plan above."]
+      : parked ? ["bad", "Yes: the run stopped; see the recovery checkpoint above."]
+        : ["ok", "No."];
+  $("#qa").replaceChildren(...[["Moving?", moving], ["Healthy?", healthy], ["How far?", far], ["Needs you?", needs]].flatMap(([question, [tone, answer]]) => [
+    Object.assign(document.createElement("dt"), { textContent: question }),
+    Object.assign(document.createElement("dd"), { textContent: answer, className: tone }),
+  ]));
+}
+
+function renderStream() {
+  state.mapFilter ??= "all";
+  if (!$("#chips").childElementCount) {
+    $("#chips").append(...Object.entries(MAP_KINDS).map(([kind, text]) => {
+      const button = Object.assign(document.createElement("button"), { type: "button", textContent: text, className: "button ghost small" });
+      button.dataset.kind = kind;
+      button.addEventListener("click", () => { state.mapFilter = kind; renderStream(); });
+      return button;
+    }));
+  }
+  for (const button of $("#chips").children) button.setAttribute("aria-pressed", String(button.dataset.kind === state.mapFilter));
+  const seen = state.streamSeen?.job === state.job.id ? state.streamSeen.at : null;
+  // ponytail: last 300 rows; a full long run has thousands of tool events. Page back if the owner needs older ones.
+  const rows = state.events.filter((entry) => state.mapFilter === "all" || eventKind(entry) === state.mapFilter).slice(-300).reverse();
+  $("#events").replaceChildren(...rows.map((entry) => {
+    const kind = eventKind(entry), failed = /failed|error/.test(entry.type);
     const row = document.createElement("div");
-    row.className = `event ${/failed|error/.test(entry.type) ? "fail" : ""}`;
-    const time = document.createElement("time"); time.textContent = new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    const dot = document.createElement("i");
+    row.className = `event${failed ? " fail" : ""}${seen && entry.at > seen ? " fresh" : ""}`;
+    const time = document.createElement("time"); time.textContent = new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+    const badge = Object.assign(document.createElement("i"), { className: `kind ${failed ? "fail" : kind}`, textContent: MAP_KINDS[kind] });
     const text = document.createElement("span"); text.textContent = entry.message || entry.type;
-    row.append(time, dot, text);
+    row.append(time, badge, text);
     return row;
   }));
+  state.streamSeen = { job: state.job.id, at: state.events.at(-1)?.at ?? seen };
 }
+
+$("#health").addEventListener("click", () => {
+  if (!state.job) return;
+  state.mapPick = { job: state.job.id, stop: state.mapPick?.job === state.job.id && state.mapPick.stop === "health" ? null : "health" };
+  renderMap();
+});
 
 function renderArtifacts() {
   const canShow = stageOrder.indexOf(state.job.state) > 0 || ["failed", "completed"].includes(state.job.state);

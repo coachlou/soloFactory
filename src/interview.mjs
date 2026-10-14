@@ -76,7 +76,8 @@ export const INTERVIEW_RESPONSE_SCHEMA = {
   },
 };
 
-export const MAX_TRANSCRIPT_CHARS = 400_000;
+// Under MAX_PROMPT_CHARS (200_000) with room for the guide skill, the run snapshot and JSON escaping.
+export const MAX_TRANSCRIPT_CHARS = 150_000;
 
 export function validateMessages(messages) {
   if (!Array.isArray(messages) || messages.length === 0 || messages.length > 80) {

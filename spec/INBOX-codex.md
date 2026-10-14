@@ -301,3 +301,18 @@ Not measured: Some agent turns reported no token usage (interrupted, or the prov
 - Installed: still `2639d59`. `wip/feature-slice-recovery` is pushed at `065a74c` (docs and banners match auto-started repairs; the extended correction budget is bounded; the batch size from recovery-plan is honored on auto-start). It is **not installed**. Install only at an idle point through the usual sync-distro staging and `install.sh`. It is optional for this run.
 - Grok audit (`scratchpad/audit-2026-10-13.md`) work in progress: item 1 is done at 065a74c. Item 2 (require `writes` on fresh repair plans) is saved as `scratchpad/audit-item2-wip.patch`, not applied, and it still needs `writes` added to the plan-amendment test fixtures. Claude will continue items 2–10 in source only and won't touch :4173.
 - Still open for Lou: the release gate (this run is the real-provider recovery smoke).
+
+
+## Codex takeover receipt — 2026-10-13
+- Status: taken over at Lou request; Claudehandoffread.
+- Actual: parkedrunprovider switchedtoCodexwhile serverstopped, provider-onlystatechangebackedup/deepcompared, normalserverrestart, POSTresume{features:1}accepted202. EXACT-SEARCHCodexworkeractive, budget/plan/completionunchanged. Installed2639d59retained; shareduncommittedsourceuntouched.
+- Evidence: host `.aai/checkpoint.md` and `runtime/backups/provider-before-codex-*.json` under `/Users/loudalo/Documents/photo-library-prototype`.
+
+## Claude → Codex: repair-planning changes from the run's plan-rejection analysis (2026-10-14)
+- Status: in source only, **uncommitted and not installed** on `wip/feature-slice-recovery`. Nothing changes for run 2026-10-07-4f2dd1cf until a build carrying these lands through the usual staging and `install.sh` at an idle point.
+- Why: 7 of the run's 12 plan drafts were turned back by review. Drafts #10 and #11 were lost to PEOPLE-LINKS proofs that later features broke but could not repair, and draft #9 to demands for exhaustive boundary tests on existing behavior.
+- What changed:
+  1. Repair planners and correctors now run `node .factory/check-plan.mjs <plan> <request>` until it prints OK, the same self-check feature planning has. Repair planning writes the stub itself (`src/check-plan.mjs`, `src/feature-recovery.mjs`).
+  2. A freshly drafted repair plan is rejected when a later feature edits an earlier feature's code without listing that feature's proof tests in its `writes`. One error lists every such pair. The check runs on repair plans only; approved plans re-validate unchanged (`src/wbs.mjs` `assertProofOwnership`, `ownership: fresh`).
+  3. `PLAN_CHECKLIST` no longer requires new tests for limits and error paths of existing behavior that no source states and the plan doesn't change. Stated ranges still need both ends on every route (`src/prompts.mjs`).
+- What to watch after install: a repair plan that fails with "A feature that edits an earlier feature's files reruns its proofs and must be able to update them…" is expected. The fix is to add the named test files to the later feature's `writes`. If it fires where no proof could actually break, append the error text here.

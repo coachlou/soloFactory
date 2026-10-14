@@ -9,6 +9,7 @@ import { JobStore } from "../src/store.mjs";
 import { SoloFactory } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
 import { impactedFeatures, outsideWrites, validateFeaturePlan } from "../src/wbs.mjs";
+import { validateRecoveryPlan } from "../src/feature-recovery.mjs";
 
 const checks = [{ id: "MH-1", text: "Record a score" }, { id: "MH-2", text: "See history" }];
 const opts = { jobId: "job", contractDigest: "contract", checks };
@@ -127,4 +128,21 @@ test("a later feature that edits an earlier feature's files reruns that feature'
   assert.deepEqual(impact.impacted, ["SLICE-SKELETON"]);
   const uiChecks = events.slice(events.indexOf(impact), events.findIndex((event) => event.type === "slice.completed" && event.slice === "SLICE-UI"));
   assert.ok(uiChecks.some((event) => event.type === "gate.started" && /^proof-SLICE-SKELETON\./.test(event.gate)), "the skeleton's proofs ran inside SLICE-UI's checks");
+});
+
+test("with ownership on, a later feature editing an earlier feature's code must own its proof tests", () => {
+  const owned = { ...opts, ownership: true };
+  const a = feature("A", { dependsOn: ["BASE"], closes: ["MH-1"], writes: ["src/public/app.js", "test/A.test.mjs"] });
+  const b = (writes) => feature("B", { dependsOn: ["A", "C"], closes: ["MH-2"], writes });
+  const c = feature("C", { dependsOn: ["BASE"], writes: ["src/other.js", "test/C.test.mjs"] });
+  const offending = plan(base(), a, c, b(["src/public/app.js", "test/B.test.mjs"]));
+  validateFeaturePlan(offending, opts); // off by default: approved plans re-validate unchanged
+  assert.throws(() => validateFeaturePlan(offending, owned), (error) => /B edits src\/public\/app\.js of A without test\/A\.test\.mjs/.test(error.message) && !/\bC edits/.test(error.message));
+  validateFeaturePlan(plan(base(), a, c, b(["src/public/app.js", "test/B.test.mjs", "test/A.test.mjs"])), owned);
+  // A "./" proof path is the same file; and a freshly drafted repair plan gets the check, a saved one does not.
+  a.acceptance[0].proof.command[2] = "./test/A.test.mjs";
+  const request = { id: "req", jobId: "job", contractDigest: "contract", checks, sources: [{ path: "spec.md" }], completed: [] };
+  const cited = { ...offending, requestId: "req", slices: offending.slices.map((slice) => ({ ...slice, acceptance: slice.acceptance.map((item) => ({ ...item, sources: [{ path: "spec.md", locator: "§1" }] })) })) };
+  assert.throws(() => validateRecoveryPlan(cited, request, { fresh: true }), /B edits src\/public\/app\.js of A/);
+  validateRecoveryPlan(cited, request);
 });

@@ -207,13 +207,13 @@ if (args[1] === "resume") {
   assert.ok(events.some((event) => event.type === "watchdog.decision" && event.decision === "continuation_refused"));
 });
 
-test("controller: a silent Claude turn outlives the idle limit, because its CLI prints only at the end", async (t) => {
+test("controller: a silent Claude turn outlives the idle limit: a long tool call (npm test) streams nothing", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-watch-claude-"));
   const bin = path.join(root, "bin");
   await mkdir(bin);
   await writeFile(path.join(bin, "claude"), `#!/usr/bin/env node
 process.stdin.resume(); process.stdin.on("end", () => {});
-setTimeout(() => { console.log(JSON.stringify({ result: "built quietly" })); process.exit(0); }, 1500);
+setTimeout(() => { console.log(JSON.stringify({ type: "result", result: "built quietly", session_id: "quiet" })); process.exit(0); }, 1500);
 `);
   await chmod(path.join(bin, "claude"), 0o755);
   const saved = Object.fromEntries(["PATH", "SOLOFACTORY_AGENT_IDLE_MINUTES", "SOLOFACTORY_AGENT_HARD_MINUTES"].map((key) => [key, process.env[key]]));

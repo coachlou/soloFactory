@@ -677,6 +677,23 @@ http.createServer((q, r) => r.end(q.url === "/health" ? "ok" : JSON.stringify({ 
   }
 });
 
+test("a metrics route that answers 500 is a repairable invalid_metrics, not a park", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-metrics-500-"));
+  const store = new JobStore(root);
+  await store.init();
+  await writeFile(path.join(root, "app.mjs"), `import http from "node:http";
+http.createServer((q, r) => { if (q.url === "/health") return r.end("ok"); r.statusCode = 500; r.end("boom"); }).listen(process.env.PORT);`);
+  const manifest = { version: 1, healthPath: "/health", metricsPath: "/_factory/metrics", commands: { start: ["node", "app.mjs"] } };
+  await mkdir(path.join(root, ".factory", "logs"), { recursive: true });
+  const job = await store.create({ brief, transcript, provider: "fixture" });
+  const factory = new SoloFactory({ store, provider: createFixtureProvider() });
+  try {
+    await assert.rejects(factory.deployLocal(job, manifest, new AbortController().signal), (error) => error.code === "invalid_metrics" && /HTTP 500/.test(error.message));
+  } finally {
+    await factory.shutdown();
+  }
+});
+
 test("a set-aside follow-on that was rolled back does not block relaunching the app it restored", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-relaunch-aside-"));
   const store = new JobStore(root);

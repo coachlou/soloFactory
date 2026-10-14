@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile, writeFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { contractDigest, originalChecks, preparePlanReview, runInputs, sourceSet, validatePlanReview, validateReview } from './review.mjs';
 import { ALL_BLOCKERS, CONSOLIDATION_RULES, CONTROLLER_FACTS, PLAN_CHECKLIST, REREVIEW } from './prompts.mjs';
 import { PLAN_SCHEMA_FIXES, assertConsolidation, failedIntegrationProofs, pendingProofFailure, validateFeaturePlan, validateSlicePlan } from './wbs.mjs';
@@ -41,7 +42,7 @@ export function validateRecoveryPlan(raw, request, { fresh = false } = {}) {
     // A dependency on an already built feature is satisfied; only ids in this plan are validated.
     const built = new Set(request.completed ?? []);
     raw = { ...raw, slices: raw.slices?.map(slice => Array.isArray(slice?.dependsOn) ? { ...slice, dependsOn: slice.dependsOn.filter(dep => !built.has(dep)) } : slice) };
-    return { ...validateFeaturePlan(raw, { jobId: request.jobId, contractDigest: request.contractDigest, checks: request.checks, sources: request.sources.map(item => item.path) }), requestId: request.id };
+    return { ...validateFeaturePlan(raw, { jobId: request.jobId, contractDigest: request.contractDigest, checks: request.checks, sources: request.sources.map(item => item.path), ownership: fresh }), requestId: request.id };
   }
   if (raw?.version !== 1 || raw.requestId !== request.id || raw.contractDigest !== request.contractDigest) throw new Error('Recovery plan does not match its request and frozen contract.');
   const normalized = validateSlicePlan(raw);
@@ -83,9 +84,10 @@ function repairPlanPrompt(planFile, requestFile) {
 Write ONLY ${planFile} as JSON: ${PLAN_SCHEMA}.
 Every unfinished check has exactly one closing feature. A broad MH/SC summary is not enough: carry each detailed obligation the sources state for that gap (fields, states, limits, error cases, layout, copy) as its own acceptance item citing the source path and locator. Each proof is an executable test of real behavior.
 ${CONSOLIDATION_RULES}
-Preserve already passing behavior and completed features; no new walking skeleton. Use small dependency-ordered features. The plan is reviewed against the sources and this checklist before execution; check it yourself first:
+Preserve already passing behavior and completed features; no new walking skeleton. Use small dependency-ordered features. Each feature is built in one agent turn capped at 45 minutes, proofs included: split any feature that changes several screens or source areas, or that needs more than a handful of new proofs. The plan is reviewed against the sources and this checklist before execution; check it yourself first:
 ${PLAN_CHECKLIST}
-${CONTROLLER_FACTS}`;
+${CONTROLLER_FACTS}
+Before you finish, run exactly node .factory/check-plan.mjs ${planFile} ${requestFile} as its own command from your working directory (no cd, absolute path or chaining: any other form is denied permission). It applies the controller's own validation to the plan. Fix every error it prints and rerun it until it prints OK; an invalid plan costs a whole extra turn.`;
 }
 
 function repairPlanAuditPrompt(planFile, priorBlockers = null, consolidated = false, rereview = false) {
@@ -103,10 +105,11 @@ ${ALL_BLOCKERS}${rereview ? `\n${REREVIEW}` : ''} Approve only a plan you would 
 
 // Patch, not re-plan, as planCorrectionPrompt: a full rewrite re-read every source and let the next
 // review find new nits in untouched entries, so corrections ran out (smoke 8's recovery, ~$14, never approved).
-function repairCorrectionPrompt(planFile, blockers) {
+function repairCorrectionPrompt(planFile, requestFile, blockers) {
   return `You are correcting the repair plan after a blocked review. Patch ${planFile}: change ONLY the features, acceptance items and proofs the blockers below name (adding an item or feature only where a blocker requires it) and leave every other entry exactly as it is, byte for byte. Read ${planFile} and .factory/plan-review-request.json; open a source or the existing app only where a blocker cites it or resolving it needs it. Keep the same schema, jobId, requestId and contractDigest. Resolve every blocker without narrowing, waiving or dropping a requirement. Do not write code. Then check the entries you changed (and anything that references them) against the reviewer's checklist:
 ${PLAN_CHECKLIST}
 ${CONTROLLER_FACTS}
+Before you finish, run exactly node .factory/check-plan.mjs ${planFile} ${requestFile} as its own command from your working directory (no cd, absolute path or chaining: any other form is denied permission). It applies the controller's own validation to the plan. Fix every error it prints and rerun it until it prints OK; an invalid plan costs a whole extra turn.
 Blockers:
 ${blockers.map(item => `- ${item}`).join('\n')}`;
 }
@@ -341,9 +344,11 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
         return plan;
       } catch (error) { return error; }
     };
+    const requestFile = `.factory/recovery-request-${request.id}.json`;
     if (!amendment) {
-      const requestFile = `.factory/recovery-request-${request.id}.json`;
       await writeFile(path.join(appDir, requestFile), JSON.stringify(request, null, 2));
+      // Same self-check as feature planning; written here too, since a run planned before it existed has no stub.
+      await writeFile(path.join(appDir, '.factory/check-plan.mjs'), `import ${JSON.stringify(pathToFileURL(fileURLToPath(new URL('./check-plan.mjs', import.meta.url))).href)};\n`);
       await factory.invoke(job, `recovery-plan-${request.id}`, repairPlanPrompt(planFile, requestFile), signal);
     }
     await guard();
@@ -385,7 +390,7 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
         factory.takePause('specifying');
         phase.schemaFixes = (phase.schemaFixes ?? 0) + 1;
         await factory.store.writeState(job);
-        await factory.invoke(job, `recovery-schema-fix-${request.id}-${phase.schemaFixes}`, repairCorrectionPrompt(planFile, planBlockers), signal);
+        await factory.invoke(job, `recovery-schema-fix-${request.id}-${phase.schemaFixes}`, repairCorrectionPrompt(planFile, requestFile, planBlockers), signal);
         await guard();
         plan = await readPlan();
         continue;
@@ -397,7 +402,7 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
       factory.takePause('specifying');
       phase.corrections += 1;
       await factory.store.writeState(job);
-      await factory.invoke(job, `recovery-correction-${request.id}-${phase.corrections}`, repairCorrectionPrompt(planFile, planBlockers), signal);
+      await factory.invoke(job, `recovery-correction-${request.id}-${phase.corrections}`, repairCorrectionPrompt(planFile, requestFile, planBlockers), signal);
       await guard();
       plan = await readPlan();
     }

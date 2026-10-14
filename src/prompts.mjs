@@ -372,6 +372,9 @@ export const CONTROLLER_FACTS = `How the controller runs proofs:
 
 // One checklist for planner, reviewer and corrector: the planner self-checks against exactly what
 // the reviewer blocks on, so a review round is not spent discovering a rule.
+// Run 2026-10-07-4f2dd1cf draft #9 (2026-10-13): blockers demanded both ends of every limit on every
+// route, including limits in preserved code no unfinished check names. Edge tests now cover only what
+// the sources state or the plan itself changes (smoke 90b8b32e's both-ends rule still holds for those).
 export const PLAN_CHECKLIST = `A plan is blocked when:
 - an original check is not fully proved by its closing feature, or prerequisites are out of order;
 - a detailed obligation a source states is missing, or cites the wrong source or locator;
@@ -379,11 +382,13 @@ export const PLAN_CHECKLIST = `A plan is blocked when:
 - a proof is not an executable test of real behavior, or depends on repo state, network, wall-clock
   time or the order other tests run in;
 - a claim about escaping, validation, limits or errors is tested without the input that would
-  expose a failure (escaping needs markup in the input; a validated range needs BOTH ends, each limit
-  accepted and one past it rejected, on every input or route that validates it);
+  expose a failure (escaping needs markup in the input; a range a source states or the plan changes
+  needs BOTH ends, each limit accepted and one past it rejected,
+  on every input or route that validates it). Limits and error paths of existing behavior that no source states and the plan does not change
+  need no new tests; their absence is not a blocker;
 - a case's expectation depends on a step its action never performs;
-- a requirement with a cases table has refs none of its cases cites, or negative/failure cases the
-  contract implies are proved nowhere in the plan (cases are optional: a requirement without a table is
+- a requirement with a cases table has refs none of its cases cites, or negative/failure cases a
+  source states are proved nowhere in the plan (cases are optional: a requirement without a table is
   proved by its proof command, and a failure path another requirement's cases prove is not repeated);
 - consolidated cases drop or blur a distinct field, action, boundary, failure condition or
   API/browser surface;
@@ -438,6 +443,7 @@ ${CONSOLIDATION_RULES}
 - Size the plan to the work: one coherent feature is right for a small change; a large brief gets
   as many small dependency-ordered features as its behavior needs (at most 30). Never compress
   scope into horizontal mega-features or drop a requirement to fit a count.
+- Each feature is built in one agent turn capped at 45 minutes, proofs included: split any feature that changes several screens or source areas, or that needs more than a handful of new proofs.
 ${followOn
     ? `- Follow-on release: factory.json, the build, GET /health and GET /_factory/metrics already exist.
   Plan increments against the shipped app; no walking skeleton. Preserve existing acceptance.`
@@ -539,7 +545,10 @@ ${featureBlock("Feature (each proof.command names an entry in Proof commands)", 
 Original requirements this feature closes (prove the full wording):
 ${JSON.stringify(owned, null, 2)}
 
-Write each obligation's proof test first, then the minimum real behavior that passes it. Source-
+Build one case at a time: write its proof test, then the minimum real behavior that passes it, and run that
+proof until it passes before starting the next case, so an interrupted turn leaves passing cases, not half-wired
+code. Run only this feature's proof commands, plus targeted tests of earlier code you changed; do not run the
+whole test suite, which the controller runs at final integration and which can exhaust your 45-minute turn. Source-
 string assertions do not prove user behavior. An obligation with cases needs one node:test per case
 whose name contains [CASE-ID], run by its proof command without a --test-reporter flag of its own; the
 controller passes it only when every case's own test passed. Cases are read only from node:test events, so even

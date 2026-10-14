@@ -49,7 +49,7 @@ test("Claude routes planning, plan corrections and every review to the reasoning
     for (const key of keys) delete process.env[key];
     await withFakeCli("claude", `const fs = require("node:fs");
 fs.writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2)));
-process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({result:"ok"})));`, async () => {
+process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({type:"result",result:"ok"})));`, async () => {
       const run = async (stage, model, effort) => {
         await createProvider("claude").run({cwd, prompt:"ok", context:{stage}});
         const args = JSON.parse(await readFile(capture,"utf8"));
@@ -74,7 +74,7 @@ test("Claude turns ignore the owner's personal config and write turns may run th
   const cwd = await mkdtemp(path.join(os.tmpdir(), "sf-claude-isolation-"));
   const capture = path.join(cwd, "args.json");
   await withFakeCli("claude", `require("node:fs").writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2)));
-let input = ""; process.stdin.on("data", (chunk) => input += chunk); process.stdin.on("end", () => { require("node:fs").writeFileSync(${JSON.stringify(capture + ".stdin")}, input); console.log(JSON.stringify({result:"ok"})); });`, async () => {
+let input = ""; process.stdin.on("data", (chunk) => input += chunk); process.stdin.on("end", () => { require("node:fs").writeFileSync(${JSON.stringify(capture + ".stdin")}, input); console.log(JSON.stringify({type:"result",result:"ok"})); });`, async () => {
     const args = async (mode, context) => {
       await createProvider("claude").run({ cwd, prompt: "ok", mode, context });
       return JSON.parse(await readFile(capture, "utf8"));

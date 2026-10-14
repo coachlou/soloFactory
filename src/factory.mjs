@@ -91,6 +91,9 @@ export class SoloFactory {
 
   async planRecovery(jobId, guidance = "", { features } = {}) {
     const job = await this.continuable(jobId);
+    // Only the policy's planning actions reach the planner; a run Resume can continue is not replanned.
+    const next = continuationAction(job, { maxRepairs: this.maxRepairs });
+    if (!admitsPlanning(next)) throw new FactoryError("not_continuable", `Prepare repair plan is not the next step: ${next.reason}`, { nextAction: next });
     await assertPlanInputsRevised(this.store, job);
     // An interrupted amendment review continues as a review; it never becomes a fresh planner run.
     if (await amendmentResumable(this.store, job)) return this.activate(jobId, signal => resumeAmendedReview(this, jobId, signal));
@@ -849,7 +852,15 @@ export class SoloFactory {
         // The last feature writes the README; left to the final reviewer it is a source change that forces the post-review gate rerun.
         const [index, total] = position.split("/");
         const prompt = featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed, precheck: cursor.precheck, last: index === total });
-        await this.invoke(job, label, prompt, signal, { resumeSessionId: this.resumeSessionFor(job, label) });
+        const before = await candidate();
+        try {
+          await this.invoke(job, label, prompt, signal, { resumeSessionId: this.resumeSessionFor(job, label) });
+        } catch (error) {
+          // A build that hit the safety cap while still changing files is too big for one turn, not stuck:
+          // continue it once in its own session (the stage's one continuation allowance) instead of parking.
+          if (error.code !== "agent_hard_timeout" || await candidate() === before || !await this.allowContinuation(job, labels.build)) throw error;
+          await this.invoke(job, labels.resume, featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed: true, precheck: cursor.precheck, last: index === total }), signal, { resumeSessionId: error.details?.sessionId ?? this.resumeSessionFor(job, labels.resume) });
+        }
         await save("checking");
       }
       if (cursor.substage === "checking") {
@@ -1117,6 +1128,13 @@ export class SoloFactory {
           allowContinuation: () => this.allowContinuation(job, label),
         },
       });
+    } catch (error) {
+      // A failed turn's session is kept too, so its resume continues that context instead of starting cold.
+      if (error.details?.sessionId) {
+        (job.agentSessions ||= {})[label] = error.details.sessionId;
+        await this.store.writeState(job);
+      }
+      throw error;
     } finally {
       await this.releaseWorker(job, spawned);
     }
@@ -1485,7 +1503,10 @@ export class SoloFactory {
 
     await this.emit(job.id, { type: "deployment.started", state: job.state, message: `Waiting for ${url}${manifest.healthPath}` });
     await waitForHttp(`${url}${manifest.healthPath}`, child, signal);
-    const metrics = await fetchJson(`${url}${manifest.metricsPath}`);
+    // Health answered, so a failing metrics route is the app's bug: give it the same repair as a bad schema.
+    const metrics = await fetchJson(`${url}${manifest.metricsPath}`).catch((error) => {
+      throw new FactoryError("invalid_metrics", `The app metrics endpoint failed: ${error.message}.`, { missing: [], received: undefined });
+    });
     validateMetrics(metrics);
     return { mode: "local", status: "live", url, port, pid: child.pid, startedAt: new Date().toISOString() };
   }
@@ -1686,6 +1707,10 @@ export async function assertPlanAmendable(store, job, { phaseId, plan } = {}, { 
 // The one continuation policy: the controller, the HTTP API and the dashboard all ask this which
 // action may continue a parked run, so a banner can never offer an action the controller refuses.
 // `busy`: a worker already holds or has queued this run.
+// approve-plan: a ready plan may be revised with feedback before it is approved.
+const PLANNING_ACTIONS = new Set(["prepare-plan", "revise-inputs", "retry-plan", "approve-plan"]);
+export const admitsPlanning = (next) => PLANNING_ACTIONS.has(next.action) || Boolean(next.alternatives?.some((item) => PLANNING_ACTIONS.has(item.action)));
+
 export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
   const next = (action, label, endpoint, reason) => ({ action, label, endpoint: endpoint && `/api/jobs/${job.id}/${endpoint}`, reason });
   const phase = job.recoveryPhase?.status;

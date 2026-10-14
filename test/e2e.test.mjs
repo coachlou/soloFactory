@@ -310,13 +310,14 @@ test("briefs queue per project, overlap across projects, and wait behind a parke
   const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-queue-"));
   const fixture = createFixtureProvider();
   const held = new Map(); // project dir -> release()
-  const failNext = new Set(); // project dirs whose next specification turn throws
+  const failNext = new Set(); // project dirs whose next build turn throws
   const providerFactory = () => ({
     ...fixture,
     run: async (args) => {
-      if (args.context?.stage === "specification") {
-        if (failNext.delete(args.cwd)) throw new Error("fixture specification failure");
+      // Any build turn, so a resume that skips specification is held too.
+      if (args.context?.stage !== "interview") {
         if (held.has(args.cwd)) await held.get(args.cwd).promise;
+        if (failNext.delete(args.cwd)) throw new Error("fixture specification failure");
       }
       return fixture.run(args);
     },
@@ -382,6 +383,19 @@ test("briefs queue per project, overlap across projects, and wait behind a parke
   assert.equal(dequeued.dequeued, true);
   assert.equal((await getJson(`${base}/api/jobs/${a4.id}`)).job.state, "cancelled");
   const a5 = (await submit()).job;
+  // Dismiss hard-resets the tree, so it is refused while a resume of that run is writing.
+  hold(dirA);
+  failNext.add(dirA);
+  await postJson(`${base}/api/jobs/${a3.id}/resume`, {});
+  await waitForJob(base, a3.id, ["specifying"]);
+  const refused = await fetch(`${base}/api/jobs/${a3.id}/dismiss`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  assert.equal(refused.status, 409);
+  assert.match((await refused.json()).error, /writer/);
+  release(dirA);
+  assert.equal((await waitForJob(base, a3.id, ["failed"])).state, "failed");
+  assert.equal((await getJson(`${base}/api/jobs/${a5.id}`)).job.state, "queued", "the start still waits behind the re-parked run");
+  // The parked state lands just before the run releases the project.
+  while ((await getJson(`${base}/api/health`)).activeRuns.length) await new Promise((resolve) => setTimeout(resolve, 20));
   // Setting aside a failed follow-on rewinds the app to the release before it, keeping owner data.
   await writeFile(path.join(dirA, "half-built.js"), "// left by the failed run\n");
   await mkdir(path.join(dirA, "data"), { recursive: true });

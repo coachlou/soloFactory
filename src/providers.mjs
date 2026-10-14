@@ -233,7 +233,7 @@ const CLAUDE_SHELL_RULE = `Shell: you are already in the project root. Only plai
 call; a command with cd, &&, ;, |, a loop, a heredoc or a redirect is denied without running. Read files with
 Read, create and change them with Write and Edit, and search with Glob and Grep.`;
 
-async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = "write", context = {} }) {
+async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = "write", resumeSessionId = null, context = {} }) {
   await mkdir(cwd, { recursive: true });
   const reasoningTask = /^(specification(?:-|$)|feature-plan(?:-|$)|plan-review$|plan-correction-|recovery-plan-)|(?:^|-)review(?:-|$)/.test(context.stage ?? "");
   const model = reasoningTask
@@ -242,7 +242,11 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
   const effort = reasoningTask
     ? process.env.SOLOFACTORY_CLAUDE_REASONING_EFFORT || "low"
     : process.env.SOLOFACTORY_CLAUDE_EFFORT || "medium";
-  const args = ["-p", "--no-session-persistence", "--output-format", "json", "--model", model, "--effort", effort];
+  // stream-json, not json: json printed nothing until exit, so 45-minute build turns left empty logs, fed the
+  // watchdog nothing and had no session id to continue after a cap (SEARCH-UI, 2026-10-14). Sessions persist
+  // so a capped or interrupted turn resumes its own context instead of starting cold.
+  const args = ["-p", "--output-format", "stream-json", "--verbose", "--model", model, "--effort", effort];
+  if (resumeSessionId) args.push("--resume", resumeSessionId);
   // Agent turns must not inherit the owner's personal Claude Code config: on 2026-10-12 builds ran the user's
   // Fable advisor (62% of a feature's cost), an rtk hook that rewrote commands, and every claude.ai connector.
   args.push("--setting-sources", "project,local", "--strict-mcp-config");
@@ -257,6 +261,7 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
       "Bash(node --test:*)", "Bash(ls:*)", "Bash(git ls-files:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", ...proofs);
   }
   if (schema) args.push("--json-schema", JSON.stringify(schema));
+  let sessionId = resumeSessionId;
   const result = await runProcess({
     executable: "claude",
     args,
@@ -273,7 +278,9 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
     onSpawn: (child) => context.onSpawn?.(child, { hardTimeoutMs: minutesFromEnv("SOLOFACTORY_AGENT_HARD_MINUTES", 45) }),
     onActivity: context.onActivity,
     onLine(line) {
-      onEvent?.({ type: "agent_output", message: line.slice(0, 500) });
+      const { sessionId: seen, event } = claudeStreamLine(line);
+      sessionId = seen ?? sessionId;
+      if (event) onEvent?.(event);
     },
   });
   if (result.code !== 0) {
@@ -282,18 +289,33 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
       result,
       diagnostics: detectProviderDiagnostics(result.lines.join("\n")),
       logPath,
-      sessionId: null,
+      sessionId,
       autoResumes: 0,
       idleTimeoutMs: minutesFromEnv("SOLOFACTORY_AGENT_IDLE_MINUTES", 6),
       hardTimeoutMs: minutesFromEnv("SOLOFACTORY_AGENT_HARD_MINUTES", 45),
     });
   }
-  // ponytail: the CLI can print a plain-text line ("Background tasks still running after
-  // 600s; terminating.") before its JSON envelope (seen 2026-09-18); the envelope is the last `{` line.
-  const envelope = JSON.parse(result.output.split("\n").filter((line) => line.startsWith("{")).at(-1) ?? result.output);
+  // The envelope is the stream's `result` event; plain-text lines ("Background tasks still running after
+  // 600s; terminating.", seen 2026-09-18) can sit between records.
+  const envelope = result.lines.map((line) => claudeStreamLine(line).record).findLast((record) => record?.type === "result");
+  if (!envelope) throw new Error(`Claude Code exited without a result record. See ${logPath}.`);
   const final = envelope.structured_output ?? envelope.result;
   const usage = claudeUsage(envelope);
-  return schema ? { ...(typeof final === "string" ? JSON.parse(final) : final), usage } : { message: String(final ?? "").trim(), usage };
+  sessionId = envelope.session_id ?? sessionId;
+  return schema ? { ...(typeof final === "string" ? JSON.parse(final) : final), usage, sessionId } : { message: String(final ?? "").trim(), usage, sessionId };
+}
+
+// One stream-json line: the session it names, and a dashboard event per tool call in the codex vocabulary
+// ("Completed Edit src/app.js"). Text, thinking and tool results stay in the log only, so the 160-event
+// window is not flooded.
+export function claudeStreamLine(line) {
+  let record;
+  try { record = JSON.parse(line); } catch { return {}; }
+  const sessionId = record?.session_id ?? null;
+  const tools = record?.type === "assistant" ? (record.message?.content ?? []).filter((block) => block.type === "tool_use") : [];
+  const target = (input = {}) => String(input.file_path ?? input.path ?? input.command ?? input.pattern ?? "").split("\n")[0].slice(0, 160);
+  const event = tools.length ? { type: "item.completed", message: tools.map((tool) => `Completed ${tool.name} ${target(tool.input)}`.trim()).join("; ").slice(0, 500) } : null;
+  return { record, sessionId, event };
 }
 
 // Token usage in one shape for both CLIs. inputTokens counts every input token, cached or not

@@ -1095,9 +1095,56 @@ test("an ordinary test gate that exhausts its repairs needs a repair plan; Resum
   assert.equal(result.state, "completed", result.error?.message);
 });
 
+test("Prepare repair plan is refused while Resume is the next step, without a write", async () => {
+  let fail = true;
+  const { store, job, make } = await plannedRun({ after: async (stage) => { if (fail && stage === "build-slice-SLICE-UI") { fail = false; throw new Error("provider dropped"); } } });
+  const parked = await make().start(job.id);
+  assert.equal(parked.state, "failed");
+  assert.equal(continuationAction(parked).action, "resume");
+  const before = await readFile(path.join(store.jobDir(job.id), "state.json"), "utf8");
+  await assert.rejects(make().planRecovery(job.id), { code: "not_continuable" });
+  assert.equal(await readFile(path.join(store.jobDir(job.id), "state.json"), "utf8"), before);
+});
+
 test("an ordinary gate failure with repairs left continues with Resume", () => {
   const job = { id: "j", state: "failed", error: { code: "quality_gate_failed", details: { gate: "test" } }, attempt: 1 };
   assert.equal(continuationAction(job, { maxRepairs: 2 }).action, "resume");
   assert.equal(continuationAction({ ...job, attempt: 2 }, { maxRepairs: 2 }).action, "prepare-plan");
   assert.equal(continuationAction({ ...job, attempt: 1, repairBudgetLimit: 1 }, { maxRepairs: 2 }).action, "prepare-plan");
+});
+
+test("a build that hits the safety cap while changing files continues once in its own session", async () => {
+  // SEARCH-UI, 2026-10-14: one 45-minute build wrote ~380 lines, hit the cap and parked the run for the owner.
+  const sessions = [];
+  let capped = 0;
+  const { store, job, factory } = await plannedRun({ after: async (stage, cwd, context) => {
+    if (/^(build-slice|slice-resume)-/.test(stage)) sessions.push(stage);
+    if (stage.startsWith("build-slice-") && capped < 2) {
+      capped += 1;
+      await writeFile(path.join(cwd, `partial-${capped}.txt`), "work in progress\n");
+      throw Object.assign(new Error("Claude Code reached the 45 minutes safety cap. Partial work is preserved."),
+        { code: "agent_hard_timeout", details: { timeoutReason: "hard", sessionId: `session-${capped}` } });
+    }
+  } });
+  const result = await factory.start(job.id);
+  // First feature: capped, continued once and finished. Second feature: capped, continued once too.
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(result.attempt, 0, "a continuation is not a repair");
+  assert.equal(Object.values(result.watch.continuations).filter((used) => used === 1).length, 2);
+  const resumes = (await store.events(job.id, 1000)).filter((event) => event.type === "agent.started" && event.message.includes("slice-resume-"));
+  assert.equal(resumes.length, 2);
+  assert.match(JSON.stringify(result.agentSessions), /session-1/, "the capped turn's session is kept for its continuation");
+});
+
+test("a capped build that changed nothing parks instead of continuing", async () => {
+  const { job, make } = await plannedRun();
+  const fixture = createFixtureProvider();
+  const provider = { id: "fixture", async run(options) {
+    if (options.context.stage.startsWith("build-slice-")) throw Object.assign(new Error("cap"), { code: "agent_hard_timeout", details: { timeoutReason: "hard", sessionId: "s" } });
+    return fixture.run(options);
+  } };
+  const result = await make({ provider }).start(job.id);
+  assert.equal(result.state, "failed");
+  assert.equal(result.error.code, "agent_hard_timeout");
+  assert.deepEqual(result.watch?.continuations ?? {}, {});
 });

@@ -194,6 +194,9 @@ export function incidentRecord(job) {
   const label = details.logPath ? details.logPath.split("/").pop().replace(/\.log$/, "") : observed.worker?.label ?? job.failedState;
   const minutes = (ms) => `${Math.max(1, Math.round((ms ?? 0) / 60_000))} minute${Math.round((ms ?? 0) / 60_000) === 1 ? "" : "s"}`;
   const code = job.error?.code;
+  const featureCursor = job.recoveryPhase?.cursor ?? job.featureCursor;
+  const featureRepairs = featureCursor?.id && Number.isFinite(featureCursor.attemptBefore) ? (job.attempt ?? 0) - featureCursor.attemptBefore : null;
+  const turns = (n) => `${n} repair turn${n === 1 ? "" : "s"}`;
   const verified = [...new Set([...(job.sliceDone ?? []), ...(job.recoveryPhase?.done ?? [])])];
   return {
     trigger: loop ? "repeated_failure" : details.timeoutReason ? `${details.timeoutReason}_timeout` : code ?? "unknown",
@@ -209,7 +212,8 @@ export function incidentRecord(job) {
       : details.timeoutReason === "idle" ? "Why the worker went quiet. Silence alone does not show a sign-in, quota or network problem."
       : code === "worker_unconfirmed" ? "Whether that worker is still writing to the workspace."
       : "Nothing beyond the recorded error.",
-    tried: `${job.attempt ?? 0} repair turn${job.attempt === 1 ? "" : "s"}; ${continuations} automatic continuation${continuations === 1 ? "" : "s"}.`,
+    // job.attempt counts the whole run; the feature's own share is measured from its cursor baseline.
+    tried: `${featureRepairs == null ? `${turns(job.attempt ?? 0)} in the whole run` : `${turns(featureRepairs)} on ${featureCursor.id} (${job.attempt ?? 0} in the whole run)`}; ${continuations} automatic continuation${continuations === 1 ? "" : "s"}.`,
     preserved: `Workspace files, logs and evidence are preserved${verified.length ? `, including ${verified.length} verified feature${verified.length === 1 ? "" : "s"} (${verified.join(", ")})` : ""}.`,
     nextAction: next?.label ?? clip(next?.reason ?? ""),
     selectedAction: next?.action ?? null,

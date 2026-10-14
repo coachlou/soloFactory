@@ -89,3 +89,15 @@ test("usage parses both CLIs into one shape and sums without inventing a cost", 
   assert.equal(addUsage(null, claude), claude);
   assert.equal(claudeUsage({ result: "no usage block" }), null);
 });
+
+// Shapes from `claude -p --output-format stream-json --verbose` (claude CLI, 2026-10-14).
+test("claude stream lines yield the session id and one dashboard event per tool call", async () => {
+  const { claudeStreamLine } = await import("../src/providers.mjs");
+  assert.equal(claudeStreamLine('{"type":"system","subtype":"init","session_id":"abc"}').sessionId, "abc");
+  assert.equal(claudeStreamLine('{"type":"system","subtype":"init","session_id":"abc"}').event, null);
+  const edit = claudeStreamLine(JSON.stringify({ type: "assistant", session_id: "abc", message: { content: [
+    { type: "text", text: "Editing" }, { type: "tool_use", name: "Edit", input: { file_path: "src/public/app.js" } }, { type: "tool_use", name: "Bash", input: { command: "npm test\nmore" } }] } }));
+  assert.deepEqual(edit.event, { type: "item.completed", message: "Completed Edit src/public/app.js; Completed Bash npm test" });
+  assert.equal(claudeStreamLine('{"type":"result","structured_output":{"ok":true},"session_id":"abc"}').record.structured_output.ok, true);
+  assert.deepEqual(claudeStreamLine("Background tasks still running after 600s; terminating."), {});
+});

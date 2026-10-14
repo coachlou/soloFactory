@@ -374,7 +374,8 @@ export function caseResults(cases, events) {
 // Bare "npm", "npm CLI (…)", "Node.js": no version digits or version words, so not a feature needing a different toolchain.
 const CONTROLLER_TOOLCHAIN_RE = /^(node(\.js)?|npm)(\s+cli)?(\s*\((?![^()]*\b(version|lts|latest|requires?|required|minimum|newer|older|least)\b)[^()\d]*\))?$/i;
 
-export function validateFeaturePlan(raw, { jobId, contractDigest, checks, sources = null }) {
+// ownership: also require test ownership across features (assertProofOwnership); off for re-validating approved plans.
+export function validateFeaturePlan(raw, { jobId, contractDigest, checks, sources = null, ownership = false }) {
   if (!raw || typeof raw !== "object" || raw.version !== 2) throw new Error("slices.json must be a version 2 feature plan.");
   if (raw.jobId !== jobId || raw.contractDigest !== contractDigest) throw new Error("Feature plan does not match this run and its frozen contract.");
   if (!Array.isArray(raw.slices) || raw.slices.length === 0) throw new Error("slices.json must contain at least one feature.");
@@ -444,6 +445,7 @@ export function validateFeaturePlan(raw, { jobId, contractDigest, checks, source
     return { id: slice.id, title: slice.title.trim(), objective: slice.objective.trim(), demo: slice.demo.trim(), dependsOn: [...dependsOn], closes: [...slice.closes], acceptance, ...(writes ? { writes } : {}) };
   });
   assertDisjointWrites(slices);
+  if (ownership) assertProofOwnership(slices);
 
   // A case may retire an obligation of an earlier feature (a stage gate that stops being true once this
   // feature exists). Ids outside this plan are a replacement plan's base obligations, judged by assertConsolidation.
@@ -519,6 +521,29 @@ function validateWrites(slice, dependsOn) {
   const shared = dependsOn.length ? SHARED_FILES.filter((file) => writesCover(writes, file)) : [];
   if (shared.length) throw new Error(`${where} depends on other features but writes ${shared.join(", ")}. Shared files belong to a foundation feature (one with no dependsOn).`);
   return writes;
+}
+
+// A later feature that edits an earlier feature's code reruns that feature's proofs, but its repairs may only change
+// its own writes. Without the earlier proof tests in those writes, a deliberate change (a renamed selector) leaves a
+// failing proof nobody may fix: run 2026-10-07-4f2dd1cf lost drafts #10 and #11 to PEOPLE-LINKS this way.
+// Overlap implies a dependency path, since assertDisjointWrites already rejected overlapping independent features.
+// ponytail: a feature's proof tests are proof-command file arguments inside its own writes; a test it doesn't declare
+// (or one under the same glob as its code) is skipped here and left to the plan reviewer.
+function assertProofOwnership(slices) {
+  const problems = [];
+  slices.forEach((a, index) => {
+    if (!a.writes) return;
+    const tests = [...new Set(a.acceptance.flatMap((item) => item.proof.command.slice(1).map((arg) => arg.replace(/^\.\//, ""))).filter((arg) => !arg.startsWith("-") && /\.\w+$/.test(arg) && writesCover(a.writes, arg)))];
+    const code = a.writes.filter((entry) => !tests.some((file) => writesCover([entry], file)));
+    if (!tests.length || !code.length) return;
+    for (const b of slices.slice(index + 1)) {
+      if (!b.writes) continue;
+      const shared = code.filter((x) => b.writes.some((y) => overlaps(x, y)));
+      const missing = tests.filter((file) => !writesCover(b.writes, file));
+      if (shared.length && missing.length) problems.push(`${b.id} edits ${shared.join(", ")} of ${a.id} without ${missing.join(", ")}`);
+    }
+  });
+  if (problems.length) throw new Error(`A feature that edits an earlier feature's files reruns its proofs and must be able to update them: ${problems.join("; ")}. Add those proof tests to the later feature's writes, or move the shared edit into the earlier feature.`);
 }
 
 // Features with no dependency path between them may be built in either order, so they must not share files.
