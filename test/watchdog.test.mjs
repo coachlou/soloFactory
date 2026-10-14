@@ -9,7 +9,7 @@ import { JobStore } from "../src/store.mjs";
 import { buildRecoveryPacket, continuationAction, SoloFactory } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
 import { createProvider } from "../src/providers.mjs";
-import { normalizeFailure, repeatedFailure, RunMonitor, supervisionStatus, watchConfig } from "../src/watchdog.mjs";
+import { normalizeFailure, repeatedFailure, RunMonitor, supervisionStatus, watchConfig, workerAlive } from "../src/watchdog.mjs";
 
 const brief = { workingName: "Pocket Pulse", acceptanceScenarios: ["A user records a score."] };
 const transcript = [{ role: "user", content: "A daily tracker." }];
@@ -255,4 +255,19 @@ test("restart: a live worker parks the run; Resume appears only after it exits",
   await other.writeState(gone);
   await other.recoverInterrupted();
   assert.equal((await other.read(gone.id)).error.code, "process_restarted");
+});
+
+test("a worker whose leader died still counts as alive while its group has a member", async () => {
+  // The leader spawns a grandchild into its group, prints its pid, then exits; the grandchild keeps running.
+  const leader = spawn(process.execPath, ["-e", `const g = require("node:child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }); console.log(g.pid); g.unref();`], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
+  let out = "";
+  leader.stdout.on("data", (chunk) => { out += chunk; });
+  await once(leader, "exit");
+  const grandchild = Number(out.trim());
+  try {
+    assert.ok(grandchild > 0);
+    assert.equal(workerAlive(leader.pid), true);
+  } finally { process.kill(-leader.pid, "SIGKILL"); }
+  for (let i = 0; i < 40 && workerAlive(leader.pid); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.equal(workerAlive(leader.pid), false);
 });
