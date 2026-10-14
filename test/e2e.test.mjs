@@ -383,15 +383,26 @@ test("briefs queue per project, overlap across projects, and wait behind a parke
   assert.equal(dequeued.dequeued, true);
   assert.equal((await getJson(`${base}/api/jobs/${a4.id}`)).job.state, "cancelled");
   const a5 = (await submit()).job;
-  // Dismiss hard-resets the tree, so it is refused while a resume of that run is writing.
-  hold(dirA);
+  // Dismiss hard-resets the tree, so it is refused while a resume of that run waits in the queue:
+  // two held runs elsewhere fill both slots, so the resume cannot launch yet and a3 still reads parked.
+  const dirC = path.join(home, "projects", "gamma");
+  hold(dirB);
+  hold(dirC);
+  await postJson(`${base}/api/projects/select`, { id: "projects/beta" });
+  const b2 = (await submit()).job;
+  await postJson(`${base}/api/projects`, { name: "gamma" });
+  const c1 = (await submit()).job;
+  await waitForJob(base, b2.id, ["specifying"]);
+  await waitForJob(base, c1.id, ["specifying"]);
   failNext.add(dirA);
   await postJson(`${base}/api/jobs/${a3.id}/resume`, {});
-  await waitForJob(base, a3.id, ["specifying"]);
   const refused = await fetch(`${base}/api/jobs/${a3.id}/dismiss`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   assert.equal(refused.status, 409);
   assert.match((await refused.json()).error, /writer/);
-  release(dirA);
+  release(dirB);
+  release(dirC);
+  assert.equal((await waitForJob(base, b2.id, ["completed"])).state, "completed");
+  assert.equal((await waitForJob(base, c1.id, ["completed"])).state, "completed");
   assert.equal((await waitForJob(base, a3.id, ["failed"])).state, "failed");
   assert.equal((await getJson(`${base}/api/jobs/${a5.id}`)).job.state, "queued", "the start still waits behind the re-parked run");
   // The parked state lands just before the run releases the project.
