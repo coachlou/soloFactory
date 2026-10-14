@@ -377,7 +377,7 @@ export async function createSoloFactoryServer(options = {}) {
         const jobStore = storeOfJob(jobMatch[1]);
         const job = await ensureRecovery(await jobStore.read(jobMatch[1]), jobStore);
         const [annotated] = await annotateJobs(jobProject.get(job.id) ?? active.id, [job]);
-        return json(response, 200, { job: annotated, events: await jobStore.events(job.id) });
+        return json(response, 200, { job: { ...annotated, idleGaps: await jobStore.idleGaps(job.id) }, events: await jobStore.events(job.id) });
       }
       const telemetryMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/telemetry$/);
       if (request.method === "GET" && telemetryMatch) {

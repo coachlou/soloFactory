@@ -783,9 +783,9 @@ function mapStops(job) {
   let last = Date.parse(plan.start) || null;
   const stops = plan.slices.map((slice) => {
     const stat = plan.stats[slice.id] ?? {}, done = plan.done.includes(slice.id), current = !done && !finished && slice.id === plan.current;
-    // ponytail: wall time since the previous feature was verified, so pauses count too; sum its stages if that misleads.
+    // Running time since the previous feature was verified: pauses, stops and long silences (job.idleGaps) are subtracted.
     const ended = done ? Date.parse(stat.verifiedAt) : current ? (parked ? Date.parse(job.updatedAt) : Date.now()) : null;
-    const ms = ended && last ? Math.max(0, ended - last) : 0;
+    const ms = ended && last ? runningMs(last, ended, job.idleGaps) : 0;
     if (done && stat.verifiedAt) last = Date.parse(stat.verifiedAt);
     return { id: slice.id, title: slice.title, deps: (slice.dependsOn ?? []).map((dep) => plan.slices.findIndex((other) => other.id === dep)).filter((index) => index >= 0), ms, reviews: stat.reviews ?? 0, repairs: stat.repairs ?? 0, status: done ? "done" : live(current) };
   });
@@ -915,6 +915,23 @@ function renderStop(stops, selected, showHealth, health) {
   patchChildren($("#stop"), [title, about, status]);
 }
 
+function runningMs(from, to, gaps = []) {
+  let ms = Math.max(0, to - from);
+  for (const [start, end] of gaps) ms -= Math.max(0, Math.min(to, end) - Math.max(from, start));
+  return Math.max(0, ms);
+}
+
+// Time left from running time only: median per feature (one slow feature should not drag it), the underway feature
+// credited for what it has already run, and a quartile range once there are enough samples.
+function timeLeft(stops, live) {
+  const done = stops.filter((stop) => stop.status === "done" && stop.ms > 0).map((stop) => stop.ms).sort((a, b) => a - b);
+  if (!done.length) return null;
+  const at = (q) => done[Math.min(done.length - 1, Math.floor(q * done.length))];
+  const rest = Math.max(0, stops.filter((stop) => stop.status !== "done").length - (live >= 0 ? 1 : 0));
+  const total = (per) => (live >= 0 ? Math.max(per * 0.25, per - stops[live].ms) : 0) + per * rest;
+  return { median: at(0.5), mid: total(at(0.5)), range: done.length >= 4 ? [total(at(0.25)), total(at(0.75))] : null };
+}
+
 function renderAnswers(stops, live, features) {
   const job = state.job, parked = PARKED.includes(job.state), quiet = lastActivityAge(job);
   const recent = state.events.findLast((entry) => eventKind(entry) !== "stage");
@@ -928,10 +945,9 @@ function renderAnswers(stops, live, features) {
   const repairs = usage ? `${usage.feature[0]} of ${usage.feature[1]} repairs used on this feature, ${usage.plan[0]} of ${usage.plan[1]} in the plan` : plural(job.attempt ?? 0, "repair");
   const healthy = [job.supervision?.status === "Progress needs checking" ? "warn" : usage && usage.feature[0] >= usage.feature[1] ? "warn" : "ok", `${repairs}.${cases.length ? ` ${passed} of ${cases.length} acceptance cases pass.` : ""}`];
   const verified = stops.filter((stop) => stop.status === "done");
-  const timed = verified.filter((stop) => stop.ms > 0), average = timed.length ? timed.reduce((sum, stop) => sum + stop.ms, 0) / timed.length : 0;
-  const left = stops.length - verified.length;
-  const elapsed = (job.completedAt ? Date.parse(job.completedAt) : Date.now()) - Date.parse(job.startedAt || job.createdAt);
-  const far = ["", `${verified.length} of ${stops.length} ${features ? "features verified" : "steps done"}${live >= 0 ? `; ${features ? "feature" : "step"} ${live + 1} is ${stops[live].status === "blocked" ? "stopped" : "underway"}` : ""}.${features && average && left ? ` About ${formatSpan(average * left)} left at this plan's ${minutesLabel(average)} average.` : ""} Run: ${formatSpan(elapsed)}${usageLine(state.telemetry?.summary?.tokens?.total)}.`];
+  const estimate = features ? timeLeft(stops, live) : null;
+  const elapsed = runningMs(Date.parse(job.startedAt || job.createdAt), job.completedAt ? Date.parse(job.completedAt) : Date.now(), job.idleGaps);
+  const far = ["", `${verified.length} of ${stops.length} ${features ? "features verified" : "steps done"}${live >= 0 ? `; ${features ? "feature" : "step"} ${live + 1} is ${stops[live].status === "blocked" ? "stopped" : "underway"}` : ""}.${estimate && estimate.mid > 0 ? ` About ${estimate.range ? `${formatSpan(estimate.range[0])} to ${formatSpan(estimate.range[1])}` : formatSpan(estimate.mid)} of running time left (median ${minutesLabel(estimate.median)} a feature).` : ""} Run: ${formatSpan(elapsed)} running${usageLine(state.telemetry?.summary?.tokens?.total)}.`];
   const next = job.nextAction;
   const needs = parked && next && !["none", "factory-fix"].includes(next.action) ? ["bad", `Yes: ${next.label}${next.reason ? `. ${next.reason}` : ""}`]
     : job.recoveryPhase?.status === "ready" ? ["warn", "Yes: review and approve the repair plan above."]

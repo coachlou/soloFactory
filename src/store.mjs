@@ -160,6 +160,22 @@ export class JobStore {
     return enriched;
   }
 
+  // Stretches of the run that were not running: after a pause/stop event until the next event, or any silence over
+  // an hour (server down). The time-left estimate subtracts these so only running time counts.
+  // ponytail: re-read when the file grows; incremental parsing if events.jsonl gets huge.
+  async idleGaps(id) {
+    const file = path.join(this.jobDir(id), "events.jsonl");
+    try {
+      const { size } = await stat(file);
+      this.gapCache ??= new Map();
+      const cached = this.gapCache.get(id);
+      if (cached?.size === size) return cached.gaps;
+      const gaps = idleGapsOf(await readFile(file, "utf8"));
+      this.gapCache.set(id, { size, gaps });
+      return gaps;
+    } catch { return []; }
+  }
+
   async events(id, limit = 160) {
     try {
       const lines = (await readFile(path.join(this.jobDir(id), "events.jsonl"), "utf8"))
@@ -244,4 +260,19 @@ export class JobStore {
     await stat(file);
     return { file, content: await readFile(file, "utf8") };
   }
+}
+
+const STOPPED_EVENTS = new Set(["job.paused", "job.failed", "job.cancelled", "job.interrupted"]);
+const LONG_SILENCE_MS = 60 * 60_000;
+export function idleGapsOf(text) {
+  const gaps = [];
+  let previous = null;
+  for (const line of text.split("\n")) {
+    let event; try { event = JSON.parse(line); } catch { continue; }
+    const at = Date.parse(event.at);
+    if (!Number.isFinite(at)) continue;
+    if (previous && at > previous.at && (STOPPED_EVENTS.has(previous.type) || at - previous.at > LONG_SILENCE_MS)) gaps.push([previous.at, at]);
+    previous = { at, type: event.type };
+  }
+  return gaps;
 }
