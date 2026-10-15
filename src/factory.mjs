@@ -56,6 +56,9 @@ export class FactoryError extends Error {
 // one SoloFactory per run, and a project's next release must stop the previous release's app.
 const liveByProject = new Map();
 
+// Test files and fixtures: never widened into, since editing another feature's tests can weaken them.
+const TEST_PATH = /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
+
 export class SoloFactory {
   constructor({ store, provider, maxRepairs = 2, autoStartRepairs = true, commandRunner = runProcess, deployer, watch = watchConfig() } = {}) {
     this.store = store;
@@ -723,6 +726,7 @@ export class SoloFactory {
         repairs: job.attempt - cursor.attemptBefore,
         reviews: cursor.reviews,
         commit: cursor.commit,
+        ...(cursor.widened && { widened: cursor.widened }),
       };
       job.sliceDone = [...(job.sliceDone ?? []), slice.id];
       job.sliceIndex = i + 1;
@@ -774,7 +778,7 @@ export class SoloFactory {
   async parkSetAside(job, waiting) {
     const [entry, ...rest] = job.setAside;
     const slices = job.approvedPlan.plan.slices;
-    const { writes } = slices.find((item) => item.id === entry.id);
+    const writes = [...slices.find((item) => item.id === entry.id).writes, ...(entry.cursor?.widened ?? [])];
     const changes = (await this.store.git("diff", "--name-status", "-z", "--no-renames", entry.base, entry.ref, "--", ".", ":(exclude).factory/review-request.json", ":(exclude).factory/review-result.json")).split("\0").filter(Boolean);
     for (let n = 0; n < changes.length; n += 2) {
       if (outsideWrites([changes[n + 1]], writes).length) continue;
@@ -1270,16 +1274,35 @@ export class SoloFactory {
   // A feature may change only the files it declared; impact selection later trusts these lists. Diffing
   // from the feature's start commit also catches files the agent committed itself. A cursor without a
   // base (saved by an older release) falls back to the uncommitted tree.
+  // A plan's file lists can miss a file the feature's checks need (run 2026-10-07-4f2dd1cf: VIEWER-DATES wrote only its
+  // test while its fix lived in app.js, so three repairs changed nothing). An edit to an existing source file no unbuilt
+  // feature owns widens this feature's writes on its cursor instead of failing; tests, new files and deletions still fail.
   async writesFailure(job, slice) {
-    const base = [job.recoveryPhase?.cursor, job.featureCursor].find((cursor) => cursor?.id === slice.id)?.base;
-    const listed = base ? [await this.store.git("diff", "--name-only", "-z", base), await this.store.git("ls-files", "-z", "-o", "--exclude-standard")]
-      : [await this.store.git("ls-files", "-z", "-m", "-o", "-d", "--exclude-standard")];
-    const changed = [...new Set(listed.join("\0").split("\0").filter(Boolean))];
-    const outside = outsideWrites(changed, slice.writes);
+    const recovery = job.recoveryPhase?.cursor?.id === slice.id;
+    const cursor = recovery ? job.recoveryPhase.cursor : job.featureCursor?.id === slice.id ? job.featureCursor : null;
+    const base = cursor?.base;
+    const list = async (...args) => (await this.store.git(...args)).split("\0").filter(Boolean);
+    const changed = base ? [...new Set([...await list("diff", "--name-only", "-z", base), ...await list("ls-files", "-z", "-o", "--exclude-standard")])]
+      : await list("ls-files", "-z", "-m", "-o", "-d", "--exclude-standard");
+    const writes = [...slice.writes, ...(cursor?.widened ?? [])];
+    let outside = outsideWrites(changed, writes);
+    if (outside.length && base) {
+      const modified = new Set(await list("diff", "--name-only", "-z", "--diff-filter=M", base));
+      const plan = recovery ? job.recoveryPhase.plan : job.approvedPlan?.plan;
+      const done = (recovery ? job.recoveryPhase.done : job.sliceDone) ?? [];
+      const others = (plan?.slices ?? []).filter((item) => item.id !== slice.id && !done.includes(item.id) && item.writes);
+      const widen = outside.filter((file) => modified.has(file) && !TEST_PATH.test(file) && !others.some((item) => writesCover(item.writes, file)));
+      if (widen.length) {
+        cursor.widened = [...(cursor.widened ?? []), ...widen];
+        await this.store.writeState(job);
+        await this.emit(job.id, { type: "slice.writes_widened", state: job.state, slice: slice.id, files: widen, message: `Feature ${slice.id} needed ${widen.join(", ")} beyond its declared writes; its writes now include them` });
+        outside = outside.filter((file) => !widen.includes(file));
+      }
+    }
     if (!outside.length) return null;
     const message = `Feature ${slice.id} changed files outside its declared writes: ${outside.join(", ")}.`;
     await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "writes", feature: slice.id, message });
-    return new FactoryError("quality_gate_failed", message, { gate: "writes", output: `${message}\nDeclared writes: ${slice.writes.join(", ")}\nMove the change into a declared file or revert it; the plan's file lists are fixed during a build.` });
+    return new FactoryError("quality_gate_failed", message, { gate: "writes", output: `${message}\nDeclared writes: ${writes.join(", ")}\nAn existing source file outside the writes is allowed when the fix needs it, but not another feature's tests, a new file outside the writes, a deletion, or a file an unbuilt feature owns. Move the change into an allowed file or revert it.` });
   }
 
   // Merge check: proofs of built features whose files (or whose dependencies' files) this feature changed
@@ -1291,7 +1314,8 @@ export class SoloFactory {
     if (!base || !slice.writes) return [];
     const files = async (...args) => (await this.store.git(...args)).split("\0").filter(Boolean);
     const changed = [...new Set([...await files("diff", "--name-only", "-z", base), ...await files("ls-files", "-z", "-o", "--exclude-standard")])];
-    const slices = job.approvedPlan.plan.slices;
+    // Widened writes count as owned, so later edits to those files rerun this feature's proofs.
+    const slices = job.approvedPlan.plan.slices.map((item) => job.sliceStats?.[item.id]?.widened && item.writes ? { ...item, writes: [...item.writes, ...job.sliceStats[item.id].widened] } : item);
     const ids = impactedFeatures(slices, done, changed) ?? [];
     if (ids.length) await this.emit(job.id, { type: "slice.impact", state: job.state, slice: slice.id, impacted: ids, message: `Feature ${slice.id} changed files of ${ids.join(", ")}; rerunning their proofs` });
     const built = slices.filter((item) => done.includes(item.id) || item.id === slice.id);

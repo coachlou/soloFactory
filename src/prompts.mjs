@@ -243,7 +243,8 @@ export function repairPrompt(failurePath, slice = null, bugs = [], featureFile =
     ? `
 The failure is inside slice ${slice.id} (${slice.title}), given in full below: do not read the plan file.
 Earlier completed slices must be preserved — fix only what this slice's acceptance criteria need.${slice.writes ? ` Change
-only the files its writes list; any other changed file fails its checks.` : ""}
+the files its writes list. If the fix needs an existing source file outside them, edit it: the controller adds it to this
+feature's writes. Never edit another feature's tests, create a new file outside the writes, or delete one; those fail its checks.` : ""}
 ${featureBlock("Slice", JSON.stringify(slice, null, 2), featureFile)}`
     : "";
   const bugLines = bugs.length
@@ -394,8 +395,8 @@ export const PLAN_CHECKLIST = `A plan is blocked when:
   API/browser surface;
 - a proof marked "pending": "integration" could run when its feature is built;
 - a required model, native package, runtime or tool is unverified;
-- a feature's writes miss files its obligations plainly need, or are broad enough to serialize the plan
-  (a glob over a whole tree), or a dependsOn exists only to permit a shared file rather than real use;
+- a feature's writes miss files its obligations plainly need (a behavior shown in the UI needs the UI file, even
+  when another feature also writes it), or are broad enough to serialize the plan (a glob over a whole tree);
 - a proof reruns other features' proofs (a cumulative regression or aggregate suite) instead of only its own tests.`;
 
 export function featurePlanPrompt({ followOn = false } = {}) {
@@ -426,8 +427,8 @@ Rules the controller enforces:
 - A feature with an empty closes is a named prerequisite: it needs its own observable acceptance
   and proof, and a later closing feature must depend on it.
 - Every feature declares writes: the paths, directories or globs it creates or edits, tests included.
-  The controller fails a feature that changes any other file. Features with no dependsOn path between
-  them must write different files. package.json and factory.json belong to a foundation feature (one
+  List every file its obligations need changed, the UI files included. Features with no dependsOn path
+  between them must write different files, so two features that need the same file get a dependsOn. package.json and factory.json belong to a foundation feature (one
   with no dependsOn), so put every dependency there. .factory/, package-lock.json, README.md and
   .gitignore are always writable.
 - Each proof runs only its own feature's tests. The controller reruns an earlier feature's proofs whenever
@@ -553,8 +554,9 @@ string assertions do not prove user behavior. An obligation with cases needs one
 whose name contains [CASE-ID], run by its proof command without a --test-reporter flag of its own; the
 controller passes it only when every case's own test passed. Cases are read only from node:test events, so even
 a standalone script proof must import node:test and wrap each case in test(); a script that prints its own
-ok/fail lines records nothing and fails its gate. Change only the files your feature's writes list; any other
-changed file fails its checks. Do not edit .factory contract or plan files. Do not
+ok/fail lines records nothing and fails its gate. Change the files your feature's writes list. If your
+obligations need an existing source file outside them, edit it: the controller adds it to your writes. Never edit
+another feature's tests, create a new file outside your writes, or delete one; those fail its checks. Do not edit .factory contract or plan files. Do not
 deploy; the controller runs build and this feature's proof commands, then a scoped review.
 
 ${DATA_RULE}`;

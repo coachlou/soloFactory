@@ -2,7 +2,7 @@
 // independent features apart and the controller fails a feature that changes anything else.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { JobStore } from "../src/store.mjs";
@@ -71,10 +71,12 @@ async function declaredRun(stray) {
       value.slices[0].acceptance[0].proof.command = ["node", "--test", "server.test.mjs"];
       await writeFile(file, JSON.stringify(value, null, 2));
     }
-    if (stray && stage === "build-slice-SLICE-UI") {
+    if (["new", "committed", true].includes(stray) && stage === "build-slice-SLICE-UI") {
       await writeFile(path.join(options.cwd, "stray.mjs"), "export {};\n");
       if (stray === "committed") await store.git("add", "stray.mjs").then(() => store.git("commit", "-qm", "agent commit"));
     }
+    // An existing file another (built) feature owns: source widens the writes, a test never does.
+    if (["source", "test"].includes(stray) && stage === "build-slice-SLICE-UI") await appendFile(path.join(options.cwd, stray === "source" ? "server.mjs" : "server.test.mjs"), "\n// touched\n");
     return result;
   } };
   const logs = [];
@@ -145,4 +147,19 @@ test("with ownership on, a later feature editing an earlier feature's code must 
   const cited = { ...offending, requestId: "req", slices: offending.slices.map((slice) => ({ ...slice, acceptance: slice.acceptance.map((item) => ({ ...item, sources: [{ path: "spec.md", locator: "§1" }] })) })) };
   assert.throws(() => validateRecoveryPlan(cited, request, { fresh: true }), /B edits src\/public\/app\.js of A/);
   validateRecoveryPlan(cited, request);
+});
+
+test("a feature whose fix needs an existing source file outside its writes widens them instead of failing", async () => {
+  const { result, events } = await declaredRun("source");
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.deepEqual(events.find((event) => event.type === "slice.writes_widened")?.files, ["server.mjs"]);
+  assert.deepEqual(result.sliceStats["SLICE-UI"].widened, ["server.mjs"]);
+  assert.equal(events.filter((event) => event.gate === "writes").length, 0);
+});
+
+test("editing another feature's test outside the writes still fails the writes gate", async () => {
+  const { result, events } = await declaredRun("test");
+  assert.match(events.find((event) => event.gate === "writes")?.message ?? "", /SLICE-UI changed files outside its declared writes: server\.test\.mjs/);
+  assert.equal(events.filter((event) => event.type === "slice.writes_widened").length, 0);
+  assert.equal(result.state, "failed");
 });
