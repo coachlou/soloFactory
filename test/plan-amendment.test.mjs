@@ -393,7 +393,8 @@ test('HTTP: packet download, a 540KB bounded submission, refusals that change no
   assert.equal(replacing.status, 202, await replacing.clone().text());
   const replaced = await settle();
   assert.deepEqual(stages.slice(before), [`recovery-plan-review-${replaced.recoveryPhase.id}-1`]);
-  assert.equal(replaced.nextAction.action, 'amend-plan'); assert.equal(replaced.recoveryPhaseHistory.at(-1).planDigest, ready.recoveryPhase.planDigest);
+  assert.equal(replaced.nextAction.action, 'amend-plan'); assert.equal((await app.store.read(job.id)).recoveryPhaseHistory.at(-1).planDigest, ready.recoveryPhase.planDigest);
+  assert.equal(replaced.recoveryPhaseHistory, undefined, 'the polled job omits superseded plans');
   assert.equal((await post('recovery-start', { planDigest: ready.recoveryPhase.planDigest })).status, 409);
   // The dashboard drives the same allowed action with a file input and a retained selection.
   const dashboard = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
