@@ -554,7 +554,7 @@ export async function runFeatureRecovery(factory, id, signal, approval = null, {
       // v1 (legacy) slices carry prose acceptance; give each a stable check id for the scoped review.
       const feature = { ...slice, closes: sliceChecks(slice), acceptance: slice.acceptance.map((item, n) => typeof item === 'string' ? { id: `${slice.id}-A${n + 1}`, behavior: item, proof: null } : item) };
       job = await factory.proveFeature(job, feature, owned, `${i + 1}/${phase.plan.slices.length}`, signal, {
-        cursor: phase.cursor, assertCurrent, planDigest: phase.planDigest, plan: phase.plan, planFile: phase.planFile, probe: true,
+        cursor: phase.cursor, assertCurrent, planDigest: phase.planDigest, plan: phase.plan, planFile: phase.planFile, probe: true, totalRepairLimit: phase.totalRepairLimit,
         labels: { build: label, resume: `${label}-resume`, review: n => `${label}-review-${n}` },
       });
       phase.done.push(slice.id); phase.index = i + 1;

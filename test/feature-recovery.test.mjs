@@ -129,6 +129,82 @@ async function setup(t, mutate = async () => {}, { uploads = {}, alreadyPasses =
   return { root, store, factory, failed, stages, prompts, deployments: () => deployments };
 }
 
+for (const matched of [false, true]) test(`case failure text distinguishes failed and never-run cases (${matched ? 'partial match' : 'zero match'})`, async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'solo-case-failure-'));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
+  const store = new JobStore(root); await store.init();
+  const job = await store.create({ brief: {}, transcript: [], provider: 'fixture' });
+  await mkdir(path.join(root, '.factory/logs'), { recursive: true });
+  await writeFile(path.join(root, 'case.test.mjs'), "import test from 'node:test'; test('[CASE-X] fails', () => { throw new Error('real assertion failure'); });\n");
+  const command = ['node', '--test', '--test-name-pattern', matched ? '\\[CASE-X\\]' : '\\[CASE-NO-MATCH\\]', 'case.test.mjs'];
+  const factory = new SoloFactory({ store, provider: { async run() { return {}; } } });
+  const failure = await factory.verify(job, { commands: { test: command, build: ['node', '-e', ''] } }, new AbortController().signal, {
+    includeInstall: false, proofs: [{ id: 'PROOF', proof: { command }, cases: [{ id: 'CASE-X' }, { id: 'CASE-Y' }] }],
+  });
+  assert.equal(failure.code, 'quality_gate_failed');
+  await factory.repair(job, failure, new AbortController().signal);
+  const text = await readFile(path.join(root, '.factory/last-failure-1.txt'), 'utf8');
+  assert.match(text, /^Gate test: expected passing test\(s\) named .*\[CASE-Y\].*none ran/);
+  assert.match(text, matched ? /Failed cases: \[CASE-X\]/ : /Failed cases: none/);
+  assert.match(text, matched ? /Never ran: \[CASE-Y\]/ : /Never ran: \[CASE-X\], \[CASE-Y\]/);
+  assert.match(text, matched ? /real assertion failure/ : /pass 1/);
+});
+
+for (const outcome of ['passes', 'blocks again', 'phase cap', 'pause before repair']) test(`spent gate repairs get one review allowance: ${outcome}`, async t => {
+  let reviews = 0;
+  const succeeds = outcome === 'passes' || outcome === 'pause before repair';
+  const repairTexts = [];
+  const env = await setup(t, async args => {
+    if (/^recovery-.*-RECOVERY-1-review-\d+$/.test(args.context.stage)) {
+      reviews++;
+      if (!succeeds || reviews <= 2) {
+        const p = path.join(args.cwd, '.factory/review-result.json'); const r = JSON.parse(await readFile(p));
+        r.verdict = 'blocked'; r.checks[0].status = 'missing'; r.blockers = ['Review finding: control absent']; await writeFile(p, JSON.stringify(r));
+      }
+      if (outcome === 'pause before repair' && reviews === 1) await env.factory.pause(args.context.job.id);
+    }
+    if (/^repair-/.test(args.context.stage) && args.context.job.recoveryPhase) {
+      repairTexts.push(await readFile(path.join(args.cwd, `.factory/last-failure-${args.context.job.attempt}.txt`), 'utf8'));
+    }
+  });
+  const ready = await env.factory.planRecovery(env.failed.id);
+  env.factory.maxRepairs = 2;
+  let gatesFailed = 0;
+  const run = env.factory.commandRunner;
+  env.factory.commandRunner = async opts => {
+    const job = await env.store.read(ready.id);
+    if (job.recoveryPhase.cursor?.id === 'RECOVERY-1' && job.recoveryPhase.cursor.substage === 'checking' && gatesFailed < 2) {
+      gatesFailed++;
+      return { code: 1, output: `gate failure ${gatesFailed}` };
+    }
+    return run(opts);
+  };
+  if (outcome === 'phase cap') {
+    ready.recoveryPhase.status = 'running'; ready.recoveryPhase.totalRepairLimit = ready.attempt + 3;
+    await env.store.writeState(ready);
+  }
+  let result = outcome === 'phase cap' ? await env.factory.resume(ready.id) : await env.factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);
+  if (outcome === 'pause before repair') {
+    assert.equal(result.state, 'paused'); assert.equal(result.attempt, ready.attempt + 2);
+    assert.equal(result.recoveryPhase.cursor.substage, 'repairing');
+    result = await env.factory.resume(result.id);
+  }
+  assert.equal(gatesFailed, 2);
+  const extra = outcome === 'phase cap' ? 1 : 2;
+  assert.equal(result.attempt, ready.attempt + 2 + extra, result.error?.message);
+  assert.equal(repairTexts.length, 2 + extra);
+  assert.ok(repairTexts.slice(2).every(text => /Review finding: control absent/.test(text)), repairTexts.join('\n'));
+  assert.equal(result.state, succeeds ? 'completed' : 'failed', result.error?.message);
+  if (!succeeds) {
+    assert.equal(result.error.code, 'review_rejected');
+    assert.equal(result.recoveryPhase.cursor.reviewRepairsGranted, true);
+    assert.ok(result.repairBudgetLimit <= result.recoveryPhase.totalRepairLimit);
+    await assert.rejects(env.factory.resume(result.id), /Prepare a repair plan/);
+    assert.equal((await env.store.read(result.id)).attempt, result.attempt);
+    assert.equal(env.deployments(), 0);
+  }
+});
+
 test('plans, approves and executes same-run recovery, preserving contract and original evidence', async t => {
   const env = await setup(t); const before = await sourceBaseline(env.store);
   const oldFailure = await readFile(path.join(env.root, '.factory/last-failure-1.txt'), 'utf8');
@@ -490,10 +566,11 @@ test('feature repair exhaustion parks with durable budget and no deployment', as
   });
   const ready = await env.factory.planRecovery(env.failed.id);
   const failed = await env.factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);
-  assert.equal(failed.state, 'failed'); assert.equal(failed.attempt, 2); assert.equal(failed.repairBudgetLimit, 2);
+  assert.equal(failed.state, 'failed'); assert.equal(failed.attempt, 3); assert.equal(failed.repairBudgetLimit, 3);
+  assert.equal(failed.recoveryPhase.cursor.reviewRepairsGranted, true);
   await assert.rejects(env.factory.resume(failed.id), /Prepare a repair plan/);
   const parked = await env.store.read(failed.id);
-  assert.equal(parked.attempt, 2); assert.equal(parked.repairBudgetLimit, 2);
+  assert.equal(parked.attempt, 3); assert.equal(parked.repairBudgetLimit, 3);
   const next = await env.factory.planRecovery(failed.id);
   assert.equal(next.recoveryPhase.status, 'ready', next.error?.message);
   assert.deepEqual(next.recoveryPhase.request.checks, failed.recoveryPhase.request.checks, 'gaps are the prior plan\'s unclosed checks');

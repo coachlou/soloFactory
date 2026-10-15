@@ -804,6 +804,15 @@ export class SoloFactory {
       labels = { build: `build-slice-${slice.id}`, resume: `slice-resume-${slice.id}`, review: (n) => `feature-review-${slice.id}-${n}` },
     } = scope;
     const save = (substage) => { cursor.substage = substage; return this.store.writeState(job); };
+    const repairReview = async (failure) => {
+      // A spent gate budget must still leave one repair allowance for the review's findings.
+      if (failure.code === "review_rejected" && !cursor.reviewRepairsGranted && job.attempt >= (job.repairBudgetLimit ?? this.maxRepairs)) {
+        cursor.reviewRepairsGranted = true;
+        job.repairBudgetLimit = Math.min(job.attempt + this.maxRepairs, scope.totalRepairLimit ?? Infinity);
+        await this.store.writeState(job);
+      }
+      return this.repair(job, failure, signal, slice);
+    };
     const candidate = () => sourceBaseline(this.store, { head: false });
     // Proof pending integration runs before the final review; the checks it proves stay unverified until then.
     const pending = pendingChecks(slice, { plan, outstanding: job.outstandingProofs });
@@ -820,7 +829,7 @@ export class SoloFactory {
         if (!cursor.reviewFailure) { await save("checking"); continue; }
         const { code, message, details } = cursor.reviewFailure;
         delete cursor.reviewFailure;
-        job = await this.repair(job, new FactoryError(code, message, details), signal, slice);
+        job = await repairReview(new FactoryError(code, message, details));
         await save("checking");
         continue;
       }
@@ -875,7 +884,8 @@ export class SoloFactory {
         job = await this.stage(job, "reviewing", `Reviewing feature ${position} — ${slice.title}`);
         if (await candidate() !== cursor.candidate) { await save("checking"); continue; }
         await assertCurrent();
-        if (cursor.reviews >= this.maxRepairs + 2) throw new FactoryError("review_unstable", `Feature ${slice.id} did not reach a stable reviewed candidate after ${cursor.reviews} reviews.`);
+        const reviewLimit = this.maxRepairs + 2 + (cursor.reviewRepairsGranted ? this.maxRepairs : 0);
+        if (cursor.reviews >= reviewLimit) throw new FactoryError("review_unstable", `Feature ${slice.id} did not reach a stable reviewed candidate after ${cursor.reviews} reviews.`);
         cursor.reviews += 1;
         const caseIds = runnable.flatMap((item) => (item.cases ?? []).map((entry) => entry.id));
         const request = await prepareReview(appDir, job, { checks: reviewChecks, candidate: cursor.candidate, caseResults: caseIds.length ? Object.fromEntries(caseIds.map((id) => [id, job.caseResults?.[id] ?? { status: "missing" }])) : undefined });
@@ -906,7 +916,7 @@ export class SoloFactory {
             await save("repairing");
             throw new FactoryError("paused", "Paused before repairing", { before: "reviewing" });
           }
-          job = await this.repair(job, failure, signal, slice);
+          job = await repairReview(failure);
           await save("checking");
           continue;
         }
@@ -1413,6 +1423,7 @@ export class SoloFactory {
       }
       const durationMs = Date.now() - started;
       let caseFailure = null;
+      let caseOutput = null;
       if (events) {
         const results = caseResults(cases, await readFile(events, "utf8").catch(() => ""));
         job.caseResults = { ...job.caseResults, ...Object.fromEntries(Object.entries(results).map(([id, value]) => [id, { ...value, gate, at: new Date().toISOString() }])) };
@@ -1420,6 +1431,16 @@ export class SoloFactory {
         const failed = Object.entries(results).filter(([, value]) => value.status !== "passed");
         if (failed.length === cases.length && failed.every(([, value]) => value.status === "missing")) caseFailure = `${gate} recorded no test events for its cases; cased proofs must run under node:test without their own --test-reporter.`;
         else if (failed.length) caseFailure = `${gate} cases did not pass: ${failed.map(([id, value]) => `${id} ${value.status}`).join(", ")}.`;
+        if (failed.length) {
+          const names = (status) => failed.filter(([, value]) => value.status === status).map(([id]) => `[${id}]`).join(", ");
+          const missing = names("missing");
+          caseOutput = [
+            missing ? `Gate ${gate}: expected passing test(s) named ${missing} but none ran (no matching case events; check the test-name pattern and node:test reporter).` : `Gate ${gate}: expected cases did not pass.`,
+            `Failed cases: ${names("failed") || "none"}.`,
+            `Never ran: ${missing || "none"}.`,
+            ...(names("skipped") ? [`Skipped/todo cases: ${names("skipped")}.`] : []),
+          ].join("\n");
+        }
         result = { ...result, caseResults: results };
       }
       if (result.timedOut) {
@@ -1437,7 +1458,7 @@ export class SoloFactory {
           durationMs,
           proofKeys,
           ...(result.caseResults ? { cases: result.caseResults } : {}),
-          output: result.output,
+          output: caseOutput ? `${caseOutput}\n\n${result.output ?? ""}` : result.output,
         });
       }
       await this.emit(job.id, { type: "gate.passed", state: job.state, gate, feature, durationMs, cases: caseCounts(result.caseResults), message: `${gate} passed` });
