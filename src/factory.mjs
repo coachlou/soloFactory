@@ -1364,7 +1364,16 @@ export class SoloFactory {
     // ponytail: a big slice is read from this file (same one the build prompt uses) so the repair prompt stays under the cap.
     if (slice) await writeFile(path.join(this.store.appDir(job.id), ".factory/logs/feature.json"), JSON.stringify(slice, null, 2));
     job = await this.stage(job, "repairing", `Repairing failed ${failure.details?.gate ?? "unknown"} gate`);
-    await this.invoke(job, `repair-${job.attempt}`, repairPrompt(failureRelative, slice, bugs), signal);
+    const label = `repair-${job.attempt}`;
+    const before = await sourceBaseline(this.store, { head: false });
+    try {
+      await this.invoke(job, label, repairPrompt(failureRelative, slice, bugs), signal);
+    } catch (error) {
+      // Same rule as a capped build: a repair still changing files at the cap is too big for one turn, not stuck.
+      // VISUAL-EVIDENCE, 2026-10-15: two 45-minute repairs each made ~50 edits, then a cold restart burned a repair.
+      if (error.code !== "agent_hard_timeout" || await sourceBaseline(this.store, { head: false }) === before || !await this.allowContinuation(job, label)) throw error;
+      await this.invoke(job, `${label}-resume`, repairPrompt(failureRelative, slice, bugs), signal, { resumeSessionId: error.details?.sessionId ?? null });
+    }
     return job;
   }
 

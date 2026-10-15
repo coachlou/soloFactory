@@ -1136,6 +1136,29 @@ test("a build that hits the safety cap while changing files continues once in it
   assert.match(JSON.stringify(result.agentSessions), /session-1/, "the capped turn's session is kept for its continuation");
 });
 
+test("a repair that hits the safety cap while changing files continues once in its own session", async () => {
+  let broken = false;
+  let capped = 0;
+  const after = async (stage, cwd) => {
+    await scopedProofs(stage, cwd);
+    if (stage === "build-slice-SLICE-UI") broken = true;
+    if (stage.startsWith("repair-") && !stage.endsWith("-resume")) {
+      capped += 1;
+      await writeFile(path.join(cwd, "partial-fix.js"), "// half done\n");
+      throw Object.assign(new Error("cap"), { code: "agent_hard_timeout", details: { timeoutReason: "hard", sessionId: "repair-session" } });
+    }
+    if (stage.endsWith("-resume")) broken = false;
+  };
+  const commandRunner = async (options) => [options.executable, ...options.args].join(" ") === "npm test" && broken ? { code: 1, output: "1 failing" } : { code: 0, output: "passed" };
+  const { store, job, factory } = await plannedRun({ after, commandRunner });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(capped, 1);
+  assert.equal(result.attempt, 1, "the continuation does not spend another repair");
+  assert.equal(result.watch.continuations["repair-1"], 1);
+  assert.equal(count(await started(store, job.id), "repair-1-resume"), 1);
+});
+
 test("a capped build that changed nothing parks instead of continuing", async () => {
   const { job, make } = await plannedRun();
   const fixture = createFixtureProvider();
