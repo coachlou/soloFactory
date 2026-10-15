@@ -698,6 +698,7 @@ function renderRecovery() {
     if (phase.status === "ready") { const allowance = document.createElement("p"); allowance.textContent = `Repair allowance: up to ${2 * (phase.plan.slices.length + 1)} attempts (2 per feature plus 2 for the full final review).`; features.append(allowance); }
     const details = fold("Full plan"); const summary = document.createElement("summary"); summary.textContent = "Full plan with sources and dependencies";
     const pre = document.createElement("pre"); pre.style.whiteSpace = "pre-wrap"; pre.textContent = JSON.stringify(phase.plan, null, 2); details.append(summary, pre); features.append(details);
+    pre.scrollTop = state.recoveryFolds["Full plan:scroll"] ?? 0; pre.addEventListener("scroll", () => { state.recoveryFolds["Full plan:scroll"] = pre.scrollTop; });
     if (phase.status === "ready") {
       const label = document.createElement("label"); label.htmlFor = "recovery-plan-feedback"; label.textContent = "Changes for the repair plan (optional)";
       const feedback = document.createElement("textarea"); feedback.id = "recovery-plan-feedback"; feedback.maxLength = 6000; feedback.value = state.recoveryPlanFeedback ?? "";
@@ -983,16 +984,22 @@ function renderStream() {
   if ($("#events").dataset.key === key) return;
   $("#events").dataset.key = key;
   const rows = state.events.filter((entry) => state.mapFilter === "all" || eventKind(entry) === state.mapFilter).slice(-300).reverse();
-  $("#events").replaceChildren(...rows.map((entry) => {
+  // Newest rows land on top, so keep the row the owner is reading at the same height; at the top, stay on top for new rows.
+  const list = $("#events"), top = () => list.getBoundingClientRect().top;
+  const anchor = list.scrollTop > 4 ? [...list.children].find((row) => row.getBoundingClientRect().bottom > top()) : null;
+  const held = anchor && { at: anchor.dataset.at, offset: anchor.getBoundingClientRect().top - top() };
+  list.replaceChildren(...rows.map((entry) => {
     const kind = eventKind(entry), failed = /failed|error/.test(entry.type);
     const row = document.createElement("div");
     row.className = `event${failed ? " fail" : ""}${seen && entry.at > seen ? " fresh" : ""}`;
     const time = document.createElement("time"); time.textContent = new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
     const badge = Object.assign(document.createElement("i"), { className: `kind ${failed ? "fail" : kind}`, textContent: MAP_KINDS[kind] });
     const text = document.createElement("span"); text.textContent = entry.message || entry.type;
-    row.append(time, badge, text);
+    row.append(time, badge, text); row.dataset.at = entry.at;
     return row;
   }));
+  const again = held && [...list.children].find((row) => row.dataset.at === held.at);
+  if (again) list.scrollTop += again.getBoundingClientRect().top - top() - held.offset;
   state.streamSeen = { job: state.job.id, at: state.events.at(-1)?.at ?? seen };
 }
 
