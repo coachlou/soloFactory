@@ -30,7 +30,7 @@ async function setup(t, { malformed = false, ready = false } = {}) {
   const opts = { store, maxRepairs: 1, autoStartRepairs: false,
     // Stands in for node:test under the factory's case reporter: every listed case passes.
     commandRunner: async ({ env = {} }) => {
-      const destination = env.NODE_OPTIONS?.match(/--test-reporter-destination="([^"]+)"/)?.[1];
+      const destination = env.SOLOFACTORY_CASE_EVENTS;
       if (destination) await writeFile(destination, ctl.cases.map(id => JSON.stringify({ type: 'test:pass', name: `[${id}] passes` })).join('\n'));
       return { code: 0, output: 'fixture tests pass' };
     },

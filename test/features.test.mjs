@@ -367,7 +367,7 @@ test("a later feature's case supersedes an earlier stage obligation, so final in
   const commandRunner = async (options) => {
     if (options.args.includes("e2e/seed.test.mjs")) {
       // The test file holds exactly one of the two named tests at a time, as the live plan's did.
-      const events = options.env.NODE_OPTIONS.match(/--test-reporter-destination="([^"]+)"/)[1];
+      const events = options.env.SOLOFACTORY_CASE_EVENTS;
       await writeFile(events, `${JSON.stringify({ type: "test:pass", name: uiBuilt ? "[UI-SEED-PASS] seed passes" : "[SK-STAGE-FAIL] seed fails" })}\n`);
     }
     return { code: 0, output: "passed" };

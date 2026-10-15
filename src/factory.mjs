@@ -1402,7 +1402,7 @@ export class SoloFactory {
       const events = cases.length ? path.join(this.store.jobDir(job.id), `cases-${gate}-${job.attempt ?? 0}.jsonl`) : null;
       if (events) await rm(events, { force: true });
       // An inherited NODE_TEST_CONTEXT makes node --test skip its files and report nothing, so cased gates drop it.
-      const env = events ? { NODE_OPTIONS: [process.env.NODE_OPTIONS, `--test-reporter="${CASE_REPORTER}" --test-reporter-destination="${events}" --test-reporter=spec --test-reporter-destination=stdout`].filter(Boolean).join(" "), NODE_TEST_CONTEXT: undefined } : {};
+      const env = events ? { NODE_OPTIONS: [process.env.NODE_OPTIONS, `--test-reporter="${CASE_REPORTER}" --test-reporter-destination=/dev/null --test-reporter=spec --test-reporter-destination=stdout`].filter(Boolean).join(" "), SOLOFACTORY_CASE_EVENTS: events, NODE_TEST_CONTEXT: undefined } : {};
       let spawned;
       let result;
       try {

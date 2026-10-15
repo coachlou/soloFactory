@@ -145,7 +145,7 @@ test('a cased proof gate fails, naming the cases that did not pass, even when th
   const seen = [];
   const env = await harness(t, async ({ args, env = {} }) => {
     seen.push([args.join(' '), env.NODE_OPTIONS ?? null]);
-    const destination = env.NODE_OPTIONS?.match(/--test-reporter-destination="([^"]+)"/)?.[1];
+    const destination = env.SOLOFACTORY_CASE_EVENTS;
     if (destination) await writeFile(destination, passing.map(id => JSON.stringify({ type: 'test:pass', name: `[${id}] test` })).join('\n'));
     return { code: 0, output: 'ok' };
   });
@@ -180,6 +180,20 @@ test('[UP-UI-BIG] shows the size error', () => {});
   await writeFile(path.join(env.app, 'test-upload.test.mjs'), body(false));
   assert.equal(await env.verify([item]), null);
   assert.equal(env.job.caseResults['UP-API-BIG'].status, 'passed');
+});
+
+test('a test that spawns its own node:test process does not erase the gate\'s case events', async t => {
+  const env = await harness(t, undefined);
+  await writeFile(path.join(env.app, 'test-upload.test.mjs'), `import test from 'node:test';
+import { execFileSync } from 'node:child_process';
+test('[UP-API-OK] accepts a small photo', () => new Promise(done => setTimeout(done, 300)));
+test('[UP-API-BIG] refuses a large photo', () => new Promise(done => setTimeout(done, 300)));
+test('[UP-UI-BIG] shows the size error', () => {
+  execFileSync(process.execPath, ['--input-type=module', '-e', "import test from 'node:test'; test('inner', () => {});"], { env: { ...process.env, NODE_TEST_CONTEXT: '' } });
+});
+`);
+  const item = { ...requirement(), proof: { command: ['node', '--test', 'test-upload.test.mjs'], expect: 'every case passes' } };
+  assert.equal(await env.verify([item]), null);
 });
 
 test('the feature builder is told how cases are proved', () => {
