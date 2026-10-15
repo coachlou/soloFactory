@@ -929,17 +929,19 @@ function renderAnswers(stops, live, features) {
     : job.state === "queued" ? ["muted", "Not yet; it is waiting in the queue."]
       : parked ? ["bad", `No. ${job.state === "paused" ? "Paused on request." : job.error?.message ?? "The run stopped."}`]
         : quiet != null && quiet >= QUIET_WARN_MS ? [quiet >= QUIET_BAD_MS ? "bad" : "warn", `Quiet for ${formatSpan(quiet)}. ${job.supervision?.status ?? ""}; the safety cap still bounds this turn.`]
-          : ["ok", `Yes. ${recent ? `${recent.message || recent.type}, ${formatSpan(Date.now() - Date.parse(recent.at))} ago.` : job.stage}`];
+          : ["ok", `Yes. ${recent ? `Last activity: ${recent.message || recent.type}, ${formatSpan(Date.now() - Date.parse(recent.at))} ago.` : job.stage}`];
   // The current feature's cases only: job.caseResults keeps every case from every feature and superseded plan.
   const plan = mapPlan(job), slice = plan?.slices.find((item) => item.id === plan.current);
   const usage = repairUsage(job), cases = (slice?.acceptance ?? []).flatMap((item) => item.cases ?? []).map((item) => job.caseResults?.[item.id] ?? { status: "not run" });
   const passed = cases.filter((entry) => entry.status === "passed").length;
-  const repairs = usage ? `${usage.feature[0]} of ${usage.feature[1]} repairs used on this feature, ${usage.plan[0]} of ${usage.plan[1]} in the plan` : plural(job.attempt ?? 0, "repair");
-  const healthy = [job.supervision?.status === "Progress needs checking" ? "warn" : usage && usage.feature[0] >= usage.feature[1] ? "warn" : "ok", `${repairs}.${cases.length ? ` ${passed} of ${cases.length} acceptance cases pass on this feature.` : ""}`];
+  // Each figure names its scope (this feature, this plan, whole run): they differ and read alike otherwise.
+  const feature = [usage && `${usage.feature[0]} of ${usage.feature[1]} repairs used`, cases.length && `${passed} of ${cases.length} acceptance cases pass`].filter(Boolean);
+  const repairs = [feature.length && `This feature: ${feature.join(", ")}.`, usage ? `This plan: ${usage.plan[0]} of ${usage.plan[1]} repairs used.` : `Whole run: ${plural(job.attempt ?? 0, "repair")}.`].filter(Boolean).join(" ");
+  const healthy = [job.supervision?.status === "Progress needs checking" ? "warn" : usage && usage.feature[0] >= usage.feature[1] ? "warn" : "ok", repairs];
   const verified = stops.filter((stop) => stop.status === "done");
   const estimate = features ? timeLeft(stops, live) : null;
   const elapsed = runningMs(Date.parse(job.startedAt || job.createdAt), job.completedAt ? Date.parse(job.completedAt) : Date.now(), job.idleGaps);
-  const far = ["", `${verified.length} of ${stops.length} ${features ? "features verified" : "steps done"}${live >= 0 ? `; ${features ? "feature" : "step"} ${live + 1} is ${stops[live].status === "blocked" ? "stopped" : "underway"}` : ""}.${estimate && estimate.mid > 0 ? ` About ${estimate.range ? `${formatSpan(estimate.range[0])} to ${formatSpan(estimate.range[1])}` : formatSpan(estimate.mid)} of running time left (median ${minutesLabel(estimate.median)} a feature).` : ""} Run: ${formatSpan(elapsed)} running${usageLine(state.telemetry?.summary?.tokens?.total)}.`];
+  const far = ["", `${features ? "This plan: " : ""}${verified.length} of ${stops.length} ${features ? "features verified" : "steps done"}${live >= 0 ? `; ${features ? "feature" : "step"} ${live + 1} is ${stops[live].status === "blocked" ? "stopped" : "underway"}` : ""}.${estimate && estimate.mid > 0 ? ` About ${estimate.range ? `${formatSpan(estimate.range[0])} to ${formatSpan(estimate.range[1])}` : formatSpan(estimate.mid)} of running time left (median ${minutesLabel(estimate.median)} a feature).` : ""} Whole run${features ? " (every plan)" : ""}: ${formatSpan(elapsed)} running${usageLine(state.telemetry?.summary?.tokens?.total)}.`];
   const next = job.nextAction;
   const needs = parked && next && !["none", "factory-fix"].includes(next.action) ? ["bad", `Yes: ${next.label}${next.reason ? `. ${next.reason}` : ""}`]
     : job.recoveryPhase?.status === "ready" ? ["warn", "Yes: review and approve the repair plan above."]
