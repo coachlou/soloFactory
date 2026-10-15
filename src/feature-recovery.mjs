@@ -90,7 +90,7 @@ export function repairPlanPrompt(planFile, requestFile, scope = null) {
 Write ONLY ${planFile} as JSON: ${PLAN_SCHEMA}.
 ${scope ? 'Every check in scope has exactly one closing feature.' : 'Every unfinished check has exactly one closing feature.'} A broad MH/SC summary is not enough: carry each detailed obligation the sources state for that gap (fields, states, limits, error cases, layout, copy) as its own acceptance item citing the source path and locator. Each proof is an executable test of real behavior.
 ${CONSOLIDATION_RULES}
-Preserve already passing behavior and completed features; no new walking skeleton. Use the fewest features the unfinished checks need, most of them independent: list a dependsOn only where a feature really uses another's output, never to order two features that write different files (give shared files their own feature, or divide the work by file, instead of chaining). Each feature is built in one agent turn capped at 45 minutes, proofs included: split a feature only when it would not fit that turn. The plan is reviewed against the sources and this checklist before execution; check it yourself first:
+Preserve already passing behavior and completed features; no new walking skeleton. Use the fewest features the unfinished checks need, most of them independent: list a dependsOn only where a feature really uses another's output or changes a file another feature also changes. A feature's writes include every file its obligations need changed, even one another feature also writes: two features that need the same file get a dependsOn between them, never a test-only feature whose behavior lives in a file it cannot change. Each feature is built in one agent turn capped at 45 minutes, proofs included: split a feature only when it would not fit that turn. The plan is reviewed against the sources and this checklist before execution; check it yourself first:
 ${PLAN_CHECKLIST}
 ${CONTROLLER_FACTS}
 Before you finish, run exactly node .factory/check-plan.mjs ${planFile} ${requestFile} as its own command from your working directory (no cd, absolute path or chaining: any other form is denied permission). It applies the controller's own validation to the plan. Fix every error it prints and rerun it until it prints OK; an invalid plan costs a whole extra turn.${scope ? `
@@ -306,7 +306,8 @@ async function replanForGate(factory, job, signal, guidance, { prior, executed }
     const slice = plan.slices[failed];
     request.scope = { feature: slice.id, checks: [...open.filter(check => sliceChecks(slice).includes(check.id)).map(check => check.id), `GATE-${gate}`] };
     request.keep = plan.slices.slice(failed + 1).filter(slice => !done.includes(slice.id));
-    request.closedChecks = prior.request.checks.filter(check => closed.has(check.id));
+    // Checks an earlier re-plan already closed left that plan's request; carry them so kept refs stay known.
+    request.closedChecks = [...(prior.request.closedChecks ?? []), ...prior.request.checks.filter(check => closed.has(check.id))];
   }
   return draftRepairPlan(factory, job, signal, request, prior);
 }

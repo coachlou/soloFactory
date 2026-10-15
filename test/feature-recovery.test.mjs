@@ -241,6 +241,8 @@ test('a spent feature gate replans only its replacement and reviews the merged p
   delete prior.plan.slices[1].writes;
   const kept = structuredClone(prior.plan.slices[1]);
   prior.status = 'running'; prior.cursor = { id: prior.plan.slices[0].id }; prior.current = prior.cursor.id;
+  // A check an earlier re-plan closed is already outside this request's checks; a second re-plan must keep it.
+  prior.request.closedChecks = [{ id: 'MH-0', text: 'Closed two plans ago' }];
   saved.state = 'failed'; saved.failedState = 'verifying'; saved.attempt = saved.repairBudgetLimit = 1;
   saved.error = { code: 'quality_gate_failed', message: 'Viewer proof failed', details: { gate: 'proof-VIEWER-005', command: ['node', '--test', 'test/viewer.test.mjs'], output: 'Viewer does not open' } };
   await env.store.writeState(saved);
@@ -249,6 +251,7 @@ test('a spent feature gate replans only its replacement and reviews the merged p
   assert.deepEqual(phase.request.checks.map(check => check.id), ['MH-1', 'SC-1', 'GATE-proof-VIEWER-005']);
   assert.deepEqual(phase.request.scope, { feature: prior.current, checks: ['MH-1', 'GATE-proof-VIEWER-005'] });
   assert.deepEqual(phase.request.keep, [kept]);
+  assert.ok(phase.request.closedChecks.some(check => check.id === 'MH-0'), 'closed checks carry across re-plans');
   assert.deepEqual(phase.plan.slices.map(slice => slice.id), [prior.current, kept.id]);
   assert.deepEqual(phase.plan.slices[1], kept);
   assert.deepEqual(reviewed.checks.map(check => check.id), phase.request.scope.checks);
@@ -867,12 +870,13 @@ test('a repair-plan correction patches only what blockers name, and the re-revie
 
 // Run 4f2dd1cf's retried repair plan came back as 30 features, 28 chained one-to-one. The prompt asked for
 // "small dependency-ordered features" and told the planner to split, so it chained them to satisfy the writes rule.
-test('the repair-plan prompt asks for few, mostly independent features and no chaining to order writes', () => {
+test('the repair-plan prompt asks for few, mostly independent features whose writes cover the files they need', () => {
   const prompt = repairPlanPrompt('plan.json', 'request.json');
   assert.doesNotMatch(prompt, /small dependency-ordered features/);
   assert.match(prompt, /fewest features/);
   assert.match(prompt, /most of them independent/);
-  assert.match(prompt, /never to order two features that write different files/);
+  assert.doesNotMatch(prompt, /divide the work by file/);
+  assert.match(prompt, /writes include every file its obligations need changed/);
 });
 
 test('the scoped repair-plan prompt plans only the failed feature and preserves kept ids', () => {
