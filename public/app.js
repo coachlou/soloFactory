@@ -930,10 +930,12 @@ function renderAnswers(stops, live, features) {
       : parked ? ["bad", `No. ${job.state === "paused" ? "Paused on request." : job.error?.message ?? "The run stopped."}`]
         : quiet != null && quiet >= QUIET_WARN_MS ? [quiet >= QUIET_BAD_MS ? "bad" : "warn", `Quiet for ${formatSpan(quiet)}. ${job.supervision?.status ?? ""}; the safety cap still bounds this turn.`]
           : ["ok", `Yes. ${recent ? `${recent.message || recent.type}, ${formatSpan(Date.now() - Date.parse(recent.at))} ago.` : job.stage}`];
-  const usage = repairUsage(job), cases = Object.values(job.caseResults ?? {});
+  // The current feature's cases only: job.caseResults keeps every case from every feature and superseded plan.
+  const plan = mapPlan(job), slice = plan?.slices.find((item) => item.id === plan.current);
+  const usage = repairUsage(job), cases = (slice?.acceptance ?? []).flatMap((item) => item.cases ?? []).map((item) => job.caseResults?.[item.id] ?? { status: "not run" });
   const passed = cases.filter((entry) => entry.status === "passed").length;
   const repairs = usage ? `${usage.feature[0]} of ${usage.feature[1]} repairs used on this feature, ${usage.plan[0]} of ${usage.plan[1]} in the plan` : plural(job.attempt ?? 0, "repair");
-  const healthy = [job.supervision?.status === "Progress needs checking" ? "warn" : usage && usage.feature[0] >= usage.feature[1] ? "warn" : "ok", `${repairs}.${cases.length ? ` ${passed} of ${cases.length} acceptance cases pass.` : ""}`];
+  const healthy = [job.supervision?.status === "Progress needs checking" ? "warn" : usage && usage.feature[0] >= usage.feature[1] ? "warn" : "ok", `${repairs}.${cases.length ? ` ${passed} of ${cases.length} acceptance cases pass on this feature.` : ""}`];
   const verified = stops.filter((stop) => stop.status === "done");
   const estimate = features ? timeLeft(stops, live) : null;
   const elapsed = runningMs(Date.parse(job.startedAt || job.createdAt), job.completedAt ? Date.parse(job.completedAt) : Date.now(), job.idleGaps);
