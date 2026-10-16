@@ -296,7 +296,11 @@ evidence; reopen it only when the integration or deploy audit shows it no longer
 This is release QA: report defects rather than fixing feature code. For each defect, write one
 node:test file under qa/ that fails because of it (the test name states the expected behavior), and
 add {test, files, description} to a bugs array in review-result.json: test is that file, files are
-the source files at fault. The controller hands each bug to the feature owning those files.`;
+the source files at fault. The controller hands each bug to the feature owning those files.
+A bug test is trusted as ground truth and the repairer may not edit it, so a faulty test parks the run. Run each
+test once before reporting it and confirm it fails because of the app, not the test harness. Node's fetch silently
+drops forbidden request headers (Host, Origin, Content-Length): when a bug depends on one, send the request with
+node:http and prove the header arrived (for example by echoing it from a stub server) before blaming the app.`;
 
 export function reviewPrompt({ featureReviewed = false } = {}) {
   return `You are the final implementation reviewer. Audit the current app against every

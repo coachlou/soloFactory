@@ -1372,6 +1372,25 @@ export class SoloFactory {
     return job.attempt === attempt ? this.repair(job, failure, signal) : job;
   }
 
+  // Owner escape hatch: a reviewer-written BUG test that can never pass (run 98b89e59: a fetch-based test that could not set
+  // Host) parks the run once repairs are spent, and a repair plan cannot edit it. The owner retires that one proof; the
+  // reviewer is told in review-request.json, and one more final pass is allowed. Remove when reviewers sanity-check their tests.
+  async waiveProof(jobId, proofId, reason = "") {
+    const job = await this.continuable(jobId);
+    const proof = job.bugProofs?.find((bug) => bug.id === proofId);
+    if (!proof || !repairsExhausted(job, this.maxRepairs)) throw new FactoryError("not_waivable", `${proofId} is not a stuck review test of this run.`);
+    const file = proof.proof.command.at(-1);
+    await this.store.git("rm", "-f", "--ignore-unmatch", "--", file);
+    job.bugProofs = job.bugProofs.filter((bug) => bug !== proof);
+    (job.waivedProofs ??= []).push({ ...proof, reason: reason.trim(), at: new Date().toISOString() });
+    (job.ownerDecisions ??= []).push({ at: new Date().toISOString(), text: `The owner waived ${proofId} (${file}: ${proof.description}) as a faulty test${reason.trim() ? `: ${reason.trim()}` : ""}. Do not require it again; judge the app on the remaining checks.` });
+    job.repairBudgetLimit = (job.attempt ?? 0) + 1;
+    await this.store.writeState(job);
+    await this.commit(job, `factory: owner waived ${proofId}`);
+    await this.emit(jobId, { type: "proof.waived", state: job.state, bug: proofId, message: `Owner waived ${proofId}: ${proof.description}` });
+    return job;
+  }
+
   // One repair turn against a recorded failure. Throws the failure itself once the budget is spent.
   async repair(job, failure, signal, slice = null, bugs = []) {
     await this.recordAttempt(job, failure, slice);
@@ -1806,7 +1825,8 @@ export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
   if (phase === "planning" || phase === "plan_failed") return next("retry-plan", "Retry repair-plan preparation", "recovery-plan", `${phase === "planning" ? "Repair-plan preparation stopped before it finished" : "Repair-plan preparation failed"}, so no plan is approved. Retry repair-plan preparation; Resume cannot continue an unapproved plan.`);
   if (phase === "ready") return { ...next("approve-plan", "Approve and continue repairs", "recovery-start", "The repair plan passed independent review, but a Pause stopped it before repairs started. Approve and continue repairs to start it; Resume does not start an unapproved plan."),
     alternatives: [next("amend-plan", "Submit corrected plan for review", "recovery-review", "Replaces the ready plan with your corrected plan. The ready plan stays in history as evidence but can no longer be approved. The replacement gets one independent review and no automatic corrections; if it passes, repairs start on their own.")] };
-  if (repairsExhausted(job, maxRepairs)) return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The repair budget is exhausted. Prepare a repair plan; once it passes independent review, repairs start on their own. Resume does not renew the budget or rerun the same review.");
+  if (repairsExhausted(job, maxRepairs)) return { ...next("prepare-plan", "Prepare repair plan", "recovery-plan", "The repair budget is exhausted. Prepare a repair plan; once it passes independent review, repairs start on their own. Resume does not renew the budget or rerun the same review."),
+    ...(job.bugProofs?.length ? { alternatives: job.bugProofs.map((bug) => ({ ...next("waive-proof", `Waive ${bug.id} (faulty test)`, "waive-proof", `Use only if the reviewer's test ${bug.proof.command.at(-1)} is itself wrong: ${bug.description}`), proof: bug.id })) } : {}) };
   // Resume would hit the same review cap; only a repair plan can move this feature.
   if (job.error?.code === "review_unstable") return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The feature did not reach a stable reviewed candidate within its review limit. Prepare a repair plan; once it passes independent review, repairs start on their own. Resume would stop at the same limit.");
   if (job.error?.details?.loop) return job.error.code === "review_rejected" || pendingProofFailure(job)

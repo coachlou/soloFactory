@@ -510,6 +510,18 @@ export async function createSoloFactoryServer(options = {}) {
         await jobStore.appendEvent(id, { type: "inputs.added", state: job.state, message: `Owner added ${relative}` });
         return json(response, 200, { path: relative, bytes: bytes.length });
       }
+      // Owner waiver of one stuck reviewer test; the run then waits for Resume.
+      const waiveMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/waive-proof$/);
+      if (request.method === "POST" && waiveMatch) {
+        const projectId = jobProject.get(waiveMatch[1]) ?? active.id;
+        if (runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start")) return json(response, 409, { error: "Pause the active run before waiving a test." });
+        const jobStore = storeFor(projectId);
+        const job = await jobStore.read(waiveMatch[1]);
+        const { proof, reason } = await readJson(request);
+        const factory = new SoloFactory({ store: jobStore, provider: providerFactory(job.provider), maxRepairs, autoStartRepairs });
+        try { return json(response, 200, { job: await factory.waiveProof(job.id, String(proof ?? ""), String(reason ?? "")) }); }
+        catch (error) { return json(response, 409, { error: error.message, code: error.code }); }
+      }
       const packetMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/recovery-plan-packet$/);
       if (request.method === "GET" && packetMatch) {
         const jobStore = storeOfJob(packetMatch[1]);
