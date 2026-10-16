@@ -309,6 +309,7 @@ finding must yield verdict:"blocked" and a non-pass check. Review every addition
 in PRD/ACCEPTANCE and every source file review-request.json lists (attached specs and prototype
 handoffs) too; record any gap as a blocker. Never narrow, waive, delete or rewrite the
 frozen contract to match the implementation. A finished worker turn is not an approval.
+${OWNER_DECISIONS}
 If the scope is too large to fix here, report the missing work honestly; the controller will
 repair within its budget or park the run. The controller rejects missing, stale, partial or
 blocked verdicts even when npm test passes.
@@ -539,6 +540,11 @@ function sharedCommands(slice) {
   return { feature: { ...slice, acceptance }, commands: Object.fromEntries([...ids].map(([key, id]) => [id, JSON.parse(key)])) };
 }
 
+// Owner decisions recorded at repair planning (planFeatureRecovery) ride in every review request.
+const OWNER_DECISIONS = `If review-request.json has ownerDecisions, they are the owner's own words from repair planning, newest
+last. Something the owner explicitly approved there is approved: do not block on it or ask for more approval
+evidence. They waive only what they name.`;
+
 // One bar for builder, feature repair and scoped reviewer, so a builder knows before it starts what a review
 // will reject. Drawn from run 4f2dd1cf, where most of 46 blocked feature reviews were proofs that asserted only
 // part of their case text (missing fixtures or steps, loose message wording, a status or counter standing in for
@@ -606,6 +612,7 @@ test, not the whole app. Judge uncased checks directly against real behavior. Ea
 already reviewed: do not reread, rerun or explore their code or tests unless this feature's check
 depends on it. Later planned features may still be missing and must not
 block this verdict; a broad requirement this feature closes still needs full proof.
+${OWNER_DECISIONS}
 
 ${REVIEW_BAR}
 

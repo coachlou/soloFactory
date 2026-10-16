@@ -7,6 +7,8 @@ import { JobStore } from '../src/store.mjs';
 import { SoloFactory, continuationAction, withContinuation } from '../src/factory.mjs';
 import { createFixtureProvider } from '../src/fixture-provider.mjs';
 import { digest, keepCorrecting, planKey, repairPlanPrompt, sourceBaseline, validateRecoveryPlan, validateRecoveryApproval } from '../src/feature-recovery.mjs';
+import { prepareReview } from '../src/review.mjs';
+import { featureReviewPrompt, reviewPrompt } from '../src/prompts.mjs';
 
 const request = { id: 'request', contractDigest: 'frozen', checks: [{ id: 'MH-3' }, { id: 'SC-2' }] };
 const plan = () => ({ version: 1, requestId: 'request', contractDigest: 'frozen', slices: [
@@ -298,6 +300,19 @@ for (const changed of ['source', 'review', 'contract', 'plan', 'specs', 'reviewe
   if (changed === 'reviewed plan') phase.planReview.planDigest = 'other';
   await assert.rejects(validateRecoveryApproval(env.factory, ready, phase.planDigest), /stale|match/);
   assert.equal(env.deployments(), 0);
+});
+
+// Run 4f2dd1cf: Lou approved the V01-V14 visual differences as repair-plan guidance; later reviews never saw it,
+// rejected the approval as unverified and cost a whole extra repair plan.
+test('owner guidance is recorded and reaches every later review request', async t => {
+  const env = await setup(t);
+  await env.factory.planRecovery(env.failed.id, 'I approve visual differences V01-V14.');
+  const job = await env.store.read(env.failed.id);
+  assert.deepEqual(job.ownerDecisions.map(item => item.text), ['I approve visual differences V01-V14.']);
+  await prepareReview(env.root, job, { checks: [{ id: 'C1', text: 'check' }] });
+  const request = JSON.parse(await readFile(path.join(env.root, '.factory/review-request.json'), 'utf8'));
+  assert.deepEqual(request.ownerDecisions, job.ownerDecisions);
+  for (const prompt of [reviewPrompt(), reviewPrompt({ featureReviewed: true }), featureReviewPrompt({ id: 'F1' })]) assert.match(prompt, /ownerDecisions/);
 });
 
 // Seen live: the inlined request (a 2.4M-character prior case-table plan) exceeded Codex's 1,048,576-character input.

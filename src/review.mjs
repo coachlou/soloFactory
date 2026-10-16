@@ -45,6 +45,7 @@ export async function prepareReview(appDir, job, { checks = originalChecks(job.b
     sources: await sourceSet(appDir, runInputs(job)),
     ...(candidate ? { candidate } : {}),
     ...(caseResults ? { caseResults } : {}),
+    ...(job.ownerDecisions?.length ? { ownerDecisions: job.ownerDecisions } : {}),
   };
   if (!request.checks.length) throw new Error("Review requires at least one intake requirement or acceptance scenario.");
   await rm(path.join(appDir, ".factory", "review-result.json"), { force: true });

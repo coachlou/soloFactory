@@ -185,6 +185,12 @@ export async function planFeatureRecovery(factory, id, signal, guidance = '', { 
   const appDir = factory.store.appDir();
   // Outside the try: a refused plan must not be recorded as a failure of the run.
   if (!['failed', 'interrupted', 'paused'].includes(job.state) || job.dismissed || (job.recoveryPhase && !['planning', 'plan_failed', 'ready', 'running', 'built'].includes(job.recoveryPhase.status))) throw new Error('Repair planning requires an unresolved parked run.');
+  // The owner's words are a factory input, not just planner guidance: every later review reads them from
+  // review-request.json (run 4f2dd1cf: an approval only the planner saw was rejected by the next reviews).
+  if (guidance.trim()) {
+    (job.ownerDecisions ||= []).push({ at: new Date().toISOString(), text: guidance.trim() });
+    await factory.store.writeState(job);
+  }
   try {
     const prior = job.recoveryPhase;
     // Which review stopped the run decides the gaps:
