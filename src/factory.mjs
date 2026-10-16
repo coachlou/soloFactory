@@ -445,7 +445,16 @@ export class SoloFactory {
       job.reviewContractDigest = request.contractDigest;
       job.reviewRequest = request;
       await this.store.writeState(job);
-      await this.invoke(job, "review", reviewPrompt({ featureReviewed: job.planVersion === 2 }), signal);
+      const prompt = reviewPrompt({ featureReviewed: job.planVersion === 2 });
+      try {
+        await this.invoke(job, "review", prompt, signal);
+      } catch (error) {
+        // A capped review is mid-check, not wrong; restarting cold repeats the whole read (2026-10-16:
+        // the medialibrary final review spent 44 of 45 minutes before a verdict). Keyed per attempt so a
+        // review after a repair gets its own allowance.
+        if (error.code !== "agent_hard_timeout" || !await this.allowContinuation(job, `review-${job.attempt}`)) throw error;
+        await this.invoke(job, "review-resume", prompt, signal, { resumeSessionId: error.details?.sessionId ?? null });
+      }
       try {
         await this.requireReview(job);
       } catch (failure) {

@@ -1,7 +1,7 @@
 // Planned-feature (slices.json v2) execution: the PRD acceptance matrix at the factory level.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import os from "node:os";
@@ -1157,6 +1157,25 @@ test("a repair that hits the safety cap while changing files continues once in i
   assert.equal(result.attempt, 1, "the continuation does not spend another repair");
   assert.equal(result.watch.continuations["repair-1"], 1);
   assert.equal(count(await started(store, job.id), "repair-1-resume"), 1);
+});
+
+test("a final review that hits the safety cap continues once in its own session", async () => {
+  let capped = 0;
+  const after = async (stage, cwd) => {
+    await scopedProofs(stage, cwd);
+    if (stage === "review") {
+      capped += 1;
+      // 2026-10-16: the medialibrary final review spent 44 of 45 minutes on suites and never wrote a verdict.
+      await rm(path.join(cwd, ".factory", "review-result.json"), { force: true });
+      throw Object.assign(new Error("cap"), { code: "agent_hard_timeout", details: { timeoutReason: "hard", sessionId: "review-session" } });
+    }
+  };
+  const { store, job, factory } = await plannedRun({ after });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(capped, 1);
+  assert.equal(result.attempt, 0, "the continuation does not spend a repair");
+  assert.equal(count(await started(store, job.id), "review-resume"), 1);
 });
 
 test("a capped build that changed nothing parks instead of continuing", async () => {

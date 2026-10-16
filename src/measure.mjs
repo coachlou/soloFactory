@@ -9,7 +9,7 @@ const RESUMED = new Set(["job.resumed", "job.restarted"]);
 export function activity(label = "") {
   if (/^(specification|feature-plan|plan-|recovery-(plan|correction|schema-fix))/.test(label)) return "planning";
   if (label.startsWith("repair")) return "repair";
-  if (label === "review" || /(^feature-review-|-review-\d+$)/.test(label)) return "review";
+  if (label === "review" || label === "review-resume" || /(^feature-review-|-review-\d+$)/.test(label)) return "review";
   return "implement";
 }
 
