@@ -792,6 +792,15 @@ could change or remove them:
 > in an app you built before today, copy that app's folder somewhere safe first. Apps built
 > from now on keep their records where the factory never touches them.
 
+**If they were below 0.10.0 before the update**, builds now go one feature at a time, and
+the run view shows them as a map of stops. Ask first whether a build was partway through
+when they stopped the server; if one was, tell them it may need to be started again. Then
+say, briefly:
+
+> Builds now go one feature at a time, and the run page shows them as a map, so you can see
+> what's done and what's next. If a build stops or pauses and needs you, an amber note at the
+> top of every page tells you which one, and Open takes you straight to it.
+
 Do not walk an updating owner through Part C. They already know how to use the app; the
 update is finished once U4 holds.
 
