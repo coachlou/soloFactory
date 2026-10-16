@@ -369,6 +369,13 @@ export function detectProviderDiagnostics(output = "") {
   const diagnosticOutput = executionFailureText(output);
   const rules = [
     {
+      // Codex's own wording for a service outage (run 4f2dd1cf, 2026-10-14); Claude reports 5xx as api_error_status.
+      code: "provider_unavailable",
+      pattern: /model is at capacity|unexpected status 50[234]\b|overloaded_error|"api_error_status":\s*5\d\d/i,
+      title: "The provider's service is temporarily unavailable",
+      action: "This is a provider outage, not a problem with the run. Resume in a few minutes; the preserved files and session are kept.",
+    },
+    {
       code: "model_cli_incompatible",
       pattern: /requires a newer version of Codex|Model metadata .* not found|resuming session with different model/i,
       title: "The configured Codex model is incompatible with this run",
@@ -411,7 +418,9 @@ export function detectProviderDiagnostics(output = "") {
       action: "Review the named path or command permission, correct it, then resume the preserved run.",
     },
   ];
-  return rules.filter((rule) => rule.pattern.test(diagnosticOutput)).map(({ pattern, ...diagnostic }) => diagnostic);
+  const found = rules.filter((rule) => rule.pattern.test(diagnosticOutput)).map(({ pattern, ...diagnostic }) => diagnostic);
+  // An outage ends the turn, so any limit or permission text beside it came from earlier work in that turn.
+  return found[0]?.code === "provider_unavailable" ? [found[0]] : found;
 }
 
 function executionFailureText(output) {

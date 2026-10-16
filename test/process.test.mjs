@@ -96,6 +96,23 @@ test("provider diagnostics distinguish limits from recoverable local blockers", 
   assert.deepEqual(detectProviderDiagnostics("turn/start failed: Input exceeds the maximum length of 1048576 characters").map((item) => item.code), ["input_too_large"]);
 });
 
+test("a Codex outage is reported as temporary, not as the local or usage blocker in older output", () => {
+  // The lines Codex printed on 2026-10-14 (run 4f2dd1cf), after a failed command earlier in the same turn.
+  const outage = [
+    { type: "item.completed", item: { type: "command_execution", status: "failed", exit_code: 1, aggregated_output: "rm: dist/cache: Permission denied\nnpm warn rate limit hit, retrying" } },
+    { type: "error", message: "Reconnecting... 5/5 (unexpected status 503 Service Unavailable: An error occurred while processing your request. You can retry your request.)" },
+    { type: "item.completed", item: { type: "error", message: "Selected model is at capacity. Please try a different model." } },
+    { type: "turn.failed" },
+  ].map((event) => JSON.stringify(event)).join("\n");
+  const diagnostics = detectProviderDiagnostics(outage);
+  assert.deepEqual(diagnostics.map((item) => item.code), ["provider_unavailable"]);
+  assert.match(diagnostics[0].action, /Resume/);
+  assert.deepEqual(detectProviderDiagnostics("unexpected status 502 Bad Gateway").map((item) => item.code), ["provider_unavailable"]);
+  // A build's own HTTP test output is not a provider outage.
+  const appTest = JSON.stringify({ type: "item.completed", item: { type: "command_execution", status: "failed", exit_code: 1, aggregated_output: "expected 200, got 503 from /api/health" } });
+  assert.deepEqual(detectProviderDiagnostics(appTest), []);
+});
+
 test("Codex makes one same-session retry after silence and does not retry a concrete blocker", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-provider-"));
   const bin = path.join(root, "bin");
