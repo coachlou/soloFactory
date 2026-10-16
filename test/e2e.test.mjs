@@ -873,3 +873,14 @@ test("the pipeline view's time so far leaves out pauses and stops", async () => 
   };
   assert.deepEqual(stateRunningMs(job, at(215)), { building: 30 * 60_000, verifying: 5 * 60_000 });
 });
+
+test("the stage rail marks finished stages done, and every stage on a completed run", async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const lift = (pattern) => source.match(pattern)[0];
+  const railMarks = new Function(`${lift(/const stageOrder = .*\n/)}${lift(/function railMarks\([\s\S]*?\n}\n/)}; return railMarks;`)();
+  assert.deepEqual(railMarks("reviewing"), { active: "reviewing", done: ["specifying", "building", "verifying"] });
+  assert.deepEqual(railMarks("repairing"), { active: "verifying", done: ["specifying", "building"] });
+  const completed = railMarks("completed");
+  for (const stage of ["specifying", "building", "verifying", "reviewing", "deploying"]) assert.ok(completed.done.includes(stage), stage);
+  assert.deepEqual(railMarks("queued").done, []);
+});

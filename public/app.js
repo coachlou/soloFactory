@@ -496,6 +496,13 @@ async function poll() {
   } catch (error) { showError(error); }
 }
 
+// Stages before the current one are done; a completed run has every stage done and none active.
+function railMarks(progressState) {
+  const active = progressState === "repairing" ? "verifying" : progressState;
+  const at = active === "completed" ? stageOrder.length : stageOrder.indexOf(active);
+  return { active, done: stageOrder.slice(0, Math.max(0, at)) };
+}
+
 function renderJob() {
   const job = state.job;
   $("#run-subtitle").textContent = job.blockedBy
@@ -504,10 +511,11 @@ function renderJob() {
       ? `Queued #${job.queuePosition}${job.queuedFor === "resume" ? " to resume" : ""}; starts when this project's current run finishes.`
       : job.error?.message || statusCopy(job.state);
   const progressState = PARKED.includes(job.state) ? job.failedState : job.state;
-  document.querySelectorAll(".stages li").forEach((item) => item.classList.remove("active"));
-  const railStage = progressState === "repairing" ? "verifying" : progressState;
-  const activeRail = document.querySelector(`[data-stage="${railStage}"]`);
-  if (activeRail) activeRail.classList.add("active");
+  const rail = railMarks(progressState);
+  document.querySelectorAll(".stages li").forEach((item) => {
+    item.classList.toggle("active", item.dataset.stage === rail.active);
+    if (item.dataset.stage !== "interview") item.classList.toggle("done", rail.done.includes(item.dataset.stage));
+  });
   renderSupervision();
   renderMap();
   renderArtifacts();
