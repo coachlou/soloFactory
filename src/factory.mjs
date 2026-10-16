@@ -447,6 +447,7 @@ export class SoloFactory {
       job.reviewRequest = request;
       await this.store.writeState(job);
       const prompt = reviewPrompt({ featureReviewed: job.planVersion === 2 });
+      const reviewed = await sourceBaseline(this.store, { head: false });
       try {
         await this.invoke(job, "review", prompt, signal);
       } catch (error) {
@@ -470,8 +471,17 @@ export class SoloFactory {
         job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: false });
         continue;
       }
+      // Reviewers only judge: a pass on source the reviewer itself changed covers an unchecked edit,
+      // so the edit is verified like any change and the new candidate gets a fresh review.
+      if (await sourceBaseline(this.store, { head: false }) !== reviewed) {
+        await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "review", message: "The reviewer changed source; its verdict is void and the app is rechecked." });
+        job.reviewEdits = (job.reviewEdits ?? 0) + 1;
+        if (job.reviewEdits > 2) throw new FactoryError("review_rejected", `The final reviewer kept changing source instead of reporting blockers (${job.reviewEdits} reviews).`);
+        job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: false });
+        continue;
+      }
       const attempt = job.attempt;
-      // The reviewer may fix code; if it changed nothing, the integration verify that preceded it still holds.
+      // The reviewer changed nothing, so the integration verify that preceded it still holds.
       const verified = job.integrationVerified;
       if (verified?.set === integrationSet(job) && verified.candidate === await sourceBaseline(this.store, { head: false })) {
         await this.commit(job, "factory: reviewing passed gates");

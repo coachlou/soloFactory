@@ -301,8 +301,10 @@ the source files at fault. The controller hands each bug to the feature owning t
 export function reviewPrompt({ featureReviewed = false } = {}) {
   return `You are the final implementation reviewer. Audit the current app against every
 requirement in .factory/PRD.md and every scenario in .factory/ACCEPTANCE.md. Inspect the real
-code and tests.${featureReviewed ? FEATURE_REVIEWED_SCOPE + "\n" : ` Fix concrete correctness, wiring, error-handling, accessibility, privacy, or
-operator-documentation gaps you find. Keep the scope small.`} Do not deploy and do not claim a
+code and tests.${featureReviewed ? FEATURE_REVIEWED_SCOPE + "\n" : ""} Do not change application source: report each
+correctness, wiring, error-handling, accessibility, privacy or operator-documentation gap as a
+blocker, and a repair turn fixes it under the checks. If you change source, the controller discards
+a passing verdict and reviews again. Do not deploy and do not claim a
 gate passed; the controller will rerun tests, build, health, and telemetry checks afterward.
 So never run whole suites or several test files at once: a broad run can outlast your time cap
 (2026-10-16: an eight-glob run used 44 of 45 minutes). For fresh executed evidence run at most a
@@ -322,8 +324,7 @@ in PRD/ACCEPTANCE and every source file review-request.json lists (attached spec
 handoffs) too; record any gap as a blocker. Never narrow, waive, delete or rewrite the
 frozen contract to match the implementation. A finished worker turn is not an approval.
 ${OWNER_DECISIONS}
-If the scope is too large to fix here, report the missing work honestly; the controller will
-repair within its budget or park the run. The controller rejects missing, stale, partial or
+Report all missing work honestly; the controller will repair within its budget or park the run. The controller rejects missing, stale, partial or
 blocked verdicts even when npm test passes.
 
 ${DATA_RULE}`;

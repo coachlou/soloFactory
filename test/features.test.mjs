@@ -176,19 +176,31 @@ test("a feature's checks run its own proofs without the whole suite; after a rep
   assert.equal(order.filter((gate) => gate === "install").length, 1, "later features and integration reuse the first install");
 });
 
-test("the post-review integration verify runs only when the final reviewer changed source", async () => {
-  for (const edits of [false, true]) {
-    const { store, job, factory } = await plannedRun({ after: async (stage, cwd) => {
-      if (edits && stage === "review") await writeFile(path.join(cwd, "review-fix.js"), "// reviewer fix\n");
-    } });
-    const result = await factory.start(job.id);
-    assert.equal(result.state, "completed", result.error?.message);
-    const events = await store.events(job.id, Infinity);
-    const review = events.findLastIndex((event) => event.type === "agent.started" && event.stage === "review");
-    const after = events.slice(review);
-    assert.equal(after.some((event) => event.type === "gate.skipped"), !edits);
-    assert.equal(after.some((event) => event.type === "gate.started" && event.gate === "test"), edits);
-  }
+test("a final reviewer's source edit voids its pass: the change is verified, then reviewed again", async () => {
+  let reviews = 0;
+  const { store, job, factory } = await plannedRun({ after: async (stage, cwd) => {
+    if (stage === "review" && ++reviews === 1) await writeFile(path.join(cwd, "review-fix.js"), "// reviewer fix\n");
+  } });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(reviews, 2, "the edited candidate got a fresh review");
+  const events = await store.events(job.id, Infinity);
+  const voided = events.findIndex((event) => event.type === "gate.failed" && event.gate === "review" && /changed source/.test(event.message));
+  assert.ok(voided > 0, "the edited verdict is voided");
+  const second = events.findLastIndex((event) => event.type === "agent.started" && event.stage === "review");
+  assert.ok(events.slice(voided, second).some((event) => event.type === "gate.started" && event.gate === "test"), "the edit is verified before the fresh review");
+  assert.ok(events.slice(second).some((event) => event.type === "gate.skipped"), "the unedited second pass reuses that verify");
+});
+
+test("a final reviewer that keeps changing source stops the run instead of looping", async () => {
+  let reviews = 0;
+  const { job, factory } = await plannedRun({ after: async (stage, cwd) => {
+    if (stage === "review") await writeFile(path.join(cwd, "review-fix.js"), `// reviewer fix ${++reviews}\n`);
+  } });
+  const result = await factory.start(job.id);
+  assert.equal(result.error?.code, "review_rejected");
+  assert.match(result.error.message, /kept changing source/);
+  assert.equal(reviews, 3);
 });
 
 test("planning agents can run the controller's own plan validation before they finish", async () => {
