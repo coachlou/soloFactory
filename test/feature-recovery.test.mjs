@@ -223,6 +223,24 @@ test('plans, approves and executes same-run recovery, preserving contract and or
   assert.ok(env.stages.at(-1) === 'review');
 });
 
+// Lou, 2026-10-16: a repair plan with tens of repairs builds them all, then tests the collection once.
+test('a big repair plan builds every repair before one test pass and skips per-repair reviews', async t => {
+  const env = await setup(t);
+  const ready = await env.factory.planRecovery(env.failed.id);
+  env.factory.batchRepairsFrom = 1;
+  const from = env.stages.length;
+  const run = env.factory.commandRunner;
+  env.factory.commandRunner = async opts => { env.stages.push(`gate:${opts.gate}`); return run(opts); };
+  const result = await env.factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);
+  assert.equal(result.state, 'completed', result.error?.message);
+  const order = env.stages.slice(from);
+  const builds = order.map((stage, n) => stage.startsWith(`recovery-${ready.recoveryPhase.id}-`) && !/-review-\d+$/.test(stage) ? n : -1).filter(n => n >= 0);
+  assert.equal(builds.length, ready.recoveryPhase.plan.slices.length, order.join(' '));
+  assert.ok(builds.at(-1) < order.findIndex(stage => stage.startsWith('gate:')), order.join(' '));
+  assert.ok(!order.some(stage => /^recovery-.*-review-\d+$/.test(stage)), order.join(' '));
+  assert.equal(result.recoveryPhase.done.length, ready.recoveryPhase.plan.slices.length);
+});
+
 test('a spent feature gate replans only its replacement and reviews the merged plan with scoped checks', async t => {
   let reviewed;
   const env = await setup(t, async args => {

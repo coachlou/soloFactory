@@ -207,8 +207,8 @@ export function recordPendingProofs(job, planDigest, slice) {
   }
 }
 
-// Build-time proofs of every verified feature, rerun once at final integration so a later feature's
-// regression is caught there instead of by aggregate proofs in every feature. A recovery run also reruns
+// Build-time proofs of every verified feature. No longer rerun at final integration (Lou, 2026-10-16); they
+// still key integrationSet, so a changed proof set voids a recorded integration pass. A recovery run also counts
 // the original plan's built features; a repair feature with the same id replaces the original.
 // ponytail: features built by earlier recovery phases are not carried; add them if regressions slip there.
 export function featureProofs(job) {

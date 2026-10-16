@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { contractDigest, originalChecks, preparePlanReview, runInputs, sourceSet, validatePlanReview, validateReview } from './review.mjs';
 import { ALL_BLOCKERS, CONSOLIDATION_RULES, CONTROLLER_FACTS, PLAN_CHECKLIST, REREVIEW } from './prompts.mjs';
-import { PLAN_SCHEMA_FIXES, assertConsolidation, failedIntegrationProofs, pendingProofFailure, validateFeaturePlan, validateSlicePlan } from './wbs.mjs';
+import { PLAN_SCHEMA_FIXES, assertConsolidation, failedIntegrationProofs, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from './wbs.mjs';
 
 export const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 // v2 repair features close checks; v1 recovery slices (older ready phases) listed them as checks.
@@ -541,8 +541,14 @@ export async function runFeatureRecovery(factory, id, signal, approval = null, {
       if (await contractDigest(appDir) !== phase.request.contractDigest) throw new Error('Frozen contract changed during feature recovery.');
       if (phase.request.sourcesDigest && digest(await sourceSet(appDir, runInputs(job))) !== phase.request.sourcesDigest) throw Object.assign(new Error('Specs or prototype inputs changed after the repair plan was approved; prepare a repair plan against the current inputs.'), { code: 'inputs_changed' });
     };
+    // Lou, 2026-10-16: a plan with tens of repairs builds them all, then tests the collection once; per-repair
+    // check and review loops made dev crawl. Only batch failures get repairs; the final whole-app review judges.
+    // ponytail: batched builds skip the declared-writes gate; the final review sees every change.
+    const batch = phase.batchEnd == null && phase.plan.slices.length >= factory.batchRepairsFrom;
+    const asFeature = slice => ({ ...slice, closes: sliceChecks(slice), acceptance: slice.acceptance.map((item, n) => typeof item === 'string' ? { id: `${slice.id}-A${n + 1}`, behavior: item, proof: null } : item) });
     for (let i = phase.index; i < phase.plan.slices.length; i++) {
       const slice = phase.plan.slices[i];
+      if (batch && phase.built?.includes(slice.id)) continue;
       await assertCurrent();
       if (!phase.cursor && phase.current === slice.id) {
         // Legacy phase parked mid-feature (before cursors): keep its budget and recheck the preserved
@@ -559,11 +565,16 @@ export async function runFeatureRecovery(factory, id, signal, approval = null, {
       const label = `recovery-${phase.id}-${slice.id}`;
       const owned = phase.request.checks.filter(c => sliceChecks(slice).includes(c.id));
       // v1 (legacy) slices carry prose acceptance; give each a stable check id for the scoped review.
-      const feature = { ...slice, closes: sliceChecks(slice), acceptance: slice.acceptance.map((item, n) => typeof item === 'string' ? { id: `${slice.id}-A${n + 1}`, behavior: item, proof: null } : item) };
+      const feature = asFeature(slice);
       job = await factory.proveFeature(job, feature, owned, `${i + 1}/${phase.plan.slices.length}`, signal, {
-        cursor: phase.cursor, assertCurrent, planDigest: phase.planDigest, plan: phase.plan, planFile: phase.planFile, probe: true, totalRepairLimit: phase.totalRepairLimit,
+        cursor: phase.cursor, assertCurrent, planDigest: phase.planDigest, plan: phase.plan, planFile: phase.planFile, probe: !batch, buildOnly: batch, totalRepairLimit: phase.totalRepairLimit,
         labels: { build: label, resume: `${label}-resume`, review: n => `${label}-review-${n}` },
       });
+      if (batch) {
+        (phase.built ||= []).push(slice.id); phase.cursor = null;
+        await factory.store.writeState(job);
+        continue;
+      }
       phase.done.push(slice.id); phase.index = i + 1;
       phase.stats[slice.id] = { commit: phase.cursor.commit, reviews: phase.cursor.reviews, repairs: job.attempt - phase.cursor.attemptBefore, verifiedAt: new Date().toISOString() };
       phase.cursor = null;
@@ -574,6 +585,24 @@ export async function runFeatureRecovery(factory, id, signal, approval = null, {
         await factory.store.writeState(job);
         throw Object.assign(new Error('The approved batch of features is done.'), { code: 'paused', details: { before: 'building' } });
       }
+    }
+    if (batch && phase.done.length < phase.plan.slices.length) {
+      await assertCurrent();
+      const features = phase.plan.slices.filter(slice => !phase.done.includes(slice.id)).map(asFeature);
+      for (const feature of features) recordPendingProofs(job, phase.planDigest, feature);
+      const attemptBefore = job.attempt;
+      job.repairBudgetLimit = Math.min(job.attempt + factory.maxRepairs * features.length, phase.totalRepairLimit);
+      await factory.store.writeState(job);
+      const proofs = features.flatMap(feature => feature.acceptance.filter(item => item.proof && !item.proof.pending));
+      job = await factory.verifyWithRepairs(job, await factory.readManifest(appDir), signal, { includeInstall: true, proofs });
+      const commit = await factory.store.git('rev-parse', 'HEAD');
+      for (const feature of features) {
+        phase.done.push(feature.id);
+        phase.stats[feature.id] = { commit, reviews: 0, repairs: job.attempt - attemptBefore, batched: true, verifiedAt: new Date().toISOString() };
+      }
+      phase.index = phase.plan.slices.length;
+      await factory.store.writeState(job);
+      await factory.emit(id, { type: 'recovery.batch.completed', state: job.state, message: `Built and tested ${features.length} repair features together` });
     }
     await assertCurrent();
     phase.status = 'built'; phase.current = null;

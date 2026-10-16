@@ -60,11 +60,12 @@ const liveByProject = new Map();
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
 
 export class SoloFactory {
-  constructor({ store, provider, maxRepairs = 2, autoStartRepairs = true, commandRunner = runProcess, deployer, watch = watchConfig() } = {}) {
+  constructor({ store, provider, maxRepairs = 2, batchRepairsFrom = 10, autoStartRepairs = true, commandRunner = runProcess, deployer, watch = watchConfig() } = {}) {
     this.store = store;
     this.watch = watch;
     this.provider = provider;
     this.maxRepairs = maxRepairs;
+    this.batchRepairsFrom = batchRepairsFrom;
     this.autoStartRepairs = autoStartRepairs;
     this.commandRunner = commandRunner;
     this.deployer = deployer;
@@ -836,6 +837,8 @@ export class SoloFactory {
     await mkdir(path.join(appDir, ".factory/logs"), { recursive: true });
     await writeFile(path.join(appDir, ".factory/logs/feature.json"), JSON.stringify(slice, null, 2));
     for (;;) {
+      // A batched repair plan only builds here; its checks run once over the whole batch.
+      if (scope.buildOnly && cursor.substage !== "implementing") return job;
       // Parked by a Pause after a blocking review: repair the recorded blockers, not another review turn.
       if (cursor.substage === "repairing") {
         // A repair interrupted after resume already spent its attempt on these blockers: check and review again.
@@ -884,6 +887,7 @@ export class SoloFactory {
           await this.invoke(job, labels.resume, featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed: true, precheck: cursor.precheck, last: index === total }), signal, { resumeSessionId: error.details?.sessionId ?? this.resumeSessionFor(job, labels.resume) });
         }
         await save("checking");
+        if (scope.buildOnly) return job;
       }
       if (cursor.substage === "checking") {
         // Feature-scoped: build, this feature's proofs and the proofs of earlier features its changes can reach,
