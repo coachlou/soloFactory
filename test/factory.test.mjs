@@ -60,7 +60,13 @@ test("the final review is scoped to integration and deploy readiness only after 
   assert.match(scoped, /health endpoint/);
   assert.doesNotMatch(reviewPrompt(), /cross-feature/);
   // Scoping never drops the per-check verdict contract the controller validates.
-  for (const prompt of [scoped, reviewPrompt()]) assert.match(prompt, /exactly one \{id,status,evidence\} per check/);
+  for (const prompt of [scoped, reviewPrompt()]) {
+    assert.match(prompt, /exactly one \{id,status,evidence\} per check/);
+    // The reviewer must not spend its cap on whole-suite runs the controller repeats anyway.
+    assert.match(prompt, /never run whole suites/);
+  }
+  // A repair-plan review runs before the controller's rerun, so the prompt must not claim one already happened.
+  assert.doesNotMatch(scoped, /reran every feature/);
 });
 
 test("full lifecycle reaches completed only after real health and metrics checks", async (t) => {

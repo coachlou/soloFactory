@@ -266,8 +266,8 @@ ${DATA_RULE}`;
 // each obligation from scratch duplicated that work (smoke 9: 298 s final review), so the final reviewer
 // concentrates on what no feature review could see. Every check still gets a review-result.json entry.
 const FEATURE_REVIEWED_SCOPE = `
-Every feature already passed its own scoped review, and the controller reran every feature and
-integration proof just before this review. Do not re-audit individual obligations from scratch.
+Every feature already passed its own proofs and scoped review; their recorded results are in
+review-request.json caseResults. Do not re-audit individual obligations from scratch.
 Spend this review on what no single feature review could see: integration (cross-feature
 interactions, shared state such as storage, config and middleware, and API consistency of routes,
 error shapes and status codes across features) and deploy readiness (the health endpoint, the
@@ -285,6 +285,9 @@ requirement in .factory/PRD.md and every scenario in .factory/ACCEPTANCE.md. Ins
 code and tests.${featureReviewed ? FEATURE_REVIEWED_SCOPE + "\n" : ` Fix concrete correctness, wiring, error-handling, accessibility, privacy, or
 operator-documentation gaps you find. Keep the scope small.`} Do not deploy and do not claim a
 gate passed; the controller will rerun tests, build, health, and telemetry checks afterward.
+So never run whole suites or several test files at once: a broad run can outlast your time cap
+(2026-10-16: an eight-glob run used 44 of 45 minutes). For fresh executed evidence run at most a
+few single files, narrowed with --test-name-pattern.
 Write a concise review record to .factory/REVIEW.md. Also read .factory/review-request.json
 and write .factory/review-result.json with version:1, jobId, token and contractDigest copied
 exactly from the request; verdict:"pass" or "blocked"; blockers:string[]; and checks containing
