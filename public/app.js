@@ -52,6 +52,7 @@ async function refreshProjects() {
   renderProjects();
   renderRuns();
   renderBackgroundBanner();
+  renderAttention();
   if (!$("#board-view").classList.contains("hidden")) renderBoard(await api("/api/board"));
 }
 
@@ -165,6 +166,31 @@ function renderRuns() {
     return option(job.id, `${marker}${projectName(job)} · ${job.state} · ${job.createdAt.slice(0, 10)}`);
   }));
   select.value = state.job?.id ?? "new";
+}
+
+// A parked latest run blocks its project until the owner acts, so it is announced on every screen
+// and in the tab title, whichever run or project is open. Cancelled runs are the owner's own choice.
+const NEEDS_YOU = ["failed", "interrupted", "paused"];
+function runsNeedingYou(projects, viewingId) {
+  return projects.filter((project) => NEEDS_YOU.includes(project.lastRun?.state) && project.lastRun.id !== viewingId)
+    .map((project) => ({ projectId: project.id, jobId: project.lastRun.id, name: project.lastRun.workingName || project.name, state: project.lastRun.state }));
+}
+
+function renderAttention() {
+  const waiting = runsNeedingYou(state.projects, state.job?.id);
+  const all = state.projects.filter((project) => NEEDS_YOU.includes(project.lastRun?.state)).length;
+  document.title = all ? `(${all}) needs you · SoloFactory` : "SoloFactory";
+  $("#attention-banner").classList.toggle("hidden", !waiting.length);
+  if (!waiting.length) return;
+  const [first] = waiting;
+  $("#attention-text").textContent = waiting.length > 1 ? `${waiting.length} runs are stopped or paused and need you.`
+    : `“${first.name}” is ${first.state === "paused" ? "paused" : "stopped"} and needs you.`;
+  $("#attention-view-button").onclick = async () => {
+    try {
+      if (first.projectId !== state.project) await switchProject(first.projectId);
+      await selectRun(first.jobId);
+    } catch (error) { showError(error); }
+  };
 }
 
 function renderBackgroundBanner() {
@@ -477,6 +503,7 @@ function showRun() {
   $("#run-id").textContent = state.job.id;
   $("#run-title").textContent = state.job.brief.workingName || "Building your app";
   renderJob();
+  renderAttention();
 }
 
 async function poll() {
@@ -796,7 +823,7 @@ function mapStops(job) {
 function mapHealth(job) {
   if (job.state === "completed") return { tone: "ok", text: "Finished" };
   if (job.state === "queued") return { tone: "idle", text: "Queued" };
-  if (job.state === "paused") return { tone: "idle", text: "Paused" };
+  if (job.state === "paused") return { tone: "warn", text: "Paused · needs you" };
   if (PARKED.includes(job.state)) return { tone: "bad", text: "Stopped · needs you" };
   const worker = job.supervision?.worker;
   if (worker?.kind === "command") return { tone: "ok", text: `Running ${worker.gate ?? "a check"} · ${formatSpan(worker.ageMs)}` };

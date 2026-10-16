@@ -884,3 +884,13 @@ test("the stage rail marks finished stages done, and every stage on a completed 
   for (const stage of ["specifying", "building", "verifying", "reviewing", "deploying"]) assert.ok(completed.done.includes(stage), stage);
   assert.deepEqual(railMarks("queued").done, []);
 });
+
+test("a stopped or paused latest run is announced from every project, but not the run on screen", async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const lift = (pattern) => source.match(pattern)[0];
+  const runsNeedingYou = new Function(`${lift(/const NEEDS_YOU = .*\n/)}${lift(/function runsNeedingYou\([\s\S]*?\n}\n/)}; return runsNeedingYou;`)();
+  const project = (id, state, name = null) => ({ id, name: id, lastRun: state && { id: `${id}-run`, state, workingName: name } });
+  const projects = [project("a", "paused", "Habit Loop"), project("b", "failed"), project("c", "cancelled"), project("d", "building"), project("e", null), project("f", "interrupted")];
+  assert.deepEqual(runsNeedingYou(projects, null).map((run) => `${run.name}:${run.state}`), ["Habit Loop:paused", "b:failed", "f:interrupted"]);
+  assert.deepEqual(runsNeedingYou(projects, "b-run").map((run) => run.jobId), ["a-run", "f-run"]);
+});
