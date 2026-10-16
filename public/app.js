@@ -806,6 +806,16 @@ function lastActivityAge(job) {
 const eventKind = (entry) => entry.type.startsWith("gate.") ? "gate"
   : /^(agent|item|turn|thread|supervision)\./.test(entry.type) ? (/Completed (Write|Edit|MultiEdit|NotebookEdit)\b/.test(entry.message ?? "") ? "file" : "agent")
   : "stage";
+// The newest `cap` rows of each kind, newest first: thousands of tool events must not push the rare
+// stage and gate rows out of "All". ponytail: older rows are dropped; page back if the owner needs them.
+function streamRows(events, filter, cap = 300) {
+  const counts = {}, rows = [];
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const kind = eventKind(events[i]);
+    if ((filter === "all" || kind === filter) && (counts[kind] = (counts[kind] ?? 0) + 1) <= cap) rows.push(events[i]);
+  }
+  return rows;
+}
 
 function renderMap() {
   const job = state.job, { label, stops, features } = mapStops(job);
@@ -978,12 +988,11 @@ function renderStream() {
   }
   for (const button of $("#chips").children) button.setAttribute("aria-pressed", String(button.dataset.kind === state.mapFilter));
   const seen = state.streamSeen?.job === state.job.id ? state.streamSeen.at : null;
-  // ponytail: last 300 rows; a full long run has thousands of tool events. Page back if the owner needs older ones.
   // Rebuild only when the rows would differ; an unchanged rebuild also resets the list's own scroll.
   const key = `${state.job.id}|${state.mapFilter}|${state.events.length}|${state.events.at(-1)?.at}`;
   if ($("#events").dataset.key === key) return;
   $("#events").dataset.key = key;
-  const rows = state.events.filter((entry) => state.mapFilter === "all" || eventKind(entry) === state.mapFilter).slice(-300).reverse();
+  const rows = streamRows(state.events, state.mapFilter);
   // Newest rows land on top, so keep the row the owner is reading at the same height; at the top, stay on top for new rows.
   const list = $("#events"), top = () => list.getBoundingClientRect().top;
   const anchor = list.scrollTop > 4 ? [...list.children].find((row) => row.getBoundingClientRect().bottom > top()) : null;

@@ -841,3 +841,17 @@ test("close() finishes promptly while a browser holds keep-alive and stalled req
   poller.destroy();
   stalled.destroy();
 });
+
+test("the activity stream keeps rare stage and gate rows under thousands of tool events", async () => {
+  // The dashboard is a browser script, so its two pure helpers are lifted out by source and run here.
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const helpers = source.match(/const eventKind = [\s\S]*?\n}\n/)[0];
+  const streamRows = new Function(`${helpers}; return streamRows;`)();
+  const events = [{ type: "stage.started", at: "0", message: "building" }, { type: "gate.passed", at: "1", message: "test" }];
+  for (let i = 0; i < 2000; i += 1) events.push({ type: "item.completed", at: String(2 + i), message: "Completed Bash npm test" });
+  const all = streamRows(events, "all");
+  assert.equal(all.length, 302);
+  assert.deepEqual(all.slice(-2).map((entry) => entry.type), ["gate.passed", "stage.started"], "oldest rare rows stay, newest first");
+  assert.equal(all[0].at, "2001");
+  assert.deepEqual(streamRows(events, "gate").map((entry) => entry.type), ["gate.passed"]);
+});
