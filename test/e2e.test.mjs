@@ -855,3 +855,21 @@ test("the activity stream keeps rare stage and gate rows under thousands of tool
   assert.equal(all[0].at, "2001");
   assert.deepEqual(streamRows(events, "gate").map((entry) => entry.type), ["gate.passed"]);
 });
+
+test("the pipeline view's time so far leaves out pauses and stops", async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const lift = (name) => source.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n}\\n`))[0];
+  const stateRunningMs = new Function(`${lift("runningMs")}${lift("stateRunningMs")}; return stateRunningMs;`)();
+  const at = (minute) => Date.parse("2026-10-14T00:00:00Z") + minute * 60_000;
+  const iso = (minute) => new Date(at(minute)).toISOString();
+  const job = {
+    // Building ran 10 minutes, parked 3 hours, then ran 20 more after the resume; verifying is still underway.
+    stageHistory: [
+      { state: "building", startedAt: iso(0), endedAt: iso(190) },
+      { state: "building", startedAt: iso(190), endedAt: iso(210) },
+      { state: "verifying", startedAt: iso(210) },
+    ],
+    idleGaps: [[at(10), at(190)]],
+  };
+  assert.deepEqual(stateRunningMs(job, at(215)), { building: 30 * 60_000, verifying: 5 * 60_000 });
+});

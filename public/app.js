@@ -768,8 +768,8 @@ function mapStops(job) {
   const plan = mapPlan(job);
   if (!plan) {
     const at = PIPELINE_STOPS.findIndex(([stage]) => stage === (parked ? job.failedState : job.state === "repairing" ? "verifying" : job.state));
-    const spent = state.telemetry?.summary?.stages?.byState ?? {};
-    return { label: `${sdlcOption(job.sdlc).label} · ${job.provider}`, stops: PIPELINE_STOPS.map(([stage, id, title], index) => ({ id, title, deps: [], ms: spent[stage]?.durationMs ?? 0, status: finished || (at >= 0 && index < at) ? "done" : live(index === at) })) };
+    const spent = stateRunningMs(job);
+    return { label: `${sdlcOption(job.sdlc).label} · ${job.provider}`, stops: PIPELINE_STOPS.map(([stage, id, title], index) => ({ id, title, deps: [], ms: spent[stage] ?? 0, status: finished || (at >= 0 && index < at) ? "done" : live(index === at) })) };
   }
   let last = Date.parse(plan.start) || null;
   const stops = plan.slices.map((slice) => {
@@ -920,6 +920,15 @@ function runningMs(from, to, gaps = []) {
   let ms = Math.max(0, to - from);
   for (const [start, end] of gaps) ms -= Math.max(0, Math.min(to, end) - Math.max(from, start));
   return Math.max(0, ms);
+}
+
+// Running time per pipeline state: pauses, stops and long silences (job.idleGaps) inside a stage don't count.
+function stateRunningMs(job, now = Date.now()) {
+  const spent = {};
+  for (const stage of job.stageHistory ?? []) {
+    spent[stage.state] = (spent[stage.state] ?? 0) + runningMs(Date.parse(stage.startedAt), stage.endedAt ? Date.parse(stage.endedAt) : now, job.idleGaps);
+  }
+  return spent;
 }
 
 // Time left from running time only: median per feature (one slow feature should not drag it), the underway feature
