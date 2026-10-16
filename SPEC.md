@@ -164,7 +164,9 @@ such a run parks with the action "install a SoloFactory fix": Resume is refused
 (`factory_fix_required`) until a different build ID is running. Build ID is the package version
 plus commit; an installed copy takes the commit from its `VERSION` stamp
 (`solofactory <version> (<sha>) ...`) because the enclosing repository's HEAD is the owner's
-project, not the factory.
+project, not the factory. Start over (`/retry`) is not refused, but the
+dashboard doesn't offer it for this blocker: it begins a new run from the same brief, so it helps
+only when the oversized input grew out of the run's own progress, not the brief itself.
 
 ## 5. Output application contract
 
@@ -301,6 +303,11 @@ Only one job may be active because the target user does not benefit from resourc
 - The UI warns owners never to paste secrets into requirements.
 - Subscription CLI credentials stay in their native credential store and are never read by
   SoloFactory.
+- Claude agent turns ignore the owner's personal Claude Code settings, hooks and MCP servers
+  (`--setting-sources project,local --strict-mcp-config`), cannot spawn subagents, and may run only
+  the controller's own gate and proof commands plus read-only orientation; the prompt tells them
+  compound shell commands are denied. They default to Opus (`SOLOFACTORY_CLAUDE_MODEL`,
+  `SOLOFACTORY_CLAUDE_REASONING_MODEL`).
 - Generated code executes with the owner's local OS permissions. v0.1 does not claim hostile
   code isolation; users should run it only in a trusted local account/workspace.
 
@@ -466,7 +473,9 @@ carry a strategy forward.
    **Release QA.** The final reviewer reports defects instead of fixing feature code: for each
    defect it writes a failing `node:test` file under `qa/` and lists `{test, files, description}`
    under `bugs` in `review-result.json`. A review that lists any bug blocks even if its verdict
-   says pass. The controller assigns each bug to the latest feature whose declared writes cover
+   says pass. A passing final review on source the reviewer itself changed is void: the change is
+   verified, then reviewed again, and a third edited review parks the run (`review_rejected`).
+   The controller assigns each bug to the latest feature whose declared writes cover
    the faulty files and repairs it under that feature's writes gate with the finding's test as
    evidence (`review.bug`); bugs no feature owns, or whose tests already pass, get the unscoped
    repair. Bug items share the final-stage budget. A repair prompt carries its feature, its

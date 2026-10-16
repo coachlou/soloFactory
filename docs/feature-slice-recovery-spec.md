@@ -102,6 +102,10 @@ contract or declare the original run complete with requirements deferred.
   its behavior, expected result and proof command stay and its cases may not be dropped
   or altered. A change of meaning is a new case that supersedes the original, which the
   reviewer compares against it.
+- Prerequisite-only recovery slices may use an empty `checks` array, but still
+  require executable acceptance criteria. Every unfinished original check must
+  still have exactly one owning slice; its full evidence gate runs after its
+  prerequisites, and final review covers the unchanged full contract.
 - Apply bounded repairs per recovery slice and a visible bound for the approved
   recovery phase. Exhaustion parks the run; automatic retries cannot replenish
   the budget or silently replan.
@@ -184,13 +188,6 @@ without recovery-phase fields readable and resumable through existing controls.
 
 ## Delivery boundary
 
-Implement and test in the SoloFactory dev repo, then regenerate the installed
-distribution. Do not replace the running factory while its current photo-library
-recovery has an active worker. This note does not change or pause that run.
-(2026-10-07 wording, kept as written. The release gate is now the real-provider recovery
-smoke noted under Status.)
-
-Prerequisite-only recovery slices may use an empty `checks` array, but still
-require executable acceptance criteria. Every unfinished original check must
-still have exactly one owning slice; its full evidence gate runs after its
-prerequisites, and final review covers the unchanged full contract.
+Changes are made and tested in the SoloFactory dev repo, then released through the installed
+distribution. Install a new build only when no run has an active worker. The release gate is the
+real-provider recovery smoke noted under Status.

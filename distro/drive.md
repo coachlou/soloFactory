@@ -182,6 +182,12 @@ and the same `nextAction`. Ask the owner before any of these actions:
 
 Ask before each.
 
+**Switching provider** (for example when one is out of usage): no endpoint changes a run's
+provider. With the owner's yes, wait until the run is parked (Pause it first), back up
+`projects/<project>/.solofactory/runs/<id>/state.json`, set its `"provider"` to another
+authenticated provider from `GET /api/config`, restart the server, then `POST /resume`. Resume
+keeps every verified feature.
+
 ## Features and repairs
 
 Each planned feature declares the files it `writes`; a feature that changes others fails its
