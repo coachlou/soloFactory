@@ -251,6 +251,7 @@ The failure is inside slice ${slice.id} (${slice.title}), given in full below: d
 Earlier completed slices must be preserved — fix only what this slice's acceptance criteria need.${slice.writes ? ` Change
 the files its writes list. If the fix needs an existing source file outside them, edit it: the controller adds it to this
 feature's writes. Never edit another feature's tests, create a new file outside the writes, or delete one; those fail its checks.` : ""}
+${REVIEW_BAR}
 ${featureBlock("Slice", JSON.stringify(slice, null, 2), featureFile)}`
     : "";
   const bugLines = bugs.length
@@ -538,6 +539,24 @@ function sharedCommands(slice) {
   return { feature: { ...slice, acceptance }, commands: Object.fromEntries([...ids].map(([key, id]) => [id, JSON.parse(key)])) };
 }
 
+// One bar for builder, feature repair and scoped reviewer, so a builder knows before it starts what a review
+// will reject. Drawn from run 4f2dd1cf, where most of 46 blocked feature reviews were proofs that asserted only
+// part of their case text (missing fixtures or steps, loose message wording, a status or counter standing in for
+// the behavior). Extend it from real review blockers, not guesses.
+export const REVIEW_BAR = `How the scoped review judges each case: it opens the case's test and checks it against the
+case text, clause by clause.
+- The test asserts every clause of its case: every named fixture, input, step and outcome. A required
+  message is asserted in its full exact wording.
+- It asserts the observable result the case names, not a stand-in: the preview actually loads, the
+  membership actually changes, the prior state is actually preserved; a job status, a counter or version
+  bump, or an untouched local copy does not prove it.
+- Its inputs can expose the defect: an orientation proof needs a fixture whose orientation is visible; a
+  rejection proof runs the rejected operation, then checks the prior state.
+- Browser steps act like a user: wait for asynchronous elements before using them; a control is visible
+  only when a user could see and reach it, and it is operated through real input events.
+- The proof command exits 0 on this candidate. A check that cannot run on this machine is a blocker to
+  report, never something to skip or fake.`;
+
 export function featureBuildPrompt(slice, { owned, planDigest, planFile = ".factory/slices.json", featureFile = ".factory/logs/feature.json", followOn = false, resumed = false, precheck = null, last = false }) {
   const { feature, commands } = sharedCommands(slice);
   return `You are the implementation worker for ONE approved feature (plan digest ${planDigest}).
@@ -555,6 +574,8 @@ ${featureBlock("Feature (each proof.command names an entry in Proof commands)", 
 Original requirements this feature closes (prove the full wording):
 ${JSON.stringify(owned, null, 2)}
 
+${REVIEW_BAR}
+
 Build one case at a time: write its proof test, then the minimum real behavior that passes it, and run that
 proof until it passes before starting the next case, so an interrupted turn leaves passing cases, not half-wired
 code. Run only this feature's proof commands, plus targeted tests of earlier code you changed; do not run the
@@ -565,7 +586,8 @@ controller passes it only when every case's own test passed. Cases are read only
 a standalone script proof must import node:test and wrap each case in test(); a script that prints its own
 ok/fail lines records nothing and fails its gate. Change the files your feature's writes list. If your
 obligations need an existing source file outside them, edit it: the controller adds it to your writes. Never edit
-another feature's tests, create a new file outside your writes, or delete one; those fail its checks. Do not edit .factory contract or plan files. Do not
+another feature's tests, create a new file outside your writes, or delete one; those fail its checks. Do not edit .factory contract or plan files. Before finishing,
+map each clause of each case to the assertion that proves it and add any that is missing. Do not
 deploy; the controller runs build and this feature's proof commands, then a scoped review.
 
 ${DATA_RULE}`;
@@ -584,6 +606,8 @@ test, not the whole app. Judge uncased checks directly against real behavior. Ea
 already reviewed: do not reread, rerun or explore their code or tests unless this feature's check
 depends on it. Later planned features may still be missing and must not
 block this verdict; a broad requirement this feature closes still needs full proof.
+
+${REVIEW_BAR}
 
 Do not change application source; if you do, the controller discards your verdict and rechecks.
 Write .factory/REVIEW.md and .factory/review-result.json: {version:1, jobId, token,

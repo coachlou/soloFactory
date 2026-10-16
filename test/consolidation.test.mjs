@@ -6,7 +6,7 @@ import path from 'node:path';
 import { JobStore } from '../src/store.mjs';
 import { SoloFactory } from '../src/factory.mjs';
 import { assertConsolidation, caseResults, validateFeaturePlan } from '../src/wbs.mjs';
-import { featureBuildPrompt, featureReviewPrompt } from '../src/prompts.mjs';
+import { REVIEW_BAR, featureBuildPrompt, featureReviewPrompt, repairPrompt } from '../src/prompts.mjs';
 
 // Consolidating overlapping obligations into one requirement with explicit cases, shared by new-run and
 // repair planning. The cases keep every distinct field, action, boundary, failure condition and surface,
@@ -230,6 +230,18 @@ test('an oversized feature is read from its file instead of being inlined in eit
     assert.match(prompt, /read \.factory\/logs\/feature\.json/);
   }
   assert.match(featureBuildPrompt(plan([requirement()]).slices[0], { owned: [], planDigest: 'digest' }), /"UPLOAD-LIMITS"/);
+});
+
+// Run 4f2dd1cf: most of 46 blocked feature reviews were proofs asserting only part of their case text.
+// Builder, feature repair and reviewer must read the same bar, so it is one shared string.
+test('the builder and feature repair see the exact bar the feature reviewer applies', () => {
+  const slice = plan([requirement()]).slices[0];
+  for (const prompt of [featureBuildPrompt(slice, { owned: [], planDigest: 'digest' }), featureReviewPrompt(slice), repairPrompt('.factory/last-failure-1.txt', slice)]) {
+    assert.ok(prompt.includes(REVIEW_BAR));
+  }
+  assert.match(REVIEW_BAR, /every clause/);
+  assert.match(featureBuildPrompt(slice, { owned: [], planDigest: 'digest' }), /map each clause/);
+  assert.ok(!repairPrompt('.factory/last-failure-1.txt').includes(REVIEW_BAR), 'non-feature repairs have no case bar');
 });
 
 // Keeping an id is a promise that the obligation still asserts the same thing; a rewrite must be a superseding case.
