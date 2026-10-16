@@ -1237,7 +1237,8 @@ export class SoloFactory {
     if (!slice) {
       for (const entry of integrationProofs(job)) { entry.status = "pending"; delete entry.candidate; delete entry.verifiedAt; delete entry.proofCandidate; }
       await this.store.writeState(job);
-      proofs = [...proofs, ...featureProofs(job), ...(job.bugProofs ?? []), ...await this.releaseQaProofs(job), ...integrationProofs(job).map(entry => ({ id: entry.gate.slice("proof-".length), key: entry.key, proof: entry.obligation.proof, cases: entry.obligation.cases }))];
+      // Each feature's proofs already passed when it was built (Lou, 2026-10-16); the suite, build and health run once here.
+      proofs = [...proofs, ...(job.bugProofs ?? []), ...await this.releaseQaProofs(job), ...integrationProofs(job).map(entry => ({ id: entry.gate.slice("proof-".length), key: entry.key, proof: entry.obligation.proof, cases: entry.obligation.cases }))];
     }
     let current = job;
     let first = null;

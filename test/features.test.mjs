@@ -328,27 +328,18 @@ test("a repair that changes dependencies reinstalls before the next check", asyn
   assert.deepEqual(order.slice(failed + 1, failed + 4), ["install", "proof-SKELETON-1", "build"]);
 });
 
-test("final integration reruns every verified feature's proofs, so a later feature's regression is repaired", async () => {
+// Lou, 2026-10-16: each feature's proofs ran until green when it was built; final integration runs the whole
+// suite, build and health once, not every feature proof again. A later regression is caught in production testing.
+test("final integration does not rerun verified features' own proofs", async () => {
   const order = [];
-  let broken = false;
-  const after = async (stage, cwd) => {
-    await e2eSkeleton(stage, cwd);
-    if (stage === "build-slice-SLICE-UI") broken = true;
-    if (stage.startsWith("repair-")) broken = false;
-  };
-  const commandRunner = async (options) => {
-    order.push(gateOf(options));
-    return options.args[0] === "e2e/skeleton.mjs" && broken ? { code: 1, output: "skeleton e2e failed" } : { code: 0, output: "passed" };
-  };
-  const { store, job, factory } = await plannedRun({ after, commandRunner });
+  const commandRunner = async (options) => { order.push(gateOf(options)); return { code: 0, output: "passed" }; };
+  const { store, job, factory } = await plannedRun({ after: e2eSkeleton, commandRunner });
   const result = await factory.start(job.id);
   assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(order.filter((gate) => gate.startsWith("proof-SLICE-")).length, 0, "no verified feature proof reruns at the end");
   const events = await store.events(job.id, 1000);
-  const lastFeature = events.findLastIndex((event) => event.type === "slice.completed");
-  const final = events.slice(lastFeature);
-  assert.ok(final.some((event) => event.type === "gate.failed" && event.gate === "proof-SLICE-SKELETON.SKELETON-1"), "final integration caught the regression");
-  assert.equal(final.filter((event) => event.type === "agent.started" && event.message.includes("repair-")).length, 1);
-  assert.equal(count(await started(store, job.id), "repair-"), 1, "no feature repairs were spent");
+  const final = events.slice(events.findLastIndex((event) => event.type === "slice.completed"));
+  assert.ok(final.some((event) => event.type === "gate.passed" && event.gate === "test"), "the whole suite still runs once at the end");
 });
 
 test("a later feature's case supersedes an earlier stage obligation, so final integration does not demand the retired case", async () => {
