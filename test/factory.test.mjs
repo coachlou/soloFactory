@@ -818,3 +818,18 @@ test("a resumed build reuses only its own feature's build session", () => {
   assert.equal(factory.resumeSessionFor(job, "slice-resume-API-AUTH"), "auth");
   assert.equal(factory.resumeSessionFor(job, "slice-resume-WEB"), null);
 });
+
+// Lou, 2026-10-16: Docker is optional; container files are written, never executed by checks.
+test("every planner, builder, repair and reviewer prompt keeps checks off Docker and other operating systems", async () => {
+  const prompts = await import("../src/prompts.mjs");
+  const { repairPlanPrompt } = await import("../src/feature-recovery.mjs");
+  const slice = { id: "F", title: "F", objective: "o", acceptance: [], closes: [], dependsOn: [] };
+  const all = {
+    specification: prompts.specificationPrompt(true), featurePlan: prompts.featurePlanPrompt(), planAudit: prompts.planAuditPrompt(),
+    planCorrection: prompts.planCorrectionPrompt(["x"]), repairPlan: repairPlanPrompt("p.json", "r.json"),
+    build: prompts.featureBuildPrompt(slice, { owned: [], planDigest: "d" }), repair: prompts.repairPrompt("f.txt", slice),
+    featureReview: prompts.featureReviewPrompt(slice), review: prompts.reviewPrompt(),
+  };
+  for (const [name, text] of Object.entries(all)) assert.ok(text.includes(prompts.HOST_RULE), `${name} lacks the host rule`);
+  assert.doesNotMatch(prompts.CONTROLLER_FACTS, /Every proof of every built feature reruns/);
+});

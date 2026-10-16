@@ -10,6 +10,15 @@ requests.total (number), requests.errors (number), latencyMs.average (number), a
 (an array of per-route aggregates, or an object keyed by normalized route path). Extra
 aggregate fields are fine; different names for these are a deployment failure.`;
 
+// Lou, 2026-10-16: Docker is not required. Run 4f2dd1cf turned a spec's "include a container configuration"
+// into executed Linux-image proofs, and an agent installed Docker to pass them. A Linux host gets its own
+// container build and test as a separate request, outside the factory, when one is actually needed.
+export const HOST_RULE = `Checks run only on this machine. A deployment file a spec asks for (Dockerfile, compose
+file, container or Linux configuration) is written and kept, but never executed: no acceptance
+item, proof, test or review may require Docker, a container runtime, a virtual machine or another
+operating system. Prove the same behavior with plain processes here instead; for example, data surviving a replacement is proven by stopping the app,
+replacing its code with a fresh copy and restarting it on the same data folder.`;
+
 // The app may be live in this same folder while workers run, and the factory commits with
 // `git add -A` and rewinds with reset/clean. Only a gitignored data/ is safe from both.
 // The install ban rides along because every worker prompt carries this rule (2026-10-15:
@@ -23,7 +32,9 @@ those files untouched.
 
 Never install system software: no brew, apt, global npm/pip installs, container runtimes,
 or virtual machines. Project dependencies in package.json are fine. If a check needs a tool
-that is missing on this machine, stop and report it as a blocker instead of installing it.`;
+that is missing on this machine, stop and report it as a blocker instead of installing it.
+
+${HOST_RULE}`;
 
 export function specificationPrompt(sliceMode = false, { followOn = false } = {}) {
   const sliceContract = sliceMode
@@ -113,7 +124,8 @@ ACCEPTANCE.md describes the finished product. A brief's delivery order, "defer X
 acceptance item. Never write a scenario that asserts a feature's absence or that something does
 not yet exist (a route still answering 404, a script still failing) — the finished product fails
 it. Never write a scenario about repository state (clean tree, git status, commit history); the
-factory commits the tree itself.${sliceContract}
+factory commits the tree itself.
+${HOST_RULE}${sliceContract}
 The future app must expose GET /health and privacy-preserving GET /_factory/metrics. Metrics
 include uptime, request/error/active counts, aggregate latency, and normalized route counts;
 never request bodies, headers, IPs, identifiers, or query strings. ${METRICS_SCHEMA}
@@ -371,16 +383,17 @@ export const CONSOLIDATION_RULES = `- Consolidate overlapping obligations into o
 export const CONTROLLER_FACTS = `How the controller runs proofs:
 - Gates run in the project root on the uncommitted working tree, stopping at the first failure.
   A feature's checks run build + that feature's own proofs (install only when dependencies changed).
-  Final integration runs install, test, build + all proofs: the whole test suite runs there, not per
-  feature. Each command has a time limit (5 minutes by default).
+  Final integration runs install, test, build + proofs pending integration: the whole test suite runs
+  there, not per feature. Each command has a time limit (5 minutes by default).
 - The factory commits (git add -A) only after a feature passes its review, so while its gates run
   the feature's new files are untracked. Never assert on git status, a clean tree or commit history.
 - data/ is gitignored owner data; tests use a temporary directory, never data/. The app starts with
   only PORT and NODE_ENV=production set.
-- Every proof of every built feature reruns at final integration, so a proof must stay true as
-  later features land. An obligation that is only true until a later feature exists (a stage gate
+- Built features' proofs are not rerun at final integration, but their test files run in the whole
+  suite there, so a proof must stay true as later features land. An obligation that is only true until a later feature exists (a stage gate
   asserting a route or file is still absent) must be retired by that later feature: one of its
-  cases lists the obligation id in supersedes, and integration then skips it.`;
+  cases lists the obligation id in supersedes, and integration then skips it.
+- ${HOST_RULE}`;
 
 // One checklist for planner, reviewer and corrector: the planner self-checks against exactly what
 // the reviewer blocks on, so a review round is not spent discovering a rule.
@@ -613,6 +626,7 @@ already reviewed: do not reread, rerun or explore their code or tests unless thi
 depends on it. Later planned features may still be missing and must not
 block this verdict; a broad requirement this feature closes still needs full proof.
 ${OWNER_DECISIONS}
+${HOST_RULE}
 
 ${REVIEW_BAR}
 
