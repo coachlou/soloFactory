@@ -69,6 +69,14 @@ test("the final review is scoped to integration and deploy readiness only after 
   assert.doesNotMatch(scoped, /reran every feature/);
 });
 
+test("every worker prompt forbids installing system software", () => {
+  const slice = { id: "S1", title: "One", goal: "g", acceptance: [] };
+  const prompts = [buildPrompt(), repairPrompt(".factory/last-failure-1.txt"), reviewPrompt(), reviewPrompt({ featureReviewed: true }),
+    continuationPrompt("build"), sliceBuildPrompt(slice, { slices: [slice] }), sliceContinuationPrompt(slice, { slices: [slice] })];
+  // 2026-10-15: an agent brew-installed Docker and colima to satisfy a container test.
+  for (const prompt of prompts) assert.match(prompt, /Never install system software/);
+});
+
 test("full lifecycle reaches completed only after real health and metrics checks", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-test-"));
   const store = new JobStore(root);

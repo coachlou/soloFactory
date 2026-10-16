@@ -12,12 +12,18 @@ aggregate fields are fine; different names for these are a deployment failure.`;
 
 // The app may be live in this same folder while workers run, and the factory commits with
 // `git add -A` and rewinds with reset/clean. Only a gitignored data/ is safe from both.
+// The install ban rides along because every worker prompt carries this rule (2026-10-15:
+// an agent brew-installed Docker and colima to satisfy a container test).
 const DATA_RULE = `Owner data: the app may be running from this folder while you work. Anything its users
 save (records, uploads, databases) must live under data/ at the project root, created at
 startup if missing; the factory keeps data/ out of git so its commits and rewinds never
 touch it. Never edit, move, or delete files in data/, and make tests use a temporary
 directory instead of data/. If an earlier release keeps user data somewhere else, leave
-those files untouched.`;
+those files untouched.
+
+Never install system software: no brew, apt, global npm/pip installs, container runtimes,
+or virtual machines. Project dependencies in package.json are fine. If a check needs a tool
+that is missing on this machine, stop and report it as a blocker instead of installing it.`;
 
 export function specificationPrompt(sliceMode = false, { followOn = false } = {}) {
   const sliceContract = sliceMode
