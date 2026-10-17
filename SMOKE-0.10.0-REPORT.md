@@ -40,3 +40,9 @@ Hit the Codex `usage_limit` after 2 features, then resumed after the limit reset
 3. **Node 24 vs host Node 26.5:** prompt-level fix made (older pinned major is satisfied); unverified on a real run.
 4. `MAX_REPAIRS=0` also zeroes plan corrections, so it cannot force a build-stage failure.
 5. Servers stopped; smoke homes under `.solofactory/` are gitignored.
+
+## Round 2 (2026-10-17)
+- Codex, new brief (Reading List, Node 24 spec, port 4211): **completed**, live and verified. Codex now 2/3 with fixes; Claude 3/3.
+- Forced park (re-planted fault): parked on a plan-level proof, correctly with no Waive button (waive is only for reviewer BUG tests).
+- Waiver: exercised on the real server with a hand-planted BUG proof; blank reason rejected, real reason moved it to `waivedProofs`, next action became Resume. A real reviewer never produced a wrong test, so that exact trigger is still only unit- and API-tested.
+- `SOLOFACTORY_MAX_REPAIRS=0` blocks planning (zero plan corrections); do not use it to force a park.

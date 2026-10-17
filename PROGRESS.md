@@ -1,5 +1,14 @@
 # SoloFactory progress
 
+## 0.10.1: real-provider smoke fixes (2026-10-17)
+
+Real-provider smoke (SMOKE-0.10.0-REPORT.md): Claude 3/3, Codex 2/3 after fixes. Fixed: owner waiver
+for a faulty reviewer BUG test (required reason, repairer note, visible on completed runs);
+reviewer tests sanity-check their harness; newer Node accepted; planner no longer lets an earlier
+feature's test pin behavior a later feature changes. Verified on real runs: Codex Habit Ledger and a
+new Reading List brief (Node 24 spec) both completed. Waiver verified through the real server and API
+with a hand-planted BUG proof; no real reviewer produced a wrong test in the final runs.
+
 ## Requested next: feature and slice recovery (2026-10-07)
 
 First implementation added after the second broad recovery cycle failed. Owner

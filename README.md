@@ -229,6 +229,6 @@ no single-build option for new runs; older single and slice runs still resume. D
 A completed worker turn is not review approval: every must-have and acceptance scenario needs
 passing, evidenced checks before deployment. When a parked run can continue, one policy names
 the allowed action (Resume, Prepare repair plan, Submit corrected plan for review), and a repair
-plan that passes independent review starts its repairs on its own. The full contract for the
+plan that passes independent review starts its repairs on its own. If the stuck gate is a reviewer-written test that is itself wrong, the owner can waive it with a written reason; the waiver is recorded on the run. The full contract for the
 review gate, continuation and feature recovery lives in
 [SPEC.md, Completion review gate](SPEC.md#completion-review-gate) and the sections after it.
