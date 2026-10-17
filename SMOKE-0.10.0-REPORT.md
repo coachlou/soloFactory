@@ -31,9 +31,12 @@ Reason required; the last repair turn's own words are shown beside the button; a
 ### Second Codex run (2026-10-16-df6500ce, fresh home `.solofactory/smoke-codex2`, with the prompt fix)
 Parked differently: no reviewer test this time. A planned proof, `F1.F1-METRICS` case METRICS-PRIVATE (AC14: metrics must leak no sentinel/IDs/paths, bounded route vocabulary), failed after 3 attempts at feature-1 integration (`quality_gate_failed`, budget exhausted). METRICS-HTTP and METRICS-SCHEMA pass. **Diagnosed:** feature F1's own test (`scripts/metrics.test.mjs:29`) asserts 404 for the completion route; later feature F2 legitimately changed it to 303. F1's proof reruns during F2's checks, F2 may not edit F1's test (writes gate), and the repairer said so and stopped. The app is right; two features' tests disagree and nothing can reconcile them. Not the waiver's case. So Codex is 0 for 2 on this brief, with two different causes. The waiver does not apply (not a BUG proof).
 
+### Third Codex run (2026-10-17-85f24773, port 4210, with all fixes)
+Stopped at 2 of the features built, 0 repairs, by `usage_limit` ("Subscription usage is unavailable"): the Codex subscription limit, not a product defect. It verifies nothing about the planner/reviewer fixes yet. Parked run is resumable in `.solofactory/smoke-codex3` once the limit resets (start the server there with PORT=4210 and Resume).
+
 ## For Lou in the morning
 1. **Review** the waiver + prompt fix (files: `src/factory.mjs`, `src/server.mjs`, `public/app.js`, `src/prompts.mjs`, `test/waive-proof.test.mjs`, this report). Committed locally, not pushed.
-2. **Codex is 0/2** on the Habit Ledger brief (run 1: faulty reviewer test; run 2: an earlier feature's test contradicts a later feature's required behavior). Claude is 3/3. Run 2 needs a gate-semantics decision: let a repairing feature update an earlier feature's proof test when the plan requires the changed behavior.
+2. **Resume the third Codex run after the Codex limit resets**; it is the only check of the planner fix. **Codex is 0/2 so far** on the Habit Ledger brief (run 1: faulty reviewer test; run 2: an earlier feature's test contradicts a later feature's required behavior). Claude is 3/3. Run 2 needs a gate-semantics decision: let a repairing feature update an earlier feature's proof test when the plan requires the changed behavior.
 3. **Node 24 vs host Node 26.5:** prompt-level fix made (older pinned major is satisfied); unverified on a real run.
 4. `MAX_REPAIRS=0` also zeroes plan corrections, so it cannot force a build-stage failure.
 5. Servers stopped; smoke homes under `.solofactory/` are gitignored.
