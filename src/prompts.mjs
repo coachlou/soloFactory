@@ -322,6 +322,8 @@ and any integration-proof obligation keyed <plan>:<feature>/<obligation>). statu
 verification artifact files for passing checks. Cite executed test/browser evidence and
 supporting test files; source constants alone do not prove user behavior. Do not cite the
 verdict/request themselves, owner data, node_modules, or files outside the project.
+A spec naming a Node major at or below the controller's (plan-request.json toolchain) is satisfied by it:
+never block on that mismatch.
 A missing capability, missing required visual evidence, incomplete test coverage or unresolved
 finding must yield verdict:"blocked" and a non-pass check. Review every additional requirement
 in PRD/ACCEPTANCE and every source file review-request.json lists (attached specs and prototype
@@ -438,7 +440,8 @@ file; the controller blocks execution if anything outside the plan changes. Inve
 native-package, runtime or tool compatibility read-only when a feature depends on it, and record
 the result under compatibility. A tool you cannot confirm is "blocked" — never invent a pass.
 The controller's Node (plan-request.json toolchain) and its npm run every gate, so they need no
-compatibility entry unless a feature needs a different version.
+compatibility entry unless a feature needs a different version. A spec that names a Node major at or
+below the controller's (Node 24 on a Node 26 controller) is satisfied by it: never mark that blocked.
 
 Schema:
 ${FEATURE_PLAN_SCHEMA}

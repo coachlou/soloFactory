@@ -23,6 +23,7 @@ test("waiving a stuck BUG test removes it, records the owner's decision and re-o
   assert.equal(before.action, "prepare-plan");
   assert.equal(before.alternatives[0].proof, "BUG-1");
   await assert.rejects(factory.waiveProof(job.id, "BUG-9"), /not a stuck review test/);
+  await assert.rejects(factory.waiveProof(job.id, "BUG-1", "  "), /Say why/);
   const waived = await factory.waiveProof(job.id, "BUG-1", "fetch cannot set Host");
   assert.deepEqual(waived.bugProofs, []);
   assert.equal(waived.waivedProofs[0].id, "BUG-1");
