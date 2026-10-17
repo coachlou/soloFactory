@@ -459,6 +459,9 @@ Rules the controller enforces:
 - A feature with an empty closes is a named prerequisite: it needs its own observable acceptance
   and proof, and a later closing feature must depend on it.
 - Every feature declares writes: the paths, directories or globs it creates or edits, tests included.
+- An earlier feature's test must not pin behavior a later feature changes (run df6500ce: F1's test required 404 on a
+  route F2 turned into a 303, and F2 could not edit it). Write each test to assert only its own feature's contract; when
+  a later feature must change an earlier test's expectation, list that test file in the later feature's writes.
   List every file its obligations need changed, the UI files included. Features with no dependsOn path
   between them must write different files, so two features that need the same file get a dependsOn. package.json and factory.json belong to a foundation feature (one
   with no dependsOn), so put every dependency there. .factory/, package-lock.json, README.md and
