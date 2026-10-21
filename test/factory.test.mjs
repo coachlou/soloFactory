@@ -879,3 +879,26 @@ test("every planner, builder, repair and reviewer prompt keeps checks off Docker
   for (const [name, text] of Object.entries(all)) assert.ok(text.includes(prompts.HOST_RULE), `${name} lacks the host rule`);
   assert.doesNotMatch(prompts.CONTROLLER_FACTS, /Every proof of every built feature reruns/);
 });
+
+test("an agent turn that changes data/ is reported, and a turn that doesn't is not", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-data-"));
+  const store = new JobStore(root);
+  await store.init();
+  const job = await store.create({ brief, transcript, provider: "fixture" });
+  const appDir = store.appDir(job.id);
+  await mkdir(path.join(appDir, "data", "uploads"), { recursive: true });
+  await writeFile(path.join(appDir, "data", "keep.json"), "{}");
+  let touch = false;
+  const provider = { ...createFixtureProvider(), run: async ({ cwd }) => {
+    if (touch) await writeFile(path.join(cwd, "data", "uploads", "new.jpg"), "x");
+    return { sessionId: null, usage: null };
+  } };
+  const factory = new SoloFactory({ store, provider });
+  await factory.invoke(job, "quiet", "p", undefined);
+  touch = true;
+  await factory.invoke(job, "noisy", "p", undefined);
+  const touched = (await store.events(job.id)).filter((event) => event.type === "data.touched");
+  assert.equal(touched.length, 1);
+  assert.equal(touched[0].stage, "noisy");
+  assert.deepEqual(touched[0].files, ["data/uploads/new.jpg"]);
+});

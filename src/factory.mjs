@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { appendFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./process.mjs";
@@ -58,6 +58,17 @@ const liveByProject = new Map();
 
 // Test files and fixtures: never widened into, since editing another feature's tests can weaken them.
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
+
+// ponytail: size + mtime per file, not content hashes; data/ can hold large uploads.
+async function dataSnapshot(appDir) {
+  const root = path.join(appDir, "data");
+  const entries = await readdir(root, { recursive: true, withFileTypes: true }).catch(() => []);
+  const files = entries.filter((entry) => entry.isFile()).map((entry) => path.relative(root, path.join(entry.parentPath, entry.name)));
+  return new Map(await Promise.all(files.map(async (file) => {
+    const info = await stat(path.join(root, file)).catch(() => null);
+    return [`data/${file}`, info ? `${info.size}:${info.mtimeMs}` : "gone"];
+  })));
+}
 
 export class SoloFactory {
   constructor({ store, provider, maxRepairs = 2, batchRepairsFrom = 10, autoStartRepairs = true, commandRunner = runProcess, deployer, watch = watchConfig() } = {}) {
@@ -1143,6 +1154,7 @@ export class SoloFactory {
     const logPath = path.join(appDir, ".factory", "logs", `${label}.log`);
     await this.emit(job.id, { type: "agent.started", state: job.state, stage: label, feature: featureOf(job), promptChars: prompt.length, message: `${this.provider.id} started ${label}` });
     const monitor = this.monitorOf(job);
+    const dataBefore = await dataSnapshot(appDir);
     let spawned;
     let result;
     try {
@@ -1176,6 +1188,7 @@ export class SoloFactory {
       throw error;
     } finally {
       await this.releaseWorker(job, spawned);
+      await this.reportDataChanges(job, label, dataBefore, await dataSnapshot(appDir));
     }
     if (result.sessionId) {
       job.agentSessions ||= {};
@@ -1184,6 +1197,14 @@ export class SoloFactory {
     }
     await this.emit(job.id, { type: "agent.completed", state: job.state, stage: label, feature: featureOf(job), usage: result.usage ?? null, message: `${label} worker completed` });
     return result;
+  }
+
+  // data/ is gitignored so owner data survives commits and rewinds, which also hides it from the writes gate
+  // and the candidate hash. Agents are told never to touch it; report when one did. Report only, never blocks.
+  async reportDataChanges(job, label, before, after) {
+    const changed = [...new Set([...before.keys(), ...after.keys()])].filter((file) => before.get(file) !== after.get(file)).sort();
+    if (!changed.length) return;
+    await this.emit(job.id, { type: "data.touched", state: job.state, stage: label, files: changed.slice(0, 50), count: changed.length, message: `${label} changed ${changed.length} file${changed.length === 1 ? "" : "s"} in data/ (owner data, outside git): ${changed.slice(0, 5).join(", ")}${changed.length > 5 ? ", …" : ""}` });
   }
 
   // The one automatic transient continuation per stage invocation, shared by the provider's idle
