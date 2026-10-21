@@ -10,6 +10,10 @@ requests.total (number), requests.errors (number), latencyMs.average (number), a
 (an array of per-route aggregates, or an object keyed by normalized route path). Extra
 aggregate fields are fine; different names for these are a deployment failure.`;
 
+// Optional lint gate (readManifest/verify). Static checks catch a mistake class before tests or review spend turns on it.
+export const LINT_RULE = `Optionally add commands.lint (an argument array starting with npm, node or npx) when the
+stack has a standard linter or type checker; it then runs as a gate before the tests at every check.`;
+
 // Lou, 2026-10-16: Docker is not required. Run 4f2dd1cf turned a spec's "include a container configuration"
 // into executed Linux-image proofs, and an agent installed Docker to pass them. A Linux host gets its own
 // container build and test as a separate request, outside the factory, when one is actually needed.
@@ -145,7 +149,7 @@ factory.json (version 1, commands.install/test/build/start as argument arrays, h
 "/health", metricsPath "/_factory/metrics"), a production build, GET /health, and
 privacy-preserving GET /_factory/metrics (aggregate counters only — never retain bodies,
 headers, IPs, identifiers, or query strings). ${METRICS_SCHEMA} Each command must begin
-with npm, node, or npx; the start command must honor PORT.`
+with npm, node, or npx; the start command must honor PORT. ${LINT_RULE}`
       : `Dependencies already completed in this workspace: ${slice.dependsOn.join(", ")}. Use their
 outputs; do not re-implement or modify them.`;
   const acceptance = slice.acceptance.map((item) => `  - ${item}`).join("\n");
@@ -247,7 +251,7 @@ not retain bodies, headers, IPs, identifiers, or query strings. ${METRICS_SCHEMA
 
 Create factory.json with version 1, commands.install/test/build/start as argument arrays,
 healthPath '/health', and metricsPath '/_factory/metrics'. Each command must begin with npm,
-node, or npx. The start command must honor PORT. Add a concise README with one-command local
+node, or npx. The start command must honor PORT. ${LINT_RULE} Add a concise README with one-command local
 operation. Do not deploy; the controller owns deployment.
 
 Run the relevant tests and build yourself, repair anything you find, and leave the workspace
@@ -598,7 +602,7 @@ ${last ? "This is the last feature: also write or update README.md with concise 
 later features. ${followOn ? "Earlier releases built this app; extend it." : (slice.dependsOn.length ? "" : `If factory.json does not exist yet, create it (version 1, commands.install/test/build/start as
 argument arrays starting with npm, node or npx; start honors PORT; healthPath "/health";
 metricsPath "/_factory/metrics"), a production build, GET /health and privacy-preserving
-GET /_factory/metrics. ${METRICS_SCHEMA}`)}
+GET /_factory/metrics. ${METRICS_SCHEMA} ${LINT_RULE}`)}
 
 ${featureBlock("Feature (each proof.command names an entry in Proof commands)", `${JSON.stringify(feature, null, 2)}\nProof commands:\n${JSON.stringify(commands)}`, featureFile)}
 Original requirements this feature closes (prove the full wording):

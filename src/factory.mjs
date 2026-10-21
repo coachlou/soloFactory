@@ -1261,7 +1261,8 @@ export class SoloFactory {
     if (manifest.metricsPath !== "/_factory/metrics") {
       throw new FactoryError("invalid_manifest", "factory.json must expose metricsPath /_factory/metrics.");
     }
-    for (const name of ["install", "test", "build", "start"]) {
+    // lint is optional: an app that declares it gets a lint gate, others keep the three required gates.
+    for (const name of ["install", "test", "build", "start", ...("lint" in manifest.commands ? ["lint"] : [])]) {
       try {
         assertAllowedCommand(manifest.commands[name]);
       } catch (error) {
@@ -1465,7 +1466,8 @@ export class SoloFactory {
     // skipTest: a feature's own proofs are its acceptance; the whole suite runs at integration. A proof that
     // is the test command itself keeps the test gate, so its gate name and repair routing are unchanged.
     if (proofs.some((item) => JSON.stringify(item.proof.command) === JSON.stringify(manifest.commands.test))) skipTest = false;
-    const gates =["install", "test", "build"].filter((gate) => (gate !== "install" || includeInstall) && (gate !== "test" || !skipTest)).map((gate) => [gate, manifest.commands[gate]]);
+    // Lint runs before test: it is the cheapest gate, and it also runs on features that skip the suite.
+    const gates = ["install", "lint", "test", "build"].filter((gate) => manifest.commands[gate] && (gate !== "install" || includeInstall) && (gate !== "test" || !skipTest)).map((gate) => [gate, manifest.commands[gate]]);
     // Each distinct obligation proof is its own gate; one identical to an earlier command already ran.
     const seen = new Map();
     for (const gate of gates) {

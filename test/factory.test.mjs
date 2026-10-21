@@ -37,6 +37,8 @@ test("build prompts spell out the metrics field names the deployer validates", (
   for (const prompt of [buildPrompt(), specificationPrompt(), sliceBuildPrompt({ id: "S1", title: "Skeleton", dependsOn: [], acceptance: ["/health answers"] }, {})]) {
     for (const field of ["uptimeSeconds", "requests.total", "requests.errors", "latencyMs.average", "routes"]) assert.match(prompt, new RegExp(field.replace(".", "\\.")));
   }
+  // Every prompt that creates factory.json offers the optional lint gate, or no app would ever declare one.
+  for (const prompt of [buildPrompt(), sliceBuildPrompt({ id: "S1", title: "Skeleton", dependsOn: [], acceptance: ["/health answers"] }, {})]) assert.match(prompt, /commands\.lint/);
 });
 
 test("every worker prompt keeps owner data in data/ and tests out of it", () => {
@@ -207,6 +209,39 @@ test("a failed gate triggers bounded repair and a complete gate rerun", async ()
   const events = await store.events(job.id, 500);
   assert.equal(events.filter((event) => event.type === "gate.failed").length, 1);
   assert.ok(events.filter((event) => event.type === "gate.passed").length >= 6);
+});
+
+test("a declared lint command is a gate that fails into repair; a disallowed one is an invalid manifest", async () => {
+  const run = async (lint, failLint) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-lint-"));
+    const store = new JobStore(root);
+    await store.init();
+    const job = await store.create({ brief, transcript, provider: "fixture" });
+    const fixture = createFixtureProvider();
+    // The fixture app declares no lint; add one to its manifest after each agent turn that wrote it.
+    const provider = { id: "fixture", async run(options) {
+      const result = await fixture.run(options);
+      const file = path.join(root, "factory.json");
+      const manifest = JSON.parse(await readFile(file, "utf8").catch(() => "null"));
+      if (manifest) await writeFile(file, JSON.stringify({ ...manifest, commands: { ...manifest.commands, lint } }));
+      return result;
+    } };
+    const gates = [];
+    const commandRunner = async ({ gate }) => {
+      gates.push(gate);
+      return gate === "lint" && failLint-- > 0 ? { code: 1, output: "no-unused-vars" } : { code: 0, output: "passed" };
+    };
+    const factory = new SoloFactory({ store, provider, commandRunner, deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9972" }) });
+    return { result: await factory.start(job.id), gates, events: await store.events(job.id, 500) };
+  };
+  const { result, gates, events } = await run(["npx", "eslint", "."], 1);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(result.attempt, 1);
+  assert.equal(gates.indexOf("lint") < gates.indexOf("test"), true, "lint runs before the suite");
+  assert.equal(events.find((event) => event.type === "gate.failed")?.gate, "lint");
+  const bad = await run(["bash", "-c", "eslint"], 0);
+  assert.equal(bad.result.error?.code, "invalid_manifest");
+  assert.match(bad.result.error?.message, /^lint:/);
 });
 
 test("startup recovery makes in-flight state explicitly interrupted", async () => {

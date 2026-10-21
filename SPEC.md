@@ -107,7 +107,7 @@ reports the subscription/login problem; it never falls back to an API key.
 | Intake | Factory Guide skill | response schema and every required coverage item validate |
 | Spec + plan | subscription CLI | all three documents exist, are non-trivial, and no app code was created early |
 | Build | subscription CLI | `factory.json` is valid and commands are within the executable allowlist |
-| Verify | local controller | install, test, and build each exit 0 within timeout |
+| Verify | local controller | install, lint (when `factory.json` declares it), test, and build each exit 0 within timeout |
 | Repair | subscription CLI | bounded attempt completes; controller reruns all gates |
 | Review | subscription CLI | review completes; controller reruns tests and build |
 | Deploy | local controller | process stays alive, `/health` returns HTTP 2xx, and `/_factory/metrics` matches the schema (repaired, bounded, on mismatch) |
@@ -194,6 +194,10 @@ Every generated app must be a self-contained Node project with:
   "metricsPath": "/_factory/metrics"
 }
 ```
+
+An optional `commands.lint` (same form) adds a lint gate that runs before the tests at every
+check, including features whose suite is skipped; an app without it keeps the three required
+gates. Build prompts offer it when the stack has a standard linter or type checker.
 
 Allowed command executables in v0.1 are `npm`, `node`, and `npx`. This is not a security
 sandbox—package scripts are code—but it removes accidental shell interpolation and keeps
@@ -423,7 +427,7 @@ carry a strategy forward.
    `plan_blocked`. Approval is persisted (`job.approvedPlan`, `approved-plan.json`) and
    committed. No implementation turn runs before it.
 4. **Build each feature** through a persisted cursor (`job.featureCursor.substage`):
-   implementing → checking (install/test/build plus every distinct obligation proof as gate
+   implementing → checking (install/lint/test/build, lint only when declared, plus every distinct obligation proof as gate
    `proof-<id>`) → reviewing (a scoped review of only that feature's owned checks and
    obligations, bound to a hash of the candidate source; a reviewer that edits source voids
    its verdict and forces fresh checks; capped at 4 reviews, `review_unstable`) → committing

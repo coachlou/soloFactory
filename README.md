@@ -217,7 +217,7 @@ Every new run plans before it builds. After the specification, a planner writes 
 dependency-ordered feature plan (`.factory/slices.json` version 2) in which each must-have and
 acceptance scenario has exactly one closing feature with executable proofs. A fresh reviewer
 must approve that exact plan, bound to its digest, the frozen contract and a token, before any
-code is written. Each feature then passes install/test/build, its own proof commands, a scoped
+code is written. Each feature then passes install/test/build (plus lint when its `factory.json` declares one), its own proof commands, a scoped
 review bound to the reviewed source, and a checkpoint commit before the next one starts. The
 feature reviewer reads the controller's gate logs and case results instead of rerunning those
 commands. After a repair, the gate that failed runs first (behind install), then the full set.
