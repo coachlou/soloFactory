@@ -80,10 +80,10 @@ A6, B5 and U2 all run **the same install command**, and it is always safe on an 
 install: it refreshes the machinery in `.ailib/` and `start.sh`, keeps `.aai/` if it is
 there, and never touches `projects/`. It comes in two forms:
 
-- **Online (default):** the `curl … bootstrap.sh` line shown in those steps. It downloads
-  the release from a private GitHub repo, so it needs the `gh` CLI signed in to an account
+- **Online (default):** the `gh api … bootstrap.sh` line shown in those steps. It downloads
+  the release from a private GitHub repo (the AIMM members' repo, `coachlou/aimm`), so it needs the `gh` CLI signed in to an account
   with access (`gh auth status`), or `GITHUB_TOKEN` set. Without that it stops with a line
-  saying to *ask for an invite* — that is not a broken machine; switch to the zip.
+  saying to *ask for an invite to the AIMM repo* — that is not a broken machine; switch to the zip.
 - **From a zip:** if the owner was sent a `solofactory-<version>.zip` (testers are), have
   them unzip it — double-clicking it is enough — and find the installer:
 
@@ -95,7 +95,7 @@ there, and never touches `projects/`. It comes in two forms:
   > it prints.
 
   Use the newest path it prints (highest version) as `<installer>`; if it prints nothing,
-  ask where they saved the zip. Then, wherever a step shows the `curl` line, run this
+  ask where they saved the zip. Then, wherever a step shows the `gh api` line, run this
   instead:
 
   ```sh
@@ -107,6 +107,25 @@ there, and never touches `projects/`. It comes in two forms:
   *from*, and the install itself still lands in the Ubuntu home folder.
 
 ---
+
+## GitHub access — before the online install
+
+The online install reads the AIMM members' repo, so it needs the GitHub CLI (`gh`) signed
+in to the owner's GitHub account — the one that was added to `coachlou/aimm`. Zip installs
+skip this. Check first:
+
+```sh
+gh auth status
+```
+
+- **`command not found`** — install it. macOS: `brew install gh` if `brew` exists; otherwise
+  have them download the installer from https://cli.github.com and open it. Ubuntu/WSL:
+  `sudo apt update && sudo apt install -y gh`. Then check again.
+- **Not logged in** — `gh auth login`: GitHub.com, HTTPS, "Login with a web browser". It
+  prints a one-time code; they paste it into the page it opens and approve. Then check again.
+- **Signed in but the install says it cannot read `coachlou/aimm`** — they signed in with a
+  different GitHub account than the one that was invited. Run `gh auth status` and compare
+  the username to the invite; `gh auth login` again with the right one.
 
 ## Step 0 — New install, or an update?
 
@@ -312,13 +331,13 @@ run it again.
 
 If you skipped the Step 0 check, run it now: an existing `~/solofactory` means this is an
 update — go to **Updating an existing install** instead, so the owner gets the update checks.
-Sent a zip? Use the zip form from **The install command**.
+Sent a zip? Use the zip form from **The install command**. Otherwise do **GitHub access** first.
 
 Ask where it should live. Default to a folder named `solofactory` in their home directory,
 and do not make them choose a path if they have no opinion.
 
 ```sh
-cd ~ && curl -fsSL https://raw.githubusercontent.com/coachlou/ambient-library/main/library/ambient-folder/bootstrap.sh | bash -s -- solofactory solofactory
+cd ~ && gh api -H 'Accept: application/vnd.github.raw' repos/coachlou/aimm/contents/aai-release/solofactory/library/ambient-folder/bootstrap.sh | bash -s -- solofactory solofactory
 ```
 
 > This is the real one — it sets up SoloFactory in a folder called `solofactory` in your home
@@ -568,7 +587,7 @@ command -v claude
 
 If you skipped the Step 0 check, run it now: an existing `~/solofactory` means this is an
 update — go to **Updating an existing install** instead, so the owner gets the update checks.
-Sent a zip? Use the zip form from **The install command**.
+Sent a zip? Use the zip form from **The install command**. Otherwise do **GitHub access** first.
 
 **It must live inside the Ubuntu home folder, never in `/mnt/c/`.** Windows drives mounted
 into Linux have different file permissions and are dramatically slower, and git behaves
@@ -582,7 +601,7 @@ their folder). Never copy or move the real folder into OneDrive — sync will co
 repo. The path only opens while WSL is running.
 
 ```sh
-cd ~ && curl -fsSL https://raw.githubusercontent.com/coachlou/ambient-library/main/library/ambient-folder/bootstrap.sh | bash -s -- solofactory solofactory
+cd ~ && gh api -H 'Accept: application/vnd.github.raw' repos/coachlou/aimm/contents/aai-release/solofactory/library/ambient-folder/bootstrap.sh | bash -s -- solofactory solofactory
 ```
 
 > This is the real one — it sets up SoloFactory. Send me everything it prints.
@@ -709,7 +728,7 @@ Updating underneath a running server leaves it serving stale code until restarte
 Sent a zip? Use the zip form from **The install command** — same result.
 
 ```sh
-cd ~ && curl -fsSL https://raw.githubusercontent.com/coachlou/ambient-library/main/library/ambient-folder/bootstrap.sh | bash -s -- solofactory solofactory
+cd ~ && gh api -H 'Accept: application/vnd.github.raw' repos/coachlou/aimm/contents/aai-release/solofactory/library/ambient-folder/bootstrap.sh | bash -s -- solofactory solofactory
 ```
 
 > This updates SoloFactory to the latest version. Your projects and settings are left exactly
@@ -840,7 +859,7 @@ Work these yourself. Do not read this table out loud.
 | Run fails with `prompt_too_large` ("over SoloFactory's 200000-character prompt limit") | A factory defect: the input cannot fit, so retrying cannot help and no agent was started | Do not retry. Have the owner use **Report this run** (or Feedback) in the top bar |
 | `Port 4173 is in use by another app` | Another app already uses port 4173 | Start with a different port: `cd ~/solofactory && PORT=5000 bash start.sh`, then use `http://127.0.0.1:5000` everywhere this guide says 4173 |
 | `SoloFactory is already running at …` | A factory from an earlier window is still running | Open that address; don't start a second one |
-| `ask for an invite to that repo` right after the `curl` line | No GitHub access to the private release | `gh auth login` with an account that has access, or use a zip — see **The install command** |
+| `ask for an invite to that repo` right after the `gh api` line | No GitHub access to the AIMM members' repo | `gh auth login` with an account that has access, or use a zip — see **The install command** |
 | `rsync: command not found` | Ubuntu missing rsync | B2 |
 | `curl: command not found` | Ubuntu missing curl | B2 |
 | `git: command not found` | git missing | A3 / B2 |
