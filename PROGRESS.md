@@ -1,5 +1,24 @@
 # SoloFactory progress
 
+## 0.10.1: real-provider smoke fixes (2026-10-17)
+
+Real-provider smoke (SMOKE-0.10.0-REPORT.md): Claude 3/3, Codex 2/3 after fixes. Fixed: owner waiver
+for a faulty reviewer BUG test (required reason, repairer note, visible on completed runs);
+reviewer tests sanity-check their harness; newer Node accepted; planner no longer lets an earlier
+feature's test pin behavior a later feature changes. Verified on real runs: Codex Habit Ledger and a
+new Reading List brief (Node 24 spec) both completed. Waiver verified through the real server and API
+with a hand-planted BUG proof; no real reviewer produced a wrong test in the final runs.
+
+## Requested next: feature and slice recovery (2026-10-07)
+
+First implementation added after the second broad recovery cycle failed. Owner
+requested staged recovery within a preserved run after the
+photo-library review exposed a broad unfinished backlog. See
+[feature-slice-recovery-spec.md](docs/feature-slice-recovery-spec.md) for the
+flow, preservation rules, implementation entry points, and acceptance tests.
+The current photo-library run is parked, so installation can occur without
+interrupting its worker. Verification and installation status follow below.
+
 ## Outcome
 
 A local-first web application whose subscription-backed Factory Guide interviews one
@@ -600,3 +619,294 @@ are the parts that do, in build order.
 
 Deferred: routing by file sensitivity (secrets/infra → first-party frontier only) matters
 only once a cheap third-party provider exists.
+
+## 2026-10-07 — completion gate defect
+
+Observed household-photo-library runs completed although REVIEW.md listed missing core features and acceptance evidence. Added controller-enforced structured verdict covering intake must-haves and scenarios, fresh run token + contract digest, file evidence validation, bounded repair, resume validation and re-review after post-review/deployment repairs. Contract narrowing during repair is rejected. Added regression tests for single/slices, rejected/missing/stale/partial verdicts, missing evidence, repair budget, resume and scope narrowing. Existing unrelated untracked archives/.aai preserved. Local installation update follows passing checks; no public release/push.
+
+## 2026-10-07 — actionable review recovery
+
+Review recovery diagnostics include every unfinished MH/SC with its full requirement, all reviewer blockers, artifact paths and repair-budget guidance. Dashboard Guide receives the selected project’s latest run snapshot and matching recovery evidence; it must not treat an existing PRD as proof of delivery or claim chat resumes execution. Matching older terse failures are enriched read-only without rewriting run history.
+
+Added regressions for complete repair diagnostics and Guide/recovery API context, including preservation of stored history. Full npm test: 103 pass, 0 fail. No generated application changes or subscription build started.
+
+## 2026-10-07 — owner-authorized review recovery
+
+An explicit resume of a review-rejected run now grants another bounded repair cycle without resetting attempt numbers, deleting previous failure files, or changing the frozen contract. Automatic retries never renew their budget. Added regressions proving a resumed exhausted run can repair and pass, and a still-incomplete run parks again within the new bound.
+
+Validation: 105 tests pass. Installed local snapshot 3ca34d262676 in photo-library-prototype; owner-authorized same-run recovery is active.
+
+## 2026-10-07 — feature recovery implementation
+
+Added separate same-run recovery planning/approval/execution, full gap coverage and stale-approval checks, source/review preservation, scoped original-requirement evidence gates, durable per-feature checkpoints and repair bounds, scheduler controls and dashboard progress. Full npm test: 122 pass, 0 fail; diff check clean. Paused/failed runs supported; active runs must first use existing Pause. Per-feature live deployment remains deferred.
+
+Recovery refinements: ready-plan feedback and revision history, prerequisite-only slices, full original owned-check reviews, correct per-feature/final integration budget bounds, and queued follow-on releases allowed behind recovery. Full suite 124/124; an existing 100ms process-start timing test failed once under load, then passed alone and in the full recheck. Browser confirmed plan list, acceptance disclosure, feedback and approval controls. Latest source needs installation after the current planner parks.
+
+Final local installation: d7806ee5f25c; 124 tests pass. Approved corrected 15-feature photo-library recovery is running on the same run, first compatibility step active. Full app completion remains pending.
+
+## 2026-10-09 — pre-build feature decomposition (spec/PRD-prebuild-feature-decomposition.md)
+
+Every new run now plans before it builds: specification → feature plan (`slices.json` v2,
+validated by `validateFeaturePlan`) → fresh plan review bound to plan digest, contract digest
+and token → per-feature implement/check (gates + obligation proofs)/scoped candidate-bound
+review/checkpoint commit through a persisted cursor → unchanged final review and deploy.
+Budgets: 2 plan corrections, 2 repairs per feature, 2 for final integration, never refilled on
+resume. `POST /api/jobs` defaults to planned features and refuses any other `sdlc` (400); the
+UI strategy selector is gone. Historical single, v1 slice and feature-recovery runs still
+resume (legacy tests now mark themselves `sdlc: "single"` or drop `planVersion`).
+
+New `test/features.test.mjs` covers matrix rows 5–12 and 15 (planner app mutation, wrong verdict digest, reviewer
+plan edit, stale plan on resume, scoped review, missing behavior with budget not refilled,
+separate final budget, reviewer candidate edits and review cap, pause-at-review, failed
+checkpoint, proof gates). A mutation that refills the feature budget on resume fails it.
+The e2e HTTP journey now runs the default planned path and the 400 on `sdlc: "single"`.
+
+Validation: `node --test test/wbs.test.mjs test/review.test.mjs` 39/39; `npm test` (distro
+precheck ok) 145/145; `git diff --check` clean. Not installed; no active run was touched.
+Claude now routes `feature-plan` to the reasoning profile; `plan-correction-N` stays on opus (plan with
+the stronger model, build with the coding model). Codex still has one profile for every stage.
+
+## 2026-10-09 — repair-plan recovery path (exhausted review budget)
+
+Exhausted review → **Prepare repair plan** is the primary action; Resume is refused (409 /
+`repair_plan_required`) and no longer renews the budget or reruns the same review (old
+owner-resume renewal removed). The repair plan is a v2 feature plan validated by
+`validateFeaturePlan` with `sources`: every obligation cites a `.factory/` contract or upload
+path plus locator, with an executable proof. It goes through a plan review and up to two
+corrections, then fails before any build. Approval binds plan digest, reviewed plan, baseline,
+source review token, input snapshot (sha256 of contract + uploads) and contract. Replanning is
+allowed from a parked running phase (mid-phase exhaustion). The dashboard lists the gaps,
+proposed features, verification checks, blockers and allowance. Prior phases, plans and
+evidence are preserved, and the full final review still gates completion. Tests cover all
+features passing then the final review failing, exhausted Resume, omitted detailed
+requirements (uncorrected/corrected), stale approval (specs, reviewed plan), interrupted and
+successful recovery.
+PRD §11: `originalChecks` is still MH/SC-only. Detailed obligations now reach recovery via cited
+sources + reviewer comparison; new-run feature planning does not yet receive sources.
+Validation: `npm test` (distro precheck ok) 154/154; `git diff --check` clean. Docs (README/SPEC)
+updated identically. Not committed, not installed; no active run touched.
+
+## 2026-10-09 — Codex review fixes: recovery shares feature safeguards
+
+1. New-run feature exhaustion → Prepare repair plan works (reads `featureCursor.reviewRequest`;
+   button shown); verified features stay done, gaps = approved plan's unclosed checks.
+2–3, 6. Recovery runs through `proveFeature` with its own cursor: candidate-bound reviews,
+   void-on-reviewer-edit, strict `checkpoint_failed`, substage resume (no re-implementation).
+4. Input fingerprint (contract + uploads) enforced in plan currency, recovery execution, every
+   final-review loop (`inputs_changed`), `validateReview` (so deploy too).
+5. New-run planning gets `sources`; obligations cite path + locator; plan audit blocks omissions.
+Regressions: one per finding in features/feature-recovery/review tests.
+Superseded by round 2: the upload edge and the §11 gap are fixed below.
+Validation: `npm test` 164/164; `git diff --check` clean. README/SPEC identical. Not committed.
+
+## 2026-10-09 — Codex review round 2
+
+1. Run input manifest = uploads the run's own transcript attached (`runInputs`); other briefs'
+   uploads never enter it. Regression: features (mid-build + mid-review), review unit, e2e HTTP.
+2. Changed inputs: `inputs_changed` everywhere, Resume refused, Prepare repair plan replans
+   without a review (`replanForInputs`): names changed files, keeps verified features, reopens
+   features that cited a changed file.
+3. Legacy recovery phase without a cursor resumes at `checking`, budget untouched, no rebuild.
+4. PRD §11: `proof.pending: "integration"` — skipped at feature time, the checks it proves read
+   "pending integration proof", run as `proof-<id>` before the final review, final review covers it.
+   Every feature still needs one proof runnable at build time.
+Validation: `npm test` 172/172; `git diff --check` clean. README/SPEC identical. Not committed.
+Mutation-checked: legacy migration, pending append, pending feature filter each fail their test when removed.
+Left as-is: legacy v1 recovery obligations with `proof: null` stay scoped-review-only (unchanged behavior).
+
+## 2026-10-09 — Codex review round 3: outstanding-proof ledger
+
+Durable `job.outstandingProofs` written when a feature is verified (`recordPendingProofs`, wbs.mjs);
+gates, final review, recovery planning and the dashboard read `pendingProofs(job)` instead of
+re-deriving from whichever plan is current.
+1. Pending proofs survive later repair plans: entries stay `pending` until the gate passes;
+   `replanForInputs` marks a reopened feature's entries `superseded`.
+2. Key `<plan digest 8>:<feature>/<obligation>` is the review check id and gate name — no
+   collisions between an original and a repair plan sharing `POP-1`.
+3. Failed proof gate with budget spent: `pendingProofFailure` → `repairsExhausted`, Resume refused,
+   `replanForProof` builds the request from the obligation, command, expect and output tail
+   (`review: null`); checks = the obligation's refs.
+4. `pendingChecks(slice, { plan, outstanding })`: a check stays pending if any obligation in the
+   plan or the ledger supports it, not only the closing feature's own.
+Validation: `npm test` 176/176; `git diff --check` clean. README/SPEC identical paragraph. Not committed.
+Mutation-checked: removing the ledger write fails 5 of the 6 round-3 tests (the plan-prerequisite case is covered by the plan path, as designed).
+Left as-is: no `supersedes` schema field — only inputs-driven reopening supersedes; a repair plan that re-implements
+a feature does not retire its earlier proof, which still has to pass. No shipped run has pending proofs
+(feature uncommitted), so legacy jobs without the ledger need no migration.
+Also: reviewer prompt now says to copy every requested check id exactly (ledger keys are not MH-n/SC-n);
+dashboard lists outstanding integration proofs. Post-deploy repair (factory.mjs ~698) reruns the
+outstanding proofs before its re-review — intended, the app changed. Untested edges: pause/resume
+mid-final-verification with ledger entries (state-persisted, gates rerun like any other); a reopened
+feature whose supporting pending obligation lives in a non-reopened feature (entry stays pending — correct).
+
+## 2026-10-09 — Codex round-4 fixes completed
+Owner authorized fixes on wip/feature-slice-recovery. Outcome: recover deduplicated and
+standalone integration-proof failures; preserve unambiguous proof identity; resolve pending
+status against the verified source and rerun after repairs. Files: proof ledger, factory gates,
+repair planning, dashboard, regression tests and shared docs. Proof: reproduce both dead ends,
+identity collision and success/source-change transitions, then full suite and HTTP checks.
+No installation, live-run changes, commit or push in this task.
+
+Implemented all four findings. Gates retain all ledger keys when commands are deduplicated,
+including commands shared among manifest gates. Failure mappings are authoritative for new
+runs, with command lookup for older error records; feature failures do not masquerade as
+integration failures. Repair planning includes every failed obligation, using its full ledger
+key as a standalone check when it has no MH/SC refs. Full digest and dot-separated gate
+components prevent prefix/boundary collisions. Passed proof evidence records candidate and
+verification time after integration gates plus final review, invalidates at stage/failure
+boundaries if source changed, and reruns on all integrated verification passes. Ordinary
+installation can create a lockfile before test evidence is bound. Dashboard and shared
+README/SPEC wording updated; input-driven reopening also supersedes passed entries.
+Regression evidence: five tests failed before implementation; eight new tests cover these
+paths, source-change/deployment repair, plan-bound pending status, legacy failure mapping,
+shared manifest commands and installation lockfile creation. Final npm test: 184/184,
+including 14 HTTP tests; distro precheck and git diff --check pass; browser script syntax
+check passes. Tests use isolated fixture projects, fake workers and deployments; no real
+provider run or live installation exercised. Preserved Claude's prior changes. All changes
+remain uncommitted; nothing installed, resumed or pushed. Next: Claude can review this
+round's source/tests alongside the earlier PRD work before committing the combined branch.
+
+## Real-provider recovery smoke test (2026-10-10, branch wip/feature-slice-recovery) — PASS (fix uncommitted)
+
+Gate for merge/release of 404d4b9. Both runs on Claude.
+
+- Knob: `SOLOFACTORY_MAX_REPAIRS` in src/server.mjs (uncommitted, default 2). 184/184 tests pass.
+- Servers (gitignored .claude/launch.json): `smoke-natural` :4201, `smoke-recovery` :4202,
+  `smoke-recovery-zero` (:4202 with MAX_REPAIRS=0). Homes under `.solofactory/smoke-*`. Never touch :4173.
+- Brief: `.solofactory/smoke/job-ordered.json` (fixed order so feature 1 owns a proof that needs feature 3).
+
+Natural run 21b70200 — PASS (completed 14:14Z, app live):
+- Ledger entry SKELETON-STORE-ADD/E2E-SEEDED-SUMMARY-DEFERRED pending after feature 1.
+- "Feature 3/3 verified; MH-2, SC-3 pending integration proof".
+- Proof gate ran and passed at integration; key in final review-request.json; entry → passed with candidate.
+
+Recovery run 42852426 — PASS after one fix:
+- Ledger entry SKELETON-STORAGE/SKEL-SEEDED-SCRIPT pending after feature 1 (full-digest key and gate).
+- Fault: seed in scripts/populated-summary.mjs 20 → 21 days. Planted before resume, feature 3's own proof
+  caught it and repaired it; replanted the instant "Feature 3/3 verified" was emitted (budget 0) → final
+  integration failed on proof-<digest>.SKELETON-STORAGE.SKEL-SEEDED-SCRIPT, quality_gate_failed, budget 1/1.
+- Restarted :4202 at default, POST recovery-plan: request.failedProof targets the right key (PASS).
+- BUG: plan rejected 3 times — "Feature SEEDED-SUMMARY-REPAIR depends on unknown slice MONTHLY-SUMMARY"
+  (also SKELETON-STORAGE, MARK-DONE). Claude lists completed features in dependsOn; validateRecoveryPlan
+  (src/feature-recovery.mjs) only accepts ids in the repair plan. Run now failed/unexpected_error.
+  FIX (Lou approved, uncommitted): validateRecoveryPlan drops dependsOn entries in request.completed;
+  test "v2 repair plans may depend on already completed features but not on unknown ones". 185/185.
+- Re-requested plan on fixed code: reviewer approved first try (digest bf1c3c7a…), one feature
+  SEEDED-SUMMARY-REPAIR closing SC-3/MH-2, proof `node scripts/populated-summary.mjs`. Approved via recovery-start.
+- Repair restored the 20-day seed; proof gate passed at 14:32:46Z; entry → passed with candidate; run completed.
+
+Uncommitted: src/server.mjs (knob), src/feature-recovery.mjs + test/feature-recovery.test.mjs (fix).
+Merge/release remains Lou's separate decision.
+
+## Provider diagnostics and planning continuation (2026-10-10, branch wip/feature-slice-recovery) — implemented, uncommitted
+
+PRD: `spec/PRD-provider-diagnostics-and-planning-continuation.md`.
+- A. `runProcess` returns `lines`, a ring of complete output lines capped at 200K. Codex and Claude diagnostics read those lines, not the
+  character tail, so a JSON record cut at the cap is never plain-text "auth" evidence. `server.mjs ensureRecovery` already
+  reads whole log files.
+- B. `continuationAction(job, {maxRepairs, busy})` in `factory.mjs` is the one policy:
+  - plan_failed after plan review still blocks with corrections spent → revise-inputs (`recovery-plan` refuses until inputs change)
+  - planning/plan_failed otherwise (interruption) → retry-plan (`recovery-plan`)
+  - ready → approve-plan (`recovery-start`)
+  - exhausted or changed inputs → prepare-plan
+  - running or otherwise → resume
+  - busy, dismissed or cancelled → none
+
+  It feeds `buildRecovery` (canResume and wording), the `runResume` refusals (codes unchanged), the `/resume` 409 (`nextAction`), and
+  `withContinuation` in `annotateJobs`, which derives stale saved banners without writing them. The dashboard uses `nextAction`.
+  A planning retry keeps the spent plan corrections (Lou, 2026-10-10: resetting would let retries bypass the limit); the budget is bound to the input fingerprint: revised inputs start fresh, and retries, feedback revisions or a return to earlier inputs share that fingerprint's spent corrections until a plan executes. Switching back to inputs whose fingerprint exhausted its corrections is refused before any turn (`plan_inputs_unchanged`); approval alone never resets the budget.
+- A trailing record cut off by a kill is dropped from diagnostic lines; a trailing plain-text line still counts.
+- Tests: 194/194 and the distro precheck pass. New tests cover acceptance 1–6 on both Codex and Claude, including the dashboard source check. No real-provider smoke test was run,
+  and the photo-library run was not touched.
+
+## Run watchdog and bounded recovery (2026-10-10, branch feature/run-watchdog off 77159ff) — implemented, committed, not installed
+
+PRD: `spec/PRD-run-watchdog-and-bounded-recovery.md` (its header names wip/feature-slice-recovery; work is on feature/run-watchdog).
+- `src/watchdog.mjs`: `RunMonitor` (one unref'd timer per active run, monotonic clock, observe-only), `supervisionStatus`,
+  `failureSignature`/`repeatedFailure`, `incidentRecord`, `workerAlive`, `watchConfig` (`SOLOFACTORY_PROGRESS_MINUTES` 20, 0–240;
+  `SOLOFACTORY_LOOP_THRESHOLD` 3, 2–10).
+- Controller: `trackWorker`/`releaseWorker` persist `job.worker` (pid); `allowContinuation` persists the one continuation per stage
+  in `job.watch.continuations` before Codex dispatches it; `repair` records `job.watch.attempts` and stops on an unchanged loop
+  (original code + `details.loop`); `fail` saves `watch.observed` + `watch.incident`; `activate` clears those two (never attempts or continuations).
+- Restart: `recoverInterrupted` parks a live recorded pid as `worker_unconfirmed` → `stop-worker` until it exits.
+- API: health `workers[]`, job `supervision`. Dashboard: supervision line, incident list.
+- Tests: 203/203 pass with the distro precheck; mutations of loop, accounting, observation and incident clearing each fail a test.
+- Gaps: no controller-level Claude-silence test; continuation test drives `invoke`, not `start`; no concurrent-click test: the existing
+  `factory_busy` guard has no test at all; legacy runs have no recorded pid; grandchildren are not tracked.
+- With the default maxRepairs=2 and threshold 3 the loop stops at the same point the budget does; it saves turns only with a larger
+  budget (recovery phases, `SOLOFACTORY_MAX_REPAIRS`).
+- Blocked: real-provider smoke test (no paid calls; live photo-library run untouched). Do not install or merge until it passes.
+
+## Real-provider smoke test of 77159ff (2026-10-10, isolated fixture) — PASS, two bugs found
+
+Clean detached worktree at 77159ff (main checkout had foreign uncommitted watchdog edits), :4204, home
+`.solofactory/smoke-v3`, project habit-v3, run 2026-10-10-3cd9dae7, Claude, brief `.solofactory/smoke/job-ordered.json`.
+- Features 3/3 verified. A seed fault tripped the app's own unit tests first (test gate, 2/2 → Resume; only proof and review
+  exhaustion count as exhausted). An e2e-only fault (`/health` check) then failed the integration proof on Resume without
+  renewing the budget → nextAction prepare-plan. PASS.
+- MAX_REPAIRS=0, recovery-plan: the real reviewer blocked (4 proof-coverage blockers) → plan_blocked, phase.blocked,
+  nextAction revise-inputs. PASS.
+- Second recovery-plan on unchanged inputs: 409 "These inputs have exhausted their plan corrections…", nextAction
+  revise-inputs, 4 blockers, agent.started 15→15, state.json byte-identical. PASS.
+- Not exercised here: revised inputs → fresh budget → approve → repair (fixture-tested; approve path passed in run 42852426).
+- BUG 1: stopping the server mid-planning recorded `job.cancelled` "The owner cancelled this run."
+- BUG 2: for that cancelled run continuationAction offered retry-plan (phase check precedes the cancelled check), but
+  planFeatureRecovery rejects `cancelled` → "Repair planning requires an unresolved parked run." and flipped the run to
+  failed/unexpected_error (after which retry worked). Policy and executor disagree. Fixed in 7579594: shutdowns park as interrupted, and cancellation is final (continuationAction checks cancelled first).
+
+## Exhausted plan corrections: supervised plan amendment (2026-10-10, branch fix/exhausted-plan-amendment off 1d5d37b) — implemented, committed, not installed
+
+PRD: `spec/PRD-exhausted-plan-amendment-recovery.md`.
+- Policy: `continuationAction` returns `amend-plan` (endpoint `recovery-review`, alternative `revise-inputs`) for `plan_blocked`, and `retry-plan`
+  labelled "Resume plan review" for an interrupted amendment. Controller, API and dashboard all read it.
+- Controller: `amendRecovery` validates (`assertPlanAmendable`) before and again under writer ownership (`activate`'s new `admit` hook runs before
+  the incident-clear write, so a refusal leaves state.json byte-identical and starts no turn). It reuses `draftRepairPlan`'s review, token, digest
+  and approval path: a new phase (same request) with the submitted plan, no planner call, `amendment: true` plus prior blockers in the review
+  request, `blocked` after one review. Corrections are neither spent nor renewed. Duplicates are caught by `planKey` (canonical JSON minus
+  `requestId`) against `phase.reviewedPlans` across the same input fingerprint (legacy phases: the on-disk plan).
+- API: `POST recovery-review` (4MB plan limit, 413 when exceeded, 400/409 from the shared preflight), `GET recovery-plan-packet` (attachment,
+  only while `amend-plan`). `readBytes` now drains an oversized body so the client receives the 413.
+- Dashboard: explanation, blockers, help-packet link, advanced file input (selection kept in `state.amendment`), alternative revise-inputs button.
+- Tests: `test/plan-amendment.test.mjs` (controller and HTTP; PRD acceptance 1-9), existing recovery and e2e tests updated for the new action; 10 is
+  covered by the existing fresh-budget assertions kept in `feature-recovery.test.mjs`.
+- Gaps: no real-provider smoke test; no browser-driven test of the file input (source checks only); duplicate detection for legacy phases is
+  best-effort (only the last on-disk plan); Node 24 was not available, tests ran on Node v26.5.0.
+
+## Smoke 11 vs smoke 9: pipeline optimizations (2026-10-12, wip/feature-slice-recovery)
+
+Smoke 11: project smoke-cases-11, run 2026-10-12-20e1e4ce, home `.solofactory/smoke-watchdog`, smoke 9 brief, HEAD 3fa33da, Claude
+with Opus reasoning. Completed and deployed. Baseline: smoke 9 (07631040, Fable reasoning).
+
+| | Smoke 9 | Smoke 11 |
+|---|---|---|
+| Wall / agent / gate time | 3289 / 3258.5 / 29.2 s | 2110.3 / 2098.4 / 10.6 s |
+| Planning turns (incl. spec) / time | 6 / 1461 s | 5 / 435 s |
+| Plan correction | 533 s | 138 s |
+| Final review | 297.7 s | 64.3 s |
+| Full-suite `test` runs / installs | 5 / 3 | 2 / 1 |
+| Tokens in / out | 21.7M / 221K | 14.2M / 134K |
+
+- Planning turns missed the ≤4 target by one: the builder-side check-plan ran (not denied after 3fa33da) but one correction remained.
+- T5 ran correctly: the scoped final reviewer fixed a real crash (`new URL(req.url)` outside the try in src/server.js) and added a test.
+- Last feature wrote the README. F1 needed one 354 s repair because its script proof printed its own ok lines and recorded no
+  cases; c28b480 tells builders cased proofs must run under node:test.
+- Caveat: Opus vs Fable confounds the planning and review timings. Smoke 10 (Fable) hit the subscription limit after 9 m / $6.48;
+  c4a7c0e makes Opus the reasoning default.
+- Next cost centre: feature builds, ~1120 s of 2100 s (F1 516 s + repair).
+
+## Pipeline efficiency audit (2026-10-13, wip/feature-slice-recovery)
+
+Smokes 13 and 14 (all Opus, reasoning effort low): ~15 min and ~$6.70 list per run. Shares in smoke 14: planning
+5 turns 34%, feature builds 42%, feature reviews 18%, final review 7%. About 56% of spend is cache writes (files and
+tool output entering a turn), 14% cache reads, so inlining files into prompts would not help.
+
+- **≤4 planning turns: retired (Lou, 2026-10-13).** Smokes 11-14 all ran spec → plan → review-1 blocks on one real
+  semantic defect (date injection, persistence path, route key, unmark semantics) → patch → review-2 approves. The
+  checklist was already given to the planner, so these are fresh-reader catches; review-2 (~$0.29, 4 tool calls) is
+  the cheapest turn and the one that validates the fix. Five planning turns is the expected shape.
+- **Repair planning got main planning's two fixes:** `repairCorrectionPrompt` now patches only what blockers name
+  (was: re-read every source, rewrite the whole plan), and automatic repair-plan re-reviews get `REREVIEW` scoping with
+  the phase's `blockerHistory` as `priorBlockers` (was: full re-audit each round). Smoke 8's recovery spent ~$14 on a
+  plan and two reviews without approval. Owner amendments keep their existing prompt. Not yet exercised on a real run.
+- Not changed: feature reviews (0 blocks in the last 9, but run 8's caught a real defect; a Sonnet trial needs a
+  per-stage model override first), final review scope, compact planner inputs (still waits on its trigger).

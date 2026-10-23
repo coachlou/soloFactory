@@ -32,7 +32,6 @@ async function boot() {
   if (!first) showError(new Error(NO_PROVIDER));
   renderMessages();
   renderCoverage();
-  renderSdlcOptions();
   await refreshProjects();
   const savedId = localStorage.getItem("solofactory.currentJob");
   const candidate = state.jobs.find((job) => job.id === savedId)
@@ -53,6 +52,7 @@ async function refreshProjects() {
   renderProjects();
   renderRuns();
   renderBackgroundBanner();
+  renderAttention();
   if (!$("#board-view").classList.contains("hidden")) renderBoard(await api("/api/board"));
 }
 
@@ -107,7 +107,9 @@ function boardCard(card) {
       bar.append(seg);
     }
     if (card.slices.repairs && bar.lastChild) bar.children[Math.max(0, card.slices.done - 1)].classList.add("repaired");
-    bar.title = `${card.slices.done}/${card.slices.total} slices${card.slices.repairs ? ` · ${card.slices.repairs} repair${card.slices.repairs === 1 ? "" : "s"}` : ""}`;
+    // Feature status: verified, then the cursor's substage (or blocked when parked), then planned.
+    const status = card.slices.current ? ` · ${card.slices.current} ${PARKED.includes(card.state) ? "blocked" : card.slices.substage ?? "planned"}` : "";
+    bar.title = `${card.slices.done}/${card.slices.total} features verified${status}${card.slices.repairs ? ` · ${card.slices.repairs} repair${card.slices.repairs === 1 ? "" : "s"}` : ""}${card.slices.remainingRepairs != null ? ` · ${card.slices.remainingRepairs} repair${card.slices.remainingRepairs === 1 ? "" : "s"} left` : ""}`;
     button.append(bar);
   }
   if (card.blockedBy) button.append(Object.assign(document.createElement("small"), { className: "blocked", textContent: `waiting on recovery of ${card.blockedBy}` }));
@@ -164,6 +166,31 @@ function renderRuns() {
     return option(job.id, `${marker}${projectName(job)} · ${job.state} · ${job.createdAt.slice(0, 10)}`);
   }));
   select.value = state.job?.id ?? "new";
+}
+
+// A parked latest run blocks its project until the owner acts, so it is announced on every screen
+// and in the tab title, whichever run or project is open. Cancelled runs are the owner's own choice.
+const NEEDS_YOU = ["failed", "interrupted", "paused"];
+function runsNeedingYou(projects, viewingId) {
+  return projects.filter((project) => NEEDS_YOU.includes(project.lastRun?.state) && project.lastRun.id !== viewingId)
+    .map((project) => ({ projectId: project.id, jobId: project.lastRun.id, name: project.lastRun.workingName || project.name, state: project.lastRun.state }));
+}
+
+function renderAttention() {
+  const waiting = runsNeedingYou(state.projects, state.job?.id);
+  const all = state.projects.filter((project) => NEEDS_YOU.includes(project.lastRun?.state)).length;
+  document.title = all ? `(${all}) needs you · SoloFactory` : "SoloFactory";
+  $("#attention-banner").classList.toggle("hidden", !waiting.length);
+  if (!waiting.length) return;
+  const [first] = waiting;
+  $("#attention-text").textContent = waiting.length > 1 ? `${waiting.length} runs are stopped or paused and need you.`
+    : `“${first.name}” is ${first.state === "paused" ? "paused" : "stopped"} and needs you.`;
+  $("#attention-view-button").onclick = async () => {
+    try {
+      if (first.projectId !== state.project) await switchProject(first.projectId);
+      await selectRun(first.jobId);
+    } catch (error) { showError(error); }
+  };
 }
 
 function renderBackgroundBanner() {
@@ -304,24 +331,9 @@ function renderMessages(thinking = false) {
   container.scrollTop = container.scrollHeight;
 }
 
-function renderSdlcOptions() {
-  const select = $("#sdlc-select");
-  const options = state.config?.sdlcOptions?.length ? state.config.sdlcOptions : [{ id: "single", label: "Single build (v0 behavior)", detail: "" }];
-  select.replaceChildren(...options.map((option) => {
-    const item = document.createElement("option");
-    item.value = option.id;
-    item.textContent = option.label;
-    return item;
-  }));
-  $("#sdlc-detail").textContent = options.find((option) => option.id === select.value)?.detail || "";
-  select.addEventListener("change", () => {
-    $("#sdlc-detail").textContent = options.find((option) => option.id === select.value)?.detail || "";
-  });
-}
-
 function sdlcOption(id) {
   const options = state.config?.sdlcOptions ?? [];
-  return options.find((option) => option.id === id) ?? { id: id ?? "single", label: id === "slices" ? "Vertical slices (wbs)" : "Single build" };
+  return options.find((option) => option.id === id) ?? { id: id ?? "single", label: "Single build" };
 }
 
 function renderCoverage() {
@@ -469,7 +481,7 @@ $("#start-button").addEventListener("click", async () => {
   try {
     const { job } = await api("/api/jobs", {
       method: "POST",
-      body: { provider: state.provider, transcript: state.messages, coverage: state.guide.coverage, brief: state.guide.brief, sdlc: $("#sdlc-select").value },
+      body: { provider: state.provider, transcript: state.messages, coverage: state.guide.coverage, brief: state.guide.brief },
     });
     // Submitted briefs queue; the owner goes straight back to shaping the next release.
     showInterview();
@@ -490,8 +502,8 @@ function showRun() {
   document.querySelector('[data-stage="interview"]').classList.add("done");
   $("#run-id").textContent = state.job.id;
   $("#run-title").textContent = state.job.brief.workingName || "Building your app";
-  $("#agent-name").textContent = state.job.provider;
   renderJob();
+  renderAttention();
 }
 
 async function poll() {
@@ -511,33 +523,28 @@ async function poll() {
   } catch (error) { showError(error); }
 }
 
+// Stages before the current one are done; a completed run has every stage done and none active.
+function railMarks(progressState) {
+  const active = progressState === "repairing" ? "verifying" : progressState;
+  const at = active === "completed" ? stageOrder.length : stageOrder.indexOf(active);
+  return { active, done: stageOrder.slice(0, Math.max(0, at)) };
+}
+
 function renderJob() {
   const job = state.job;
-  $("#run-state").textContent = job.state;
-  $("#current-stage").textContent = job.stage;
   $("#run-subtitle").textContent = job.blockedBy
     ? `Waiting on recovery of run ${job.blockedBy}: resume it, start it over, or dismiss it.`
     : job.queuePosition
       ? `Queued #${job.queuePosition}${job.queuedFor === "resume" ? " to resume" : ""}; starts when this project's current run finishes.`
       : job.error?.message || statusCopy(job.state);
-  $("#repair-count").textContent = `${job.attempt} / 2`;
-  $("#gate-count").textContent = String(state.events.filter((event) => event.type === "gate.passed").length);
-  $("#strategy-label").textContent = sdlcOption(job.sdlc).label;
-  const elapsedUntil = job.completedAt ? new Date(job.completedAt).getTime() : Date.now();
-  $("#elapsed").textContent = `${formatDuration(elapsedUntil - new Date(job.startedAt || job.createdAt).getTime())} elapsed${usageLine(state.telemetry?.summary?.tokens?.total)}`;
   const progressState = PARKED.includes(job.state) ? job.failedState : job.state;
-  const currentIndex = Math.max(0, stageOrder.indexOf(progressState));
-  $("#stage-bars").replaceChildren(...stageOrder.slice(0, -1).map((stage, index) => {
-    const bar = document.createElement("span");
-    bar.className = `stage-bar ${index < currentIndex || job.state === "completed" ? "done" : index === currentIndex ? "active" : ""}`;
-    bar.title = stage;
-    return bar;
-  }));
-  document.querySelectorAll(".stages li").forEach((item) => item.classList.remove("active"));
-  const railStage = progressState === "repairing" ? "verifying" : progressState;
-  const activeRail = document.querySelector(`[data-stage="${railStage}"]`);
-  if (activeRail) activeRail.classList.add("active");
-  renderEvents();
+  const rail = railMarks(progressState);
+  document.querySelectorAll(".stages li").forEach((item) => {
+    item.classList.toggle("active", item.dataset.stage === rail.active);
+    if (item.dataset.stage !== "interview") item.classList.toggle("done", rail.done.includes(item.dataset.stage));
+  });
+  renderSupervision();
+  renderMap();
   renderArtifacts();
   renderAppMetrics();
   renderRecovery();
@@ -545,10 +552,13 @@ function renderJob() {
   $("#cancel-button").classList.toggle("hidden", terminalFailure || job.state === "completed");
   $("#cancel-button").textContent = job.state === "queued" ? "Remove from queue" : "Cancel run";
   $("#pause-button").classList.toggle("hidden", !["specifying", "building", "repairing", "reviewing"].includes(job.state));
-  if (!state.pausing) $("#pause-button").textContent = "Pause";
-  $("#resume-button").textContent = job.state === "paused" ? "Resume" : "Resume current run";
+  // The server's pendingPause survives a reload; state.pausing covers the gap until the next poll.
+  if (job.pendingPause) { $("#pause-button").textContent = `Pausing after ${job.stage}…`; $("#pause-button").disabled = true; }
+  else if (!state.pausing) $("#pause-button").textContent = "Pause";
+  $("#resume-button").textContent = job.nextAction?.action === "resume" ? job.nextAction.label : job.state === "paused" ? "Resume" : "Resume current run";
   $("#dismiss-button").classList.toggle("hidden", !terminalFailure || Boolean(job.dismissed));
-  $("#resume-button").classList.toggle("hidden", !job.recovery?.canResume || !terminalFailure);
+  // nextAction is derived by the server's continuation policy; a saved banner's canResume can be stale.
+  $("#resume-button").classList.toggle("hidden", job.nextAction?.action !== "resume" || !terminalFailure);
   $("#copy-recovery-button").classList.toggle("hidden", !job.recovery || !terminalFailure);
   $("#start-over-button").classList.toggle("hidden", !terminalFailure);
   $("#report-run-button").classList.toggle("hidden", !terminalFailure);
@@ -559,7 +569,7 @@ function renderJob() {
   if (job.state === "completed" && job.deployment?.status === "live") {
     $("#open-app").href = job.deployment.url;
     $("#open-app").classList.remove("hidden");
-    $("#app-live").textContent = "Live";
+    $("#app-live").textContent = job.waivedProofs?.length ? `Live · owner waived ${job.waivedProofs.map((bug) => bug.id).join(", ")}` : "Live";
     $("#app-live").classList.remove("muted");
   } else if (job.state === "completed") {
     $("#app-live").textContent = "Stopped";
@@ -567,11 +577,174 @@ function renderJob() {
   }
 }
 
+// Supervision is shown beside the lifecycle state, never instead of it.
+function renderSupervision() {
+  const watch = state.job.supervision;
+  let line = $("#supervision");
+  if (!line) {
+    line = document.createElement("p"); line.id = "supervision"; line.className = "muted";
+    $("#run-subtitle").after(line);
+  }
+  line.classList.toggle("hidden", !watch);
+  if (!watch) return;
+  const when = (iso) => iso ? `${formatDuration(Date.now() - new Date(iso).getTime())} ago` : "none yet";
+  const worker = watch.worker;
+  const waiting = worker?.kind === "command" ? ` · waiting on ${worker.gate ?? "command"} for ${formatDuration(worker.ageMs)}${worker.hardLimitMs ? ` of ${formatDuration(worker.hardLimitMs)}` : ""}` : "";
+  const used = state.job.watch?.continuations ? Object.values(state.job.watch.continuations).reduce((sum, n) => sum + n, 0) : 0;
+  line.textContent = `Supervision: ${watch.status}${watch.stage ? ` · ${watch.stage}` : ""}${waiting} · last activity ${when(watch.lastActivityAt)} · last confirmed progress ${when(watch.lastProgressAt)}`
+    + ` · ${state.job.attempt ?? 0} repairs, ${used} automatic continuation${used === 1 ? "" : "s"} used · ${watch.monitoring ? "monitored while the factory server runs" : "not monitored while parked"}`;
+}
+
+// job.attempt counts every repair since the run began; recovery limits are points on that counter.
+// Per feature: cursor.attemptBefore is where the feature started (src/feature-recovery.mjs). Per plan:
+// totalRepairLimit = start + maxRepairs × (features + 1), and maxRepairs is the feature's own window.
+// ponytail: the derived plan cap is low if the plan limit clipped the last feature's window; send maxRepairs if that matters.
+const repairUsage = (job) => {
+  const phase = job.recoveryPhase, start = phase?.cursor?.attemptBefore;
+  if (phase?.totalRepairLimit === undefined || start === undefined || job.repairBudgetLimit == null) return null;
+  const perFeature = job.repairBudgetLimit - start, planCap = perFeature * (phase.plan.slices.length + 1);
+  return { feature: [job.attempt - start, perFeature], plan: [Math.max(0, planCap - (phase.totalRepairLimit - job.attempt)), planCap] };
+};
+// Mirrors pendingProofs in src/wbs.mjs.
+const pendingProofs = (job) => (job.outstandingProofs ?? []).filter((entry) => entry.status === "pending");
+
+// Bounded like MAX_AMENDED_PLAN_BYTES in src/factory.mjs; the server repeats every check.
+const MAX_AMENDED_PLAN_BYTES = 4_000_000;
+
+// Exhausted plan corrections: explain, offer the help packet, and take a corrected plan from a file.
+// A ready plan offers the same packet and upload as an alternative to approval, for writing a replacement.
+// The selection lives in state so polling re-renders and server errors never erase it.
+function renderAmendment(features, next, phase, action) {
+  const blocked = next.action === "amend-plan";
+  const pending = state.amendment?.jobId === state.job.id && state.amendment.phaseId === phase.id ? state.amendment : null;
+  if (!pending) state.amendment = null;
+  const note = document.createElement("p"); note.textContent = blocked ? `${next.reason} ${phase.corrections ?? 0} automatic correction${phase.corrections === 1 ? "" : "s"} used; no repairs have started.` : next.alternatives.find((item) => item.action === "amend-plan").reason;
+  const packet = document.createElement("a"); packet.href = `/api/jobs/${state.job.id}/recovery-plan-packet`; packet.download = ""; packet.className = "button"; packet.textContent = "Download plan help packet";
+  const details = document.createElement("details"); details.open = Boolean(pending); details.addEventListener("toggle", () => { state.amendmentOpen = details.open; });
+  if (state.amendmentOpen) details.open = true;
+  const summary = document.createElement("summary"); summary.textContent = "Advanced: submit corrected plan for review";
+  const label = document.createElement("label"); label.htmlFor = "amendment-file"; label.textContent = "Corrected plan file (.json)";
+  const file = document.createElement("input"); file.type = "file"; file.id = "amendment-file"; file.accept = ".json,application/json";
+  const status = document.createElement("p"); status.id = "amendment-status";
+  const submit = document.createElement("button"); submit.type = "button"; submit.textContent = "Submit corrected plan for review"; submit.disabled = !pending?.plan;
+  const show = () => {
+    status.textContent = pending ? (pending.error ? pending.error : `${pending.name} (${pending.size.toLocaleString()} bytes) will be reviewed once, for recovery phase ${phase.id}.`) : "No file selected.";
+    status.className = pending?.error ? "error" : "muted"; submit.disabled = !pending?.plan;
+  };
+  file.addEventListener("change", async () => {
+    const chosen = file.files[0]; if (!chosen) return;
+    const entry = state.amendment = { jobId: state.job.id, phaseId: phase.id, name: chosen.name, size: chosen.size, plan: null, error: null };
+    if (chosen.size > MAX_AMENDED_PLAN_BYTES) entry.error = `${chosen.name} is larger than ${MAX_AMENDED_PLAN_BYTES.toLocaleString()} bytes.`;
+    else {
+      try { const plan = JSON.parse(await chosen.text()); if (!plan || typeof plan !== "object" || Array.isArray(plan)) throw new Error("not an object"); entry.plan = plan; }
+      catch { entry.error = `${chosen.name} is not a JSON repair plan.`; }
+    }
+    renderRecovery();
+  });
+  submit.addEventListener("click", async () => {
+    if (!pending?.plan) return;
+    submit.disabled = true; clearError();
+    try { await api(`/api/jobs/${state.job.id}/recovery-review`, { method: "POST", body: { phaseId: pending.phaseId, plan: pending.plan } }); state.amendment = null; await poll(); startPolling(); }
+    catch (error) { pending.error = error.message; showError(error); show(); }
+  });
+  show();
+  // A ready plan's replacement is the advanced path, so its explanation and packet sit inside the
+  // disclosure; loose, they rendered under "Prepare repair plan" and read as that button's description.
+  if (blocked) { details.append(summary, label, file, status, submit); features.append(note, packet, details); }
+  else { packet.textContent = "Download plan packet for a replacement"; details.append(summary, note, packet, label, file, status, submit); features.append(details); }
+  const alternative = blocked && next.alternatives?.[0];
+  if (alternative) { const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = alternative.reason; features.append(hint); action(alternative.label, "recovery-plan"); }
+}
+
 function renderRecovery() {
-  const recovery = state.job.recovery;
-  const visible = recovery && PARKED.includes(state.job.state);
+  const phase = state.job.recoveryPhase;
+  const recovery = state.job.recovery ?? (phase ? { title: phase.status === "planning" ? "Preparing repair plan" : "Repairs", summary: phase.status === "planning" ? "Planning repair features from the review findings and every spec and prototype input." : `${phase.done.length}/${phase.plan?.slices.length ?? 0} recovery features verified`, actions: [], workspace: "Preserved project workspace", automaticRetry: "Each feature has bounded repairs; final deployment requires the full original review." } : null);
+  const visible = recovery && (PARKED.includes(state.job.state) || phase);
   $("#recovery-card").classList.toggle("hidden", !visible);
   if (!visible) return;
+  let features = $("#feature-recovery-controls");
+  if (!features) {
+    features = document.createElement("section"); features.id = "feature-recovery-controls";
+    $("#recovery-card").append(features);
+  }
+  features.replaceChildren();
+  const action = (label, endpoint, body = {}) => {
+    const button = document.createElement("button"); button.textContent = label; button.type = "button";
+    button.addEventListener("click", async () => {
+      button.disabled = true; clearError();
+      try { await api(`/api/jobs/${state.job.id}/${endpoint}`, { method: "POST", body: endpoint === "recovery-plan" ? { ...body, guidance: $("#recovery-plan-feedback")?.value ?? "" } : endpoint === "waive-proof" ? { ...body, reason: $("#recovery-plan-feedback")?.value ?? "" } : body }); await poll(); startPolling(); }
+      catch (error) { showError(error); button.disabled = false; }
+    }); features.append(button);
+  };
+  const next = state.job.nextAction;
+  if (next?.action === "amend-plan" && phase) renderAmendment(features, next, phase, action);
+  else if (next?.action === "retry-plan" || next?.action === "revise-inputs") action(next.label, "recovery-plan");
+  // The same admission the server applies: only the policy's planning steps (and revising a ready plan) offer the planner.
+  else if (next?.action === "prepare-plan" || next?.action === "approve-plan") action("Prepare repair plan", "recovery-plan");
+  if (next?.action === "approve-plan" && phase && next.alternatives?.some((item) => item.action === "amend-plan")) renderAmendment(features, next, phase, action);
+  // The reviewer's own test is faulty: the owner's note in the box above becomes the recorded reason.
+  for (const item of next?.alternatives?.filter((entry) => entry.action === "waive-proof") ?? []) { const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = item.reason; features.append(hint); if (item.repairerNote) { const note = document.createElement("pre"); note.style.whiteSpace = "pre-wrap"; note.textContent = `Last repair turn said:\n${item.repairerNote}`; features.append(note); } action(item.label, "waive-proof", { proof: item.proof }); }
+  // Owner-added specs join the run's inputs; the next plan, review or Resume sees them.
+  if (next && !["none", "factory-fix"].includes(next.action)) {
+    const label = document.createElement("label"); label.htmlFor = "input-file"; label.textContent = "Add a spec or prototype file";
+    const file = document.createElement("input"); file.type = "file"; file.id = "input-file";
+    file.addEventListener("change", async () => {
+      clearError();
+      for (const chosen of file.files) {
+        const response = await fetch(`/api/jobs/${state.job.id}/inputs?name=${encodeURIComponent(chosen.name)}`, { method: "POST", body: chosen });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) { showError(new Error(body.error || `Upload failed with HTTP ${response.status}.`)); break; }
+      }
+      await poll();
+    });
+    features.append(label, file);
+  }
+  // Reference lists fold to one counted row and always start collapsed.
+  // Polling redraws this card, so the owner's open/closed choice is kept per title.
+  state.recoveryFolds ??= {};
+  const fold = (title) => {
+    const details = document.createElement("details"); details.className = "recovery-fold";
+    details.open = state.recoveryFolds[title] ?? false;
+    details.addEventListener("toggle", () => { state.recoveryFolds[title] = details.open; });
+    return details;
+  };
+  const list = (title, rows, folded = false) => {
+    if (!rows.length) return;
+    const items = document.createElement("ol");
+    items.append(...rows.map((text) => { const row = document.createElement("li"); row.textContent = text; return row; }));
+    if (!folded) { const heading = document.createElement("h3"); heading.textContent = title; features.append(heading, items); return; }
+    const details = fold(title);
+    const summary = document.createElement("summary"); summary.textContent = `${title} `;
+    summary.append(Object.assign(document.createElement("span"), { textContent: rows.length }));
+    details.append(summary, items); features.append(details);
+    items.scrollTop = state.recoveryFolds[`${title}:scroll`] ?? 0;
+    items.addEventListener("scroll", () => { state.recoveryFolds[`${title}:scroll`] = items.scrollTop; });
+  };
+  const incident = state.job.watch?.incident;
+  if (incident && PARKED.includes(state.job.state)) list("Incident", [`Observed: ${incident.observed}`, `Uncertain: ${incident.uncertain}`, `Tried: ${incident.tried}`, `Preserved: ${incident.preserved}`, `Next: ${state.job.nextAction?.label ?? state.job.nextAction?.reason ?? incident.nextAction}`, ...incident.logs.map((log) => `Log: ${log}`)]);
+  if (phase?.status === "plan_failed") list("Plan review blockers", phase.planBlockers ?? []);
+  if (phase?.plan) {
+    list("Remaining gaps", (phase.request?.checks ?? []).map((check) => `${check.id}: ${check.text}${check.reason ? ` — ${check.reason}` : ""}`), true);
+    // Mirrors pendingChecks in src/wbs.mjs: a check is not verified with its feature while any pending
+    // obligation in this plan, or outstanding from an earlier one, still supports it.
+    const refs = new Set([...phase.plan.slices.flatMap((slice) => slice.acceptance.filter((item) => item.proof?.pending && !(state.job.outstandingProofs ?? []).some(entry => entry.planDigest === phase.planDigest && entry.feature === slice.id && entry.obligation.id === item.id && entry.status !== "pending"))), ...pendingProofs(state.job).map((entry) => entry.obligation)].flatMap((item) => item.refs ?? []));
+    const awaiting = (slice) => (slice.closes ?? []).filter((id) => refs.has(id));
+    list("Features", phase.plan.slices.map((slice) => `${phase.done.includes(slice.id) ? "Verified" : phase.current === slice.id ? "Current" : "Pending"}: ${slice.title} (${(slice.closes ?? slice.checks).join(", ")})${awaiting(slice).length ? `; ${awaiting(slice).join(", ")} pending integration proof` : ""}`), true);
+    list("Outstanding integration proofs", pendingProofs(state.job).map((entry) => `${entry.key}: ${entry.obligation.behavior} — ${entry.obligation.proof.command.join(" ")}`));
+    list("Verification checks", phase.plan.slices.flatMap((slice) => slice.acceptance.map((item) => typeof item === "string" ? item : `${item.id}: ${item.behavior} — ${item.proof.command.join(" ")}${item.proof.pending ? " (runs at integration)" : ""}`)), true);
+    if (phase.status === "ready") { const allowance = document.createElement("p"); allowance.textContent = `Repair allowance: up to ${2 * (phase.plan.slices.length + 1)} attempts (2 per feature plus 2 for the full final review).`; features.append(allowance); }
+    const details = fold("Full plan"); const summary = document.createElement("summary"); summary.textContent = "Full plan with sources and dependencies";
+    const pre = document.createElement("pre"); pre.style.whiteSpace = "pre-wrap"; pre.textContent = JSON.stringify(phase.plan, null, 2); details.append(summary, pre); features.append(details);
+    pre.scrollTop = state.recoveryFolds["Full plan:scroll"] ?? 0; pre.addEventListener("scroll", () => { state.recoveryFolds["Full plan:scroll"] = pre.scrollTop; });
+    if (phase.status === "ready") {
+      const label = document.createElement("label"); label.htmlFor = "recovery-plan-feedback"; label.textContent = "Changes for the repair plan (optional)";
+      const feedback = document.createElement("textarea"); feedback.id = "recovery-plan-feedback"; feedback.maxLength = 6000; feedback.value = state.recoveryPlanFeedback ?? "";
+      feedback.addEventListener("input", () => { state.recoveryPlanFeedback = feedback.value; }); features.append(label, feedback);
+    }
+    if (phase.status === "ready") action("Approve and continue repairs", "recovery-start", { planDigest: phase.planDigest });
+    const usage = repairUsage(state.job);
+    if (usage) { const budget = document.createElement("p"); budget.textContent = `Repair attempts used: This feature: ${usage.feature[0]} of ${usage.feature[1]} · Plan: ${usage.plan[0]} of ${usage.plan[1]}`; features.append(budget); }
+  }
   $("#recovery-title").textContent = recovery.title;
   $("#recovery-summary").textContent = recovery.summary;
   $("#recovery-actions").replaceChildren(...recovery.actions.map((action) => {
@@ -579,6 +752,8 @@ function renderRecovery() {
     item.textContent = action;
     return item;
   }));
+  // Static reassurance only matters once the run has stopped.
+  $(".recovery-meta").classList.toggle("hidden", !PARKED.includes(state.job.state));
   $("#recovery-workspace").textContent = recovery.workspace;
   $("#recovery-retry").textContent = recovery.automaticRetry;
   const restartable = (state.job.sliceDone ?? []).slice(1);
@@ -606,17 +781,288 @@ async function restartFromSlice(sliceId) {
   }
 }
 
-function renderEvents() {
-  $("#events").replaceChildren(...state.events.slice().reverse().map((entry) => {
+// The run map: the plan as a metro line, the selected stop, four status answers and the activity
+// stream. Everything is read from the job record and its event log; nothing here is a second source of truth.
+const PIPELINE_STOPS = [["specifying", "SPEC", "Write the PRD, plan and acceptance contract"], ["building", "BUILD", "Build the application"], ["verifying", "GATES", "Run the deterministic quality gates"], ["reviewing", "REVIEW", "Review against the frozen contract"], ["deploying", "DEPLOY", "Launch and check the application"]];
+const MAP_KINDS = { all: "All", agent: "Agent", file: "Files", gate: "Gates", stage: "Stages" };
+const QUIET_WARN_MS = 10 * 60_000, QUIET_BAD_MS = 30 * 60_000;
+const minutesLabel = (ms) => { const m = Math.floor(ms / 60_000); return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}` : `${m}m`; };
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function mapPlan(job) {
+  const phase = job.recoveryPhase, approved = job.approvedPlan;
+  if (phase?.plan?.slices) return { label: "Repair plan", slices: phase.plan.slices, done: phase.done ?? [], current: phase.current, stats: phase.stats ?? {}, start: phase.approvedAt };
+  if (approved?.plan?.slices) {
+    const slices = approved.plan.slices;
+    return { label: "Feature plan", slices, done: job.sliceDone ?? [], current: job.featureCursor?.id ?? slices[job.sliceIndex ?? 0]?.id, stats: job.sliceStats ?? {}, start: approved.approvedAt };
+  }
+  return null;
+}
+
+function mapStops(job) {
+  const parked = PARKED.includes(job.state), finished = job.state === "completed";
+  const live = (on) => !on ? "queued" : parked ? "blocked" : "current";
+  const plan = mapPlan(job);
+  if (!plan) {
+    const at = PIPELINE_STOPS.findIndex(([stage]) => stage === (parked ? job.failedState : job.state === "repairing" ? "verifying" : job.state));
+    const spent = stateRunningMs(job);
+    return { label: `${sdlcOption(job.sdlc).label} · ${job.provider}`, stops: PIPELINE_STOPS.map(([stage, id, title], index) => ({ id, title, deps: [], ms: spent[stage] ?? 0, status: finished || (at >= 0 && index < at) ? "done" : live(index === at) })) };
+  }
+  let last = Date.parse(plan.start) || null;
+  const stops = plan.slices.map((slice) => {
+    const stat = plan.stats[slice.id] ?? {}, done = plan.done.includes(slice.id), current = !done && !finished && slice.id === plan.current;
+    // Running time since the previous feature was verified: pauses, stops and long silences (job.idleGaps) are subtracted.
+    const ended = done ? Date.parse(stat.verifiedAt) : current ? (parked ? Date.parse(job.updatedAt) : Date.now()) : null;
+    const ms = ended && last ? runningMs(last, ended, job.idleGaps) : 0;
+    if (done && stat.verifiedAt) last = Date.parse(stat.verifiedAt);
+    return { id: slice.id, title: slice.title, deps: (slice.dependsOn ?? []).map((dep) => plan.slices.findIndex((other) => other.id === dep)).filter((index) => index >= 0), ms, reviews: stat.reviews ?? 0, repairs: stat.repairs ?? 0, status: done ? "done" : live(current) };
+  });
+  return { label: `${plan.label} · ${plural(stops.length, "feature")} · ${job.provider}`, stops, features: true };
+}
+
+// Health watches activity, not the event log alone: the agent's streamed tool use and the workspace
+// commands it runs both count, so a long silent stretch means nothing is happening at all.
+function mapHealth(job) {
+  if (job.state === "completed") return { tone: "ok", text: "Finished" };
+  if (job.state === "queued") return { tone: "idle", text: "Queued" };
+  if (job.state === "paused") return { tone: "warn", text: "Paused · needs you" };
+  if (PARKED.includes(job.state)) return { tone: "bad", text: "Stopped · needs you" };
+  const worker = job.supervision?.worker;
+  if (worker?.kind === "command") return { tone: "ok", text: `Running ${worker.gate ?? "a check"} · ${formatSpan(worker.ageMs)}` };
+  const quiet = lastActivityAge(job);
+  if (quiet == null) return { tone: "warn", text: "No activity seen yet" };
+  const tone = quiet < QUIET_WARN_MS ? "ok" : quiet < QUIET_BAD_MS ? "warn" : "bad";
+  return { tone, text: `${tone === "ok" ? "Alive" : "Quiet"} · last activity ${formatSpan(quiet)} ago` };
+}
+
+function lastActivityAge(job) {
+  const at = Math.max(Date.parse(job.supervision?.lastActivityAt ?? "") || 0, Date.parse(state.events.at(-1)?.at ?? "") || 0);
+  return at ? Date.now() - at : null;
+}
+
+const eventKind = (entry) => entry.type.startsWith("gate.") ? "gate"
+  : /^(agent|item|turn|thread|supervision)\./.test(entry.type) ? (/Completed (Write|Edit|MultiEdit|NotebookEdit)\b/.test(entry.message ?? "") ? "file" : "agent")
+  : "stage";
+// The newest `cap` rows of each kind, newest first: thousands of tool events must not push the rare
+// stage and gate rows out of "All". ponytail: older rows are dropped; page back if the owner needs them.
+function streamRows(events, filter, cap = 300) {
+  const counts = {}, rows = [];
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const kind = eventKind(events[i]);
+    if ((filter === "all" || kind === filter) && (counts[kind] = (counts[kind] ?? 0) + 1) <= cap) rows.push(events[i]);
+  }
+  return rows;
+}
+
+function renderMap() {
+  const job = state.job, { label, stops, features } = mapStops(job);
+  const live = stops.findIndex((stop) => stop.status === "current" || stop.status === "blocked");
+  const picked = state.mapPick?.job === job.id ? state.mapPick.stop : null;
+  const chosen = stops.findIndex((stop) => stop.id === picked);
+  const selected = picked === "health" ? -1 : chosen >= 0 ? chosen : live >= 0 ? live : Math.max(0, stops.map((stop) => stop.status).lastIndexOf("done"));
+  $("#map-title").textContent = label;
+  const health = mapHealth(job);
+  $("#health").className = `health-pill ${health.tone}`;
+  $("#health").setAttribute("aria-pressed", String(picked === "health"));
+  $("#health-text").textContent = health.text;
+  renderMetro(stops, selected, live);
+  renderStop(stops, selected, picked === "health", health);
+  renderAnswers(stops, live, features);
+  renderStream();
+}
+
+function renderMetro(stops, selected, live) {
+  const svg = $("#metro"), narrow = svg.clientWidth > 0 && svg.clientWidth < 520, width = narrow ? 340 : 680;
+  const perRow = Math.min(stops.length, narrow ? 5 : 9), rows = Math.ceil(stops.length / perRow), step = perRow > 1 ? (width - 100) / (perRow - 1) : 0;
+  const train = live >= 0 ? minutesLabel(stops[live].ms) : "";
+  // Rebuilt only when something visible changes, so the train's animation and keyboard focus survive polling.
+  const signature = `${perRow}|${state.job.id}|${stops.map((stop) => stop.status).join()}|${selected}|${train}`;
+  if (svg.dataset.signature === signature) return;
+  svg.dataset.signature = signature;
+  const focused = svg.contains(document.activeElement) ? document.activeElement.dataset.index : null;
+  const at = (index) => { const row = Math.floor(index / perRow), col = index % perRow; return [row % 2 ? width - 50 - col * step : 50 + col * step, 44 + row * 80]; };
+  const node = (parent, tag, attrs, text) => {
+    const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
+    if (text != null) element.textContent = text;
+    parent.append(element); return element;
+  };
+  svg.setAttribute("viewBox", `0 0 ${width} ${44 + (rows - 1) * 80 + 40}`);
+  svg.replaceChildren();
+  const spurs = node(svg, "g", {}), line = node(svg, "g", {});
+  stops.slice(0, -1).forEach((stop, index) => {
+    const [x0, y0] = at(index), [x1, y1] = at(index + 1), dx = x0 > width / 2 ? 56 : -56;
+    node(line, "path", { class: `track${stop.status === "done" && stops[index + 1].status !== "queued" ? " done" : ""}`, d: y0 === y1 ? `M${x0} ${y0} L${x1} ${y1}` : `M${x0} ${y0} C${x0 + dx} ${y0} ${x1 + dx} ${y1} ${x1} ${y1}` });
+  });
+  const deps = new Set(stops[selected]?.deps ?? []);
+  for (const dep of deps) {
+    const [x, y] = at(selected), [dx, dy] = at(dep);
+    node(spurs, "path", { class: "spur", d: `M${x} ${y} Q${(x + dx) / 2} ${y === dy ? y + 40 : (y + dy) / 2} ${dx} ${dy}` });
+  }
+  stops.forEach((stop, index) => {
+    const [x, y] = at(index);
+    const group = node(line, "g", { class: `stop ${stop.status}${index === selected ? " selected" : ""}${deps.has(index) ? " dep" : ""}`, tabindex: 0, role: "button", "data-index": index, "aria-pressed": String(index === selected), "aria-label": `${index + 1}. ${stop.id}, ${stop.status === "done" ? "verified" : stop.status}` });
+    node(group, "circle", { cx: x, cy: y, r: 12 });
+    node(group, "text", { x, y: y + 4 }, index + 1);
+    const pick = () => { state.mapPick = { job: state.job.id, stop: stop.id }; renderMap(); };
+    group.addEventListener("click", pick);
+    group.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); pick(); } });
+  });
+  if (live >= 0) {
+    const [x, y] = at(live), status = stops[live].status;
+    node(line, "text", { class: `stop-name ${status}`, x, y: y - 20 }, stops[live].id);
+    const car = node(line, "g", { class: `train ${status}` });
+    node(car, "rect", { x: x + 16, y: y - 9, width: 34, height: 18, rx: 6 });
+    node(car, "text", { x: x + 33, y: y + 4 }, train);
+  }
+  if (focused != null) svg.querySelector(`[data-index="${focused}"]`)?.focus();
+}
+
+function renderStop(stops, selected, showHealth, health) {
+  const job = state.job;
+  const title = document.createElement("strong"), about = document.createElement("p"), status = document.createElement("p");
+  status.className = "stop-status";
+  if (showHealth) {
+    title.textContent = "Health";
+    about.textContent = "Watches the agent's streamed tool use, the commands it runs and the controller's events.";
+    const quiet = lastActivityAge(job);
+    status.textContent = `${health.text}${job.supervision ? ` · supervision: ${job.supervision.status}` : ""}${quiet != null ? ` · quiet ${formatSpan(quiet)}` : ""} · green under ${QUIET_WARN_MS / 60_000} minutes quiet, amber to ${QUIET_BAD_MS / 60_000}, red past that or when the run stops.`;
+    patchChildren($("#stop"), [title, about, status]);
+    return;
+  }
+  const stop = stops[selected];
+  if (!stop) { patchChildren($("#stop"), []); return; }
+  title.textContent = `${selected + 1} · ${stop.id}`;
+  about.textContent = stop.title;
+  const tone = document.createElement("span");
+  const usage = repairUsage(job);
+  if (stop.status === "done") {
+    tone.className = "ok"; tone.textContent = "Verified";
+    status.append(tone, stop.reviews || stop.repairs || stop.ms ? ` · ${formatSpan(stop.ms)} · ${stop.repairs ? plural(stop.repairs, "repair") : "no repairs"}${stop.reviews ? ` · review passed ${stop.reviews <= 1 ? "first try" : `on pass ${stop.reviews}`}` : ""}` : "");
+  } else if (stop.status === "current") {
+    tone.className = "warn"; tone.textContent = job.stage.split(" — ")[0];
+    status.append(tone, ` · ${minutesLabel(stop.ms)} so far${usage ? ` · ${usage.feature[0]} of ${usage.feature[1]} repairs used` : ""}`);
+  } else if (stop.status === "blocked") {
+    tone.className = "bad"; tone.textContent = job.state === "paused" ? "Paused" : "Stopped";
+    status.append(tone, ` · ${job.error?.message ?? statusCopy(job.state)}`);
+  } else {
+    const waiting = stop.deps.filter((dep) => stops[dep].status !== "done").map((dep) => `${dep + 1} ${stops[dep].id}`);
+    tone.className = "muted"; tone.textContent = "Queued";
+    status.append(tone, waiting.length ? ` · waits on ${waiting.join(", ")}` : " · ready when the line reaches it");
+  }
+  patchChildren($("#stop"), [title, about, status]);
+}
+
+function runningMs(from, to, gaps = []) {
+  let ms = Math.max(0, to - from);
+  for (const [start, end] of gaps) ms -= Math.max(0, Math.min(to, end) - Math.max(from, start));
+  return Math.max(0, ms);
+}
+
+// Running time per pipeline state: pauses, stops and long silences (job.idleGaps) inside a stage don't count.
+function stateRunningMs(job, now = Date.now()) {
+  const spent = {};
+  for (const stage of job.stageHistory ?? []) {
+    spent[stage.state] = (spent[stage.state] ?? 0) + runningMs(Date.parse(stage.startedAt), stage.endedAt ? Date.parse(stage.endedAt) : now, job.idleGaps);
+  }
+  return spent;
+}
+
+// Time left from running time only: median per feature (one slow feature should not drag it), the underway feature
+// credited for what it has already run, and a quartile range once there are enough samples.
+function timeLeft(stops, live) {
+  const done = stops.filter((stop) => stop.status === "done" && stop.ms > 0).map((stop) => stop.ms).sort((a, b) => a - b);
+  if (!done.length) return null;
+  const at = (q) => done[Math.min(done.length - 1, Math.floor(q * done.length))];
+  const rest = Math.max(0, stops.filter((stop) => stop.status !== "done").length - (live >= 0 ? 1 : 0));
+  const total = (per) => (live >= 0 ? Math.max(per * 0.25, per - stops[live].ms) : 0) + per * rest;
+  return { median: at(0.5), mid: total(at(0.5)), range: done.length >= 4 ? [total(at(0.25)), total(at(0.75))] : null };
+}
+
+function renderAnswers(stops, live, features) {
+  const job = state.job, parked = PARKED.includes(job.state), quiet = lastActivityAge(job);
+  const recent = state.events.findLast((entry) => eventKind(entry) !== "stage");
+  const moving = job.state === "completed" ? ["ok", "No; the run is finished."]
+    : job.state === "queued" ? ["muted", "Not yet; it is waiting in the queue."]
+      : parked ? ["bad", `No. ${job.state === "paused" ? "Paused on request." : job.error?.message ?? "The run stopped."}`]
+        : quiet != null && quiet >= QUIET_WARN_MS ? [quiet >= QUIET_BAD_MS ? "bad" : "warn", `Quiet for ${formatSpan(quiet)}. ${job.supervision?.status ?? ""}; the safety cap still bounds this turn.`]
+          : ["ok", `Yes. ${recent ? `Last activity: ${recent.message || recent.type}, ${formatSpan(Date.now() - Date.parse(recent.at))} ago.` : job.stage}`];
+  // The current feature's cases only: job.caseResults keeps every case from every feature and superseded plan.
+  const plan = mapPlan(job), slice = plan?.slices.find((item) => item.id === plan.current);
+  const usage = repairUsage(job), cases = (slice?.acceptance ?? []).flatMap((item) => item.cases ?? []).map((item) => job.caseResults?.[item.id] ?? { status: "not run" });
+  const passed = cases.filter((entry) => entry.status === "passed").length;
+  // Each figure names its scope (this feature, this plan, whole run): they differ and read alike otherwise.
+  const feature = [usage && `${usage.feature[0]} of ${usage.feature[1]} repairs used`, cases.length && `${passed} of ${cases.length} acceptance cases pass`].filter(Boolean);
+  const repairs = [feature.length && `This feature: ${feature.join(", ")}.`, usage ? `This plan: ${usage.plan[0]} of ${usage.plan[1]} repairs used.` : `Whole run: ${plural(job.attempt ?? 0, "repair")}.`].filter(Boolean).join(" ");
+  const healthy = [job.supervision?.status === "Progress needs checking" ? "warn" : usage && usage.feature[0] >= usage.feature[1] ? "warn" : "ok", repairs];
+  const verified = stops.filter((stop) => stop.status === "done");
+  const estimate = features ? timeLeft(stops, live) : null;
+  const elapsed = runningMs(Date.parse(job.startedAt || job.createdAt), job.completedAt ? Date.parse(job.completedAt) : Date.now(), job.idleGaps);
+  const far = ["", `${features ? "This plan: " : ""}${verified.length} of ${stops.length} ${features ? "features verified" : "steps done"}${live >= 0 ? `; ${features ? "feature" : "step"} ${live + 1} is ${stops[live].status === "blocked" ? "stopped" : "underway"}` : ""}.${estimate && estimate.mid > 0 ? ` About ${estimate.range ? `${formatSpan(estimate.range[0])} to ${formatSpan(estimate.range[1])}` : formatSpan(estimate.mid)} of running time left (median ${minutesLabel(estimate.median)} a feature).` : ""} Whole run${features ? " (every plan)" : ""}: ${formatSpan(elapsed)} running${usageLine(state.telemetry?.summary?.tokens?.total)}.`];
+  const next = job.nextAction;
+  const needs = parked && next && !["none", "factory-fix"].includes(next.action) ? ["bad", `Yes: ${next.label}${next.reason ? `. ${next.reason}` : ""}`]
+    : job.recoveryPhase?.status === "ready" ? ["warn", "Yes: review and approve the repair plan above."]
+      : parked ? ["bad", "Yes: the run stopped; see the recovery checkpoint above."]
+        : ["ok", "No."];
+  patchChildren($("#qa"), [["Moving?", moving], ["Healthy?", healthy], ["How far?", far], ["Needs you?", needs]].flatMap(([question, [tone, answer]]) => [
+    Object.assign(document.createElement("dt"), { textContent: question }),
+    Object.assign(document.createElement("dd"), { textContent: answer, className: tone }),
+  ]));
+}
+
+// Polling redraws every 1.5s. Replacing nodes wholesale drops the browser's scroll anchor and the page
+// jumps, so keep each existing element and change only the text or class that differs.
+function patchChildren(parent, nodes) {
+  const old = [...parent.children];
+  if (old.length !== nodes.length || old.some((node, index) => node.tagName !== nodes[index].tagName)) { parent.replaceChildren(...nodes); return; }
+  old.forEach((node, index) => {
+    const next = nodes[index];
+    if (node.className !== next.className) node.className = next.className;
+    if (node.innerHTML !== next.innerHTML) node.replaceChildren(...next.childNodes);
+  });
+}
+
+function renderStream() {
+  state.mapFilter ??= "all";
+  if (!$("#chips").childElementCount) {
+    $("#chips").append(...Object.entries(MAP_KINDS).map(([kind, text]) => {
+      const button = Object.assign(document.createElement("button"), { type: "button", textContent: text, className: "button ghost small" });
+      button.dataset.kind = kind;
+      button.addEventListener("click", () => { state.mapFilter = kind; renderStream(); });
+      return button;
+    }));
+  }
+  for (const button of $("#chips").children) button.setAttribute("aria-pressed", String(button.dataset.kind === state.mapFilter));
+  const seen = state.streamSeen?.job === state.job.id ? state.streamSeen.at : null;
+  // Rebuild only when the rows would differ; an unchanged rebuild also resets the list's own scroll.
+  const key = `${state.job.id}|${state.mapFilter}|${state.events.length}|${state.events.at(-1)?.at}`;
+  if ($("#events").dataset.key === key) return;
+  $("#events").dataset.key = key;
+  const rows = streamRows(state.events, state.mapFilter);
+  // Newest rows land on top, so keep the row the owner is reading at the same height; at the top, stay on top for new rows.
+  const list = $("#events"), top = () => list.getBoundingClientRect().top;
+  const anchor = list.scrollTop > 4 ? [...list.children].find((row) => row.getBoundingClientRect().bottom > top()) : null;
+  const held = anchor && { at: anchor.dataset.at, offset: anchor.getBoundingClientRect().top - top() };
+  list.replaceChildren(...rows.map((entry) => {
+    const kind = eventKind(entry), failed = /failed|error/.test(entry.type);
     const row = document.createElement("div");
-    row.className = `event ${/failed|error/.test(entry.type) ? "fail" : ""}`;
-    const time = document.createElement("time"); time.textContent = new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    const dot = document.createElement("i");
+    row.className = `event${failed ? " fail" : ""}${seen && entry.at > seen ? " fresh" : ""}`;
+    const time = document.createElement("time"); time.textContent = new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+    const badge = Object.assign(document.createElement("i"), { className: `kind ${failed ? "fail" : kind}`, textContent: MAP_KINDS[kind] });
     const text = document.createElement("span"); text.textContent = entry.message || entry.type;
-    row.append(time, dot, text);
+    row.append(time, badge, text); row.dataset.at = entry.at;
     return row;
   }));
+  const again = held && [...list.children].find((row) => row.dataset.at === held.at);
+  if (again) list.scrollTop += again.getBoundingClientRect().top - top() - held.offset;
+  state.streamSeen = { job: state.job.id, at: state.events.at(-1)?.at ?? seen };
 }
+
+$("#health").addEventListener("click", () => {
+  if (!state.job) return;
+  state.mapPick = { job: state.job.id, stop: state.mapPick?.job === state.job.id && state.mapPick.stop === "health" ? null : "health" };
+  renderMap();
+});
 
 function renderArtifacts() {
   const canShow = stageOrder.indexOf(state.job.state) > 0 || ["failed", "completed"].includes(state.job.state);
@@ -634,10 +1080,10 @@ function renderArtifacts() {
 
 // "· 398K tokens in · 14K out". No dollar figure: members run on subscriptions, and the CLI's
 // list-price cost read as an API bill. Cost stays in runs.jsonl.
-function usageLine(usage) {
+function usageLine(usage, short = false) {
   if (!usage) return "";
   const count = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
-  return ` · ${count(usage.inputTokens)} tokens in · ${count(usage.outputTokens)} out`;
+  return short ? ` · ${count(usage.inputTokens)} in · ${count(usage.outputTokens)} out` : ` · ${count(usage.inputTokens)} tokens in · ${count(usage.outputTokens)} out`;
 }
 
 function renderAppMetrics() {
@@ -862,6 +1308,13 @@ function stopPolling() {
 
 function statusCopy(status) {
   return ({ queued: "The run is queued.", specifying: "Turning the interview into a build contract.", building: "The coding agent is implementing the app.", verifying: "The controller is running the real checks.", repairing: "A failed gate is being repaired, then every gate runs again.", reviewing: "The implementation is being audited against the frozen contract.", deploying: "The app is starting and its health and metrics endpoints are being checked.", completed: "The app is live and its evidence is preserved." })[status] || "Factory activity is recorded below.";
+}
+
+// Readable at any length: 45s, 12m 05s, 2h 05m, 6d 1h.
+function formatSpan(milliseconds) {
+  const s = Math.max(0, Math.floor(milliseconds / 1000)), m = Math.floor(s / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
+  const pad = (n) => String(n).padStart(2, "0");
+  return d ? `${d}d ${h % 24}h` : h ? `${h}h ${pad(m % 60)}m` : m ? `${m}m ${pad(s % 60)}s` : `${s}s`;
 }
 
 function formatDuration(milliseconds) {

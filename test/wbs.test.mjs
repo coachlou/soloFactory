@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { nextExecutable, orderSlices, validateSlicePlan } from "../src/wbs.mjs";
+import { featureProofs, nextExecutable, orderSlices, pendingChecks, pendingObligations, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "../src/wbs.mjs";
 
 const validPlan = {
   slices: [
@@ -146,4 +146,164 @@ test("a criterion shared between slices is rejected as re-implementation", () =>
     ],
   };
   assert.throws(() => validateSlicePlan(plan), /share the same acceptance criterion/);
+});
+
+// --- version-2 feature plans ---
+const checks = [
+  { id: "MH-1", text: "Record one score a day" },
+  { id: "MH-2", text: "Show the seven-day trend" },
+  { id: "SC-1", text: "The owner records a score and sees the trend move" },
+];
+const binding = { jobId: "job-1", contractDigest: "c".repeat(64), checks };
+const ob = (id, behavior, refs) => ({ id, behavior, refs, proof: { command: ["node", "--test", "test/x.test.mjs"], expect: "all tests pass" } });
+const featurePlan = (slices, extra = {}) => ({ version: 2, jobId: "job-1", contractDigest: "c".repeat(64), slices, ...extra });
+const feature = (id, closes, acceptance, dependsOn = []) => ({ id, title: `Feature ${id}`, objective: "Observable outcome", demo: "Open the page and see it", closes, acceptance, dependsOn });
+const fullPlan = () => featurePlan([
+  feature("STORE", [], [ob("STORE-1", "Scores persist across a restart", [])]),
+  feature("RECORD", ["MH-1"], [ob("RECORD-1", "Owner records one score per day", ["MH-1"])], ["STORE"]),
+  feature("TREND", ["MH-2", "SC-1"], [ob("TREND-1", "Trend shows the seven-day average", ["MH-2", "SC-1"])], ["RECORD"]),
+]);
+
+test("v2: a valid plan normalizes with a prerequisite feeding a closer", () => {
+  const plan = validateFeaturePlan(fullPlan(), binding);
+  assert.deepEqual(plan.slices.map((s) => s.id), ["STORE", "RECORD", "TREND"]);
+  assert.deepEqual(plan.slices[0].acceptance[0].proof.command, ["node", "--test", "test/x.test.mjs"]);
+});
+
+test("v2: one coherent feature is a valid plan and more than six is allowed", () => {
+  assert.equal(validateFeaturePlan(featurePlan([feature("ALL", ["MH-1", "MH-2", "SC-1"], [ob("ALL-1", "Records and trends in one page", ["MH-1", "MH-2", "SC-1"])])]), binding).slices.length, 1);
+  const many = Array.from({ length: 9 }, (_, i) => feature(`F${i}`, i === 8 ? ["MH-1", "MH-2", "SC-1"] : [], [ob(`F${i}-1`, `Increment number ${i} works end to end`, i === 8 ? ["MH-1", "MH-2", "SC-1"] : [])], i ? [`F${i - 1}`] : []));
+  assert.equal(validateFeaturePlan(featurePlan(many), binding).slices.length, 9);
+  const tooMany = Array.from({ length: 31 }, (_, i) => feature(`F${i}`, i === 30 ? ["MH-1", "MH-2", "SC-1"] : [], [ob(`F${i}-1`, `Increment number ${i} works end to end`, ["MH-1"])], i ? [`F${i - 1}`] : []));
+  assert.throws(() => validateFeaturePlan(featurePlan(tooMany), binding), /limit is 30/);
+});
+
+test("v2: a plan covering every SC but omitting an MH names the MH", () => {
+  const plan = fullPlan();
+  plan.slices[2].closes = ["SC-1"];
+  plan.slices[2].acceptance[0].refs = ["SC-1"];
+  assert.throws(() => validateFeaturePlan(plan, binding), /no closing owner for MH-2 \(Show the seven-day trend\)/);
+});
+
+test("v2: unknown and duplicate owners, orphans and unproved closes are rejected", () => {
+  const unknown = fullPlan(); unknown.slices[1].closes = ["MH-1", "MH-9"];
+  assert.throws(() => validateFeaturePlan(unknown, binding), /unknown check MH-9/);
+  const dup = fullPlan(); dup.slices[2].closes = ["MH-1", "MH-2", "SC-1"]; dup.slices[2].acceptance[0].refs.push("MH-1");
+  assert.throws(() => validateFeaturePlan(dup, binding), /MH-1 has two closing owners/);
+  const orphan = fullPlan(); orphan.slices[1].dependsOn = [];
+  assert.throws(() => validateFeaturePlan(orphan, binding), /STORE is an orphan prerequisite/);
+  const unproved = fullPlan(); unproved.slices[1].acceptance[0].refs = [];
+  assert.throws(() => validateFeaturePlan(unproved, binding), /closes MH-1 but no obligation/);
+  const badRef = fullPlan(); badRef.slices[0].acceptance[0].refs = ["SC-7"];
+  assert.throws(() => validateFeaturePlan(badRef, binding), /unknown original checks/);
+});
+
+test("v2: empty/fuzzy acceptance, malformed proof, forward deps and metadata are rejected", () => {
+  const cases = [
+    [(p) => { p.slices[0].acceptance = []; }, /at least one acceptance obligation/],
+    [(p) => { p.slices[0].acceptance[0].behavior = "works"; }, /concrete expected behavior/],
+    [(p) => { p.slices[0].acceptance[0].proof = { command: [], expect: "ok" }; }, /executable proof command/],
+    [(p) => { p.slices[0].acceptance[0].proof.command = ["bash", "-c", "true"]; }, /executable proof command/],
+    [(p) => { p.slices[0].acceptance[0].proof.command = "npm test"; }, /executable proof command/],
+    [(p) => { p.slices[0].acceptance[0].proof.expect = ""; }, /expected proof result/],
+    [(p) => { p.slices[0].dependsOn = ["TREND"]; }, /not an earlier slice/],
+    [(p) => { p.slices[1].acceptance[0].behavior = p.slices[0].acceptance[0].behavior.toUpperCase(); }, /share the behavior/],
+    [(p) => { p.slices[0].demo = "ok"; }, /demo/],
+    [(p) => { p.contractDigest = "d".repeat(64); }, /frozen contract/],
+    [(p) => { p.jobId = "other"; }, /this run/],
+    [(p) => { delete p.version; }, /version 2/],
+    [(p) => { p.compatibility = [{ subject: "sharp on arm64", status: "unknown" }]; }, /Unresolved compatibility: sharp on arm64/],
+    [(p) => { p.compatibility = [{ subject: "npm CLI", status: "blocked" }, { subject: "node-canvas", status: "blocked" }]; }, /Unresolved compatibility: node-canvas/],
+    [(p) => { p.compatibility = [{ subject: "Node 18", status: "blocked" }]; }, /Unresolved compatibility: Node 18/],
+    [(p) => { p.compatibility = [{ subject: "Node.js (latest LTS required)", status: "blocked" }]; }, /Unresolved compatibility: Node\.js \(latest LTS required\)/],
+    [(p) => { p.slices[2].acceptance[0].proof.pending = "later"; }, /pending may only be "integration"/],
+    [(p) => { p.slices[2].acceptance[0].proof.pending = "integration"; }, /at least one obligation provable when the feature is built/],
+  ];
+  for (const [mutate, pattern] of cases) {
+    const plan = fullPlan();
+    mutate(plan);
+    assert.throws(() => validateFeaturePlan(plan, binding), pattern);
+  }
+  assert.doesNotThrow(() => validateFeaturePlan(fullPlan(), binding));
+  // Subjects real planners wrote for the controller's own toolchain (smoke 040de7db) do not spend a correction.
+  const toolchain = fullPlan();
+  toolchain.compatibility = ["npm CLI", "npm CLI (used for install/test/start argument arrays in factory.json)", "Node.js"].map((subject) => ({ subject, status: "blocked" }));
+  assert.doesNotThrow(() => validateFeaturePlan(toolchain, binding));
+});
+
+test("v2: a proof pending integration keeps the checks it proves pending when its feature is verified", () => {
+  const raw = fullPlan();
+  raw.slices[2].acceptance.push({ ...ob("TREND-2", "Populated trend renders with a month of history", ["SC-1"]), proof: { command: ["node", "--test", "test/populated.test.mjs"], expect: "passes", pending: "integration" } });
+  const plan = validateFeaturePlan(raw, binding);
+  assert.equal(plan.slices[2].acceptance[1].proof.pending, "integration");
+  assert.deepEqual(pendingChecks(plan.slices[2]), ["SC-1"]);
+  assert.deepEqual(pendingChecks(plan.slices[1]), []);
+  assert.deepEqual(pendingObligations(plan).map((item) => item.id), ["TREND-2"]);
+  // A pending obligation anywhere in the plan, or outstanding from an earlier plan, keeps the check pending for whichever feature closes it.
+  const closer = { id: "X", closes: ["SC-1", "MH-1"], acceptance: [] };
+  assert.deepEqual(pendingChecks(closer, { plan }), ["SC-1"]);
+  assert.deepEqual(pendingChecks(closer, { outstanding: [{ status: "pending", refs: ["MH-1"] }, { status: "superseded", refs: ["SC-1"] }] }), ["MH-1"]);
+});
+
+
+test("proof gate identity preserves component boundaries and the full plan digest", () => {
+  const job = {};
+  const item = (id, ref) => ({ id, refs: [ref], proof: { command: ["node", id], pending: "integration" } });
+  recordPendingProofs(job, "a".repeat(64), { id: "A-B", acceptance: [item("C", "MH-1")] });
+  recordPendingProofs(job, "a".repeat(64), { id: "A", acceptance: [item("B-C", "SC-1")] });
+  recordPendingProofs(job, "a".repeat(8) + "b".repeat(56), { id: "A", acceptance: [item("B-C", "SC-1")] });
+  assert.equal(new Set(job.outstandingProofs.map(e => e.key)).size, 3);
+  assert.equal(new Set(job.outstandingProofs.map(e => e.gate)).size, 3);
+  job.error = { code: "quality_gate_failed", details: { gate: job.outstandingProofs[1].gate } };
+  assert.equal(pendingProofFailure(job).obligation.id, "B-C");
+});
+
+
+test("passed proof evidence clears pending checks only for its own plan", async () => {
+  const { createHash } = await import("node:crypto");
+  const plan = fullPlan();
+  const closer = plan.slices[2];
+  closer.acceptance.push({ ...ob("INTEGRATED", "Populated trend is integrated with history", ["SC-1"]), proof: { command: ["node", "--test", "populated.mjs"], expect: "passes", pending: "integration" } });
+  const digest = p => createHash("sha256").update(JSON.stringify(p)).digest("hex");
+  const job = {};
+  recordPendingProofs(job, digest(plan), closer);
+  job.outstandingProofs[0].status = "passed";
+  assert.deepEqual(pendingChecks(closer, { plan, outstanding: job.outstandingProofs }), []);
+  const later = structuredClone(plan); later.slices[2].title += " revised";
+  assert.deepEqual(pendingChecks(later.slices[2], { plan: later, outstanding: job.outstandingProofs }), ["SC-1"]);
+});
+
+
+test("failure mappings distinguish integrated proofs from a feature gate using the same command", () => {
+  const job = {};
+  recordPendingProofs(job, "a".repeat(64), { id: "A", acceptance: [{ id: "B", refs: [], proof: { command: ["npm", "test"], pending: "integration" } }] });
+  job.error = { code: "quality_gate_failed", details: { gate: "test", command: ["npm", "test"], proofKeys: [] } };
+  assert.equal(pendingProofFailure(job), null, "a feature failure must not be treated as integration exhaustion");
+  delete job.error.details.proofKeys;
+  assert.equal(pendingProofFailure(job).obligation.id, "B", "older failures resolve through their command");
+  job.error.details.proofKeys = [job.outstandingProofs[0].key];
+  assert.equal(pendingProofFailure(job).obligation.id, "B", "a deduplicated integration gate preserves its target");
+});
+
+test("a case may supersede only an earlier feature's obligation; unknown ids are left to assertConsolidation", () => {
+  const stage = (id, supersedes) => ({ id, surface: "cli", action: "run the seed script", expect: "exit 0 with PASS", refs: [], ...(supersedes ? { supersedes } : {}) });
+  const plan = (supersedes) => featurePlan([
+    feature("STORE", [], [ob("STORE-1", "Scores persist across a restart", []), { ...ob("STORE-GATE", "Until the trend exists the seed script exits 1", []), cases: [stage("STORE-GATE-FAIL")] }]),
+    feature("RECORD", ["MH-1"], [ob("RECORD-1", "Owner records one score per day", ["MH-1"])], ["STORE"]),
+    feature("TREND", ["MH-2", "SC-1"], [ob("TREND-1", "Trend shows the seven-day average", ["MH-2", "SC-1"]), { ...ob("TREND-SEED", "The seed script passes once the trend exists", []), cases: [stage("TREND-SEED-PASS", supersedes)] }], ["RECORD"]),
+  ]);
+  assert.deepEqual(validateFeaturePlan(plan(["STORE-GATE"]), binding).slices[2].acceptance[1].cases[0].supersedes, ["STORE-GATE"]);
+  assert.throws(() => validateFeaturePlan(plan(["TREND-1"]), binding), /kept and also superseded by case TREND-SEED-PASS/);
+  assert.doesNotThrow(() => validateFeaturePlan(plan(["OLD-PLAN-ITEM"]), binding));
+});
+
+test('a recovery final gate reruns the original built features too, with a same-id repair replacing its original', () => {
+  const f = (id, proofId, cases) => ({ id, acceptance: [{ id: proofId, proof: { command: ['node', '--test', `${proofId}.test.mjs`] }, ...(cases && { cases }) }] });
+  const job = {
+    approvedPlan: { plan: { slices: [f('BASE', 'BASE-1'), f('SEARCH', 'SEARCH-1'), f('UNBUILT', 'UNBUILT-1')] } }, sliceDone: ['BASE', 'SEARCH'],
+    recoveryPhase: { plan: { slices: [f('SEARCH', 'SEARCH-R1'), f('PEOPLE', 'PEOPLE-1', [{ id: 'K', supersedes: ['BASE-1'] }])] }, done: ['SEARCH', 'PEOPLE'] },
+  };
+  assert.deepEqual(featureProofs(job).map(p => p.id), ['SEARCH.SEARCH-R1', 'PEOPLE.PEOPLE-1'], 'BASE-1 is superseded, SEARCH-1 replaced, UNBUILT never built');
+  job.recoveryPhase.plan.slices[1].acceptance[0].cases = undefined;
+  assert.deepEqual(featureProofs(job).map(p => p.id), ['BASE.BASE-1', 'SEARCH.SEARCH-R1', 'PEOPLE.PEOPLE-1']);
 });

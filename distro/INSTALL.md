@@ -80,10 +80,10 @@ A6, B5 and U2 all run **the same install command**, and it is always safe on an 
 install: it refreshes the machinery in `.ailib/` and `start.sh`, keeps `.aai/` if it is
 there, and never touches `projects/`. It comes in two forms:
 
-- **Online (default):** the `curl … bootstrap.sh` line shown in those steps. It downloads
-  the release from a private GitHub repo, so it needs the `gh` CLI signed in to an account
+- **Online (default):** the `gh api … bootstrap.sh` line shown in those steps. It downloads
+  the release from a private GitHub repo (the AIMM members' repo, `coachlou/aimm`), so it needs the `gh` CLI signed in to an account
   with access (`gh auth status`), or `GITHUB_TOKEN` set. Without that it stops with a line
-  saying to *ask for an invite* — that is not a broken machine; switch to the zip.
+  saying to *ask for an invite to the AIMM repo* — that is not a broken machine; switch to the zip.
 - **From a zip:** if the owner was sent a `solofactory-<version>.zip` (testers are), have
   them unzip it — double-clicking it is enough — and find the installer:
 
@@ -95,11 +95,11 @@ there, and never touches `projects/`. It comes in two forms:
   > it prints.
 
   Use the newest path it prints (highest version) as `<installer>`; if it prints nothing,
-  ask where they saved the zip. Then, wherever a step shows the `curl` line, run this
+  ask where they saved the zip. Then, wherever a step shows the `gh api` line, run this
   instead:
 
   ```sh
-  cd ~ && bash "<installer>" solofactory solofactory
+  bash "<installer>" solofactory "<SF>"
   ```
 
   Its output is the same `keep` / `sync` / `write` / `start:` lines as the online form.
@@ -107,6 +107,25 @@ there, and never touches `projects/`. It comes in two forms:
   *from*, and the install itself still lands in the Ubuntu home folder.
 
 ---
+
+## GitHub access — before the online install
+
+The online install reads the AIMM members' repo, so it needs the GitHub CLI (`gh`) signed
+in to the owner's GitHub account — the one that was added to `coachlou/aimm`. Zip installs
+skip this. Check first:
+
+```sh
+gh auth status
+```
+
+- **`command not found`** — install it. macOS: `brew install gh` if `brew` exists; otherwise
+  have them download the installer from https://cli.github.com and open it. Ubuntu/WSL:
+  `sudo apt update && sudo apt install -y gh`. Then check again.
+- **Not logged in** — `gh auth login`: GitHub.com, HTTPS, "Login with a web browser". It
+  prints a one-time code; they paste it into the page it opens and approve. Then check again.
+- **Signed in but the install says it cannot read `coachlou/aimm`** — they signed in with a
+  different GitHub account than the one that was invited. Run `gh auth status` and compare
+  the username to the invite; `gh auth login` again with the right one.
 
 ## Step 0 — New install, or an update?
 
@@ -117,8 +136,10 @@ most common way to waste twenty minutes and rattle them, so settle this first.
 
 Ask exactly this:
 
-> Two quick questions before we start. Have you set up SoloFactory on this computer
-> before? And are you on a Mac, or on Windows?
+> Three quick questions before we start. Have you set up SoloFactory on this computer
+> before? Are you on a Mac, or on Windows? And which folder should SoloFactory live in —
+> the usual place is a folder called `solofactory` in your home folder; just say so if you
+> don't mind.
 
 Then route:
 
@@ -127,6 +148,14 @@ Then route:
 | Never installed, Mac | **Track A** |
 | Never installed, Windows | **Track B** |
 | Already installed, or "I think so", or "not sure" | **Detect it** — below |
+
+- **The install folder (`<SF>`).** Remember their answer for the whole session; it is the
+  one value every later step depends on. Default `$HOME/solofactory`. Wherever this runbook
+  writes `<SF>`, put their folder there, as a full path in double quotes (`"$HOME/Documents/solofactory"`
+  — a bare `~` does not expand inside quotes), in every command and every instruction you
+  give them. On Windows it must be inside the Ubuntu home folder, never `/mnt/c/` (see B5).
+  If they name something odd (a system folder, a OneDrive/Dropbox folder, a path that is not
+  empty and is not a SoloFactory install), explain why and offer the default instead.
 
 - If they don't know Mac vs Windows: ask if the machine has an Apple logo on it. Apple
   logo → Mac.
@@ -139,7 +168,7 @@ see B1e; if there is no Ubuntu window at all, it is a new install: go to **Track
 paste:
 
 ```sh
-[ -f ~/solofactory/start.sh ] && { echo "INSTALLED at ~/solofactory"; grep -m1 'app:' ~/solofactory/.ailib/manifest.yaml; } || echo "NOT INSTALLED"
+[ -f "<SF>/start.sh" ] && { echo "INSTALLED at <SF>"; grep -m1 'app:' "<SF>/.ailib/manifest.yaml"; } || echo "NOT INSTALLED at <SF>"
 ```
 
 > This just checks whether SoloFactory is already on this computer. It changes nothing.
@@ -147,7 +176,7 @@ paste:
 
 | It prints | Meaning | Go to |
 |---|---|---|
-| `NOT INSTALLED` | Nothing at the default place | **Track A** or **Track B**. If they insist they installed it somewhere else, ask them for the folder name and re-run the check with that path; do not go hunting. |
+| `NOT INSTALLED at <SF>` | Nothing at that folder | **Track A** or **Track B**. If `<SF>` is not the default and they might have installed before, run the same check once on `$HOME/solofactory`; if that one is installed, ask whether they want to update it (use it as `<SF>`) or keep a second copy. Do not go hunting beyond that. |
 | `INSTALLED ...` and an `app:` line | A real install; the `app:` line is the version they have | **Updating an existing install** |
 | `INSTALLED ...` and **no** `app:` line | A folder exists but the install is incomplete | **Updating an existing install** — the update command repairs it |
 
@@ -310,19 +339,18 @@ run it again.
 
 ## A6. Install SoloFactory
 
-If you skipped the Step 0 check, run it now: an existing `~/solofactory` means this is an
+If you skipped the Step 0 check, run it now: an existing install at `<SF>` means this is an
 update — go to **Updating an existing install** instead, so the owner gets the update checks.
-Sent a zip? Use the zip form from **The install command**.
+Sent a zip? Use the zip form from **The install command**. Otherwise do **GitHub access** first.
 
-Ask where it should live. Default to a folder named `solofactory` in their home directory,
-and do not make them choose a path if they have no opinion.
+Install into `<SF>`, the folder you settled in Step 0. If you skipped Step 0, ask now.
 
 ```sh
-cd ~ && curl -fsSL https://raw.githubusercontent.com/coachlou/ambient-library/main/library/ambient-folder/bootstrap.sh | bash -s -- solofactory solofactory
+gh api -H 'Accept: application/vnd.github.raw' repos/coachlou/aimm/contents/aai-release/solofactory/library/ambient-folder/bootstrap.sh | bash -s -- solofactory "<SF>"
 ```
 
-> This is the real one — it sets up SoloFactory in a folder called `solofactory` in your home
-> directory. It'll print a list of files as it goes. Send me everything it prints.
+> This is the real one — it sets up SoloFactory in the folder you chose (`<SF>`). It will
+> print a list of files as it goes. Send me everything it prints.
 
 It ends with a `start:` line naming the launcher and the web address. Treat any line
 beginning with `warn` as a failure to fix, not a note to pass along — see **Fixing a bad
@@ -566,23 +594,23 @@ command -v claude
 
 ## B5. Install SoloFactory
 
-If you skipped the Step 0 check, run it now: an existing `~/solofactory` means this is an
+If you skipped the Step 0 check, run it now: an existing install at `<SF>` means this is an
 update — go to **Updating an existing install** instead, so the owner gets the update checks.
-Sent a zip? Use the zip form from **The install command**.
+Sent a zip? Use the zip form from **The install command**. Otherwise do **GitHub access** first.
 
 **It must live inside the Ubuntu home folder, never in `/mnt/c/`.** Windows drives mounted
 into Linux have different file permissions and are dramatically slower, and git behaves
-incorrectly on them. `cd ~` handles this; do not let the owner talk you into a Windows path
+incorrectly on them. Keep `<SF>` under the Ubuntu home (`$HOME/...`); do not let the owner talk you into a Windows path
 like `C:\Users\...`.
 
 If the owner wants it visible from Windows (for example in a OneDrive or apps folder), don't
-move it — offer this instead: paste `\\wsl.localhost\Ubuntu\home\<user>\solofactory` into
+move it — offer this instead: paste `\\wsl.localhost\Ubuntu\home\<user>\<folder name of SF>` into
 File Explorer's address bar and pin it to Quick access (or put a shortcut to that path in
 their folder). Never copy or move the real folder into OneDrive — sync will corrupt the git
 repo. The path only opens while WSL is running.
 
 ```sh
-cd ~ && curl -fsSL https://raw.githubusercontent.com/coachlou/ambient-library/main/library/ambient-folder/bootstrap.sh | bash -s -- solofactory solofactory
+gh api -H 'Accept: application/vnd.github.raw' repos/coachlou/aimm/contents/aai-release/solofactory/library/ambient-folder/bootstrap.sh | bash -s -- solofactory "<SF>"
 ```
 
 > This is the real one — it sets up SoloFactory. Send me everything it prints.
@@ -598,7 +626,7 @@ Go to **C1**.
 Verify the folder first:
 
 ```sh
-ls ~/solofactory
+ls "<SF>"
 ```
 
 Expect to see `start.sh` and `projects` listed, among others.
@@ -608,7 +636,7 @@ Now start it in **demo mode** for the first launch. Demo mode is deterministic a
 install works before anything costs them anything.
 
 ```sh
-cd ~/solofactory && SOLOFACTORY_DEMO=1 bash start.sh
+cd "<SF>" && SOLOFACTORY_DEMO=1 bash start.sh
 ```
 
 Tell them what to expect *before* they paste it — the behaviour is unusual and reads as a
@@ -620,7 +648,8 @@ hang if unexplained:
 >
 > Leave that window alone from now on. Don't close it, don't type in it.
 
-It prints a line like `SoloFactory → http://127.0.0.1:4173`.
+It prints a line like `SoloFactory → http://127.0.0.1:4173`. If it instead says the port is in use, see *Port 4173 is in use* under
+**Fixing a bad install**, and use the address it gives you in the step below.
 
 > Now open your web browser and go to: **http://127.0.0.1:4173**
 >
@@ -636,7 +665,7 @@ If the page loads, the install is proven. Have them stop it:
 Start it again, this time for real:
 
 ```sh
-cd ~/solofactory && bash start.sh
+cd "<SF>" && bash start.sh
 ```
 
 Then have them reload `http://127.0.0.1:4173` and tell you what the page says about the
@@ -670,7 +699,7 @@ Do not launch into how to build an app. Installation is finished. Say something 
 > with you at the points that matter.
 >
 > Whenever you want to use it again, open the same text window and type:
-> `cd ~/solofactory && bash start.sh`, then open that web address.
+> `cd "<SF>" && bash start.sh`, then open that web address.
 >
 > There's a **Manual** button at the top of the page, with pictures, whenever you want to
 > look something up.
@@ -681,7 +710,7 @@ Give them that restart command in its own copy/paste box — it is the one thing
 need again and will not remember:
 
 ```sh
-cd ~/solofactory && bash start.sh
+cd "<SF>" && bash start.sh
 ```
 
 If they say yes to building something, that is a separate conversation — the folder's own
@@ -691,8 +720,7 @@ If they say yes to building something, that is a separate conversation — the f
 
 # Updating an existing install
 
-You arrive here from **Step 0** with a confirmed install at `~/solofactory` (or the folder
-the owner named — substitute it throughout). Nothing from Tracks A/B or Part C is needed;
+You arrive here from **Step 0** with a confirmed install at `<SF>`. Nothing from Tracks A/B or Part C is needed;
 git, Node, and the coding agent are already in place. Updating is the same command as
 installing: it refreshes the machinery and leaves all their work untouched.
 
@@ -708,7 +736,7 @@ Updating underneath a running server leaves it serving stale code until restarte
 Sent a zip? Use the zip form from **The install command** — same result.
 
 ```sh
-cd ~ && curl -fsSL https://raw.githubusercontent.com/coachlou/ambient-library/main/library/ambient-folder/bootstrap.sh | bash -s -- solofactory solofactory
+gh api -H 'Accept: application/vnd.github.raw' repos/coachlou/aimm/contents/aai-release/solofactory/library/ambient-folder/bootstrap.sh | bash -s -- solofactory "<SF>"
 ```
 
 > This updates SoloFactory to the latest version. Your projects and settings are left exactly
@@ -732,7 +760,7 @@ stale window: fresh window, then A4 / B3 only if it persists.
 Confirm the version actually moved:
 
 ```sh
-grep -m1 'app:' ~/solofactory/.ailib/manifest.yaml
+grep -m1 'app:' "<SF>/.ailib/manifest.yaml"
 ```
 
 It must now print a newer version than the one you read in Step 0. If it prints the same
@@ -742,7 +770,7 @@ different folder or the wrong window; re-run U2 exactly.
 ## U3. Start it and prove it
 
 ```sh
-cd ~/solofactory && bash start.sh
+cd "<SF>" && bash start.sh
 ```
 
 > Same as always: it prints a web address and then looks frozen — that's it running. Leave
@@ -791,6 +819,17 @@ could change or remove them:
 > in an app you built before today, copy that app's folder somewhere safe first. Apps built
 > from now on keep their records where the factory never touches them.
 
+**If they were below 0.10.1 before the update**, a run parked on a faulty review test now offers a Waive button (see Troubleshooting); mention it only if they've hit that. Newer Node majors than the spec names are accepted, and a later feature may now update an earlier feature's test.
+
+**If they were below 0.10.0 before the update**, builds now go one feature at a time, and
+the run view shows them as a map of stops. Ask first whether a build was partway through
+when they stopped the server; if one was, tell them it may need to be started again. Then
+say, briefly:
+
+> Builds now go one feature at a time, and the run page shows them as a map, so you can see
+> what's done and what's next. If a build stops or pauses and needs you, an amber note at the
+> top of every page tells you which one, and Open takes you straight to it.
+
 Do not walk an updating owner through Part C. They already know how to use the app; the
 update is finished once U4 holds.
 
@@ -816,15 +855,19 @@ Work these yourself. Do not read this table out loud.
 | `warn  node 22+ not found on PATH` | Node missing, or installed in a stale window | Fresh terminal window first; if still missing, A4 / B3 |
 | `warn  node 26 is newer than SoloFactory supports` (any version above 24) | Node too new for some packages the factory builds with | A4 / B3 to install Node 24 |
 | `node 22+ is required` and it **exits** | Node not on PATH at all | A4 / B3 |
-| `no .aai/ above ...` | Running `start.sh` from the wrong folder, or a half-install | `cd ~/solofactory` first; if that fails, re-run the installer |
+| `no .aai/ above ...` | Running `start.sh` from the wrong folder, or a half-install | `cd "<SF>"` first; if that fails, re-run the installer |
 | Page says *"Select an authenticated subscription provider"* | CLI missing or not signed in | C2 |
 | Page says *"Codex CLI is not installed"* / *"Claude Code is not installed"* | Not on PATH in the window the server was started from | Fresh window, verify `command -v claude`, restart the server |
 | Signed in, but still shown as unauthenticated | API-key auth, which is rejected by design | Sign in again via the browser flow with a subscription account |
 | `Run \`codex login\` and choose ChatGPT sign-in.` | Codex signed in with an API key | `codex login`, pick ChatGPT |
 | `requires a newer version of Codex` | Codex CLI is out of date | Update the Codex CLI, then restart the server |
-| Browser shows "can't connect" / "site can't be reached" | The server window was closed or `Control`+`C`'d | Restart with `cd ~/solofactory && bash start.sh` and leave it running |
-| `EADDRINUSE` | Something else is on port 4173 | Start with a different port: `cd ~/solofactory && PORT=5000 bash start.sh`, then use `http://127.0.0.1:5000` |
-| `ask for an invite to that repo` right after the `curl` line | No GitHub access to the private release | `gh auth login` with an account that has access, or use a zip — see **The install command** |
+| Browser shows "can't connect" / "site can't be reached" | The server window was closed or `Control`+`C`'d | Restart with `cd "<SF>" && bash start.sh` and leave it running |
+| Run parks as *Repair budget exhausted* | A gate kept failing after its repairs were spent | In the run view choose **Prepare repair plan**; once the independent review passes, repairs start on their own. Resume alone does not renew the budget |
+| Run parks as *Repair budget exhausted* and also shows **Waive BUG-n (faulty test)** | The review's own test, not the app, looks wrong | Read the note under the button. If the test really is wrong, type why in the box above and choose **Waive**, then Resume. Otherwise choose **Prepare repair plan** |
+| Run fails with `prompt_too_large` ("over SoloFactory's 200000-character prompt limit") | A factory defect: the input cannot fit, so retrying cannot help and no agent was started | Do not retry. Have the owner use **Report this run** (or Feedback) in the top bar |
+| `Port 4173 is in use by another app` | Another app already uses port 4173 | Start with a different port: `cd "<SF>" && PORT=5000 bash start.sh`, then use `http://127.0.0.1:5000` everywhere this guide says 4173 |
+| `SoloFactory is already running at …` | A factory from an earlier window is still running | Open that address; don't start a second one |
+| `ask for an invite to that repo` right after the `gh api` line | No GitHub access to the AIMM members' repo | `gh auth login` with an account that has access, or use a zip — see **The install command** |
 | `rsync: command not found` | Ubuntu missing rsync | B2 |
 | `curl: command not found` | Ubuntu missing curl | B2 |
 | `git: command not found` | git missing | A3 / B2 |
@@ -849,7 +892,7 @@ yourself; do not ask the owner to confirm them.
 1. `node --version` prints v22, v23 or v24.
 2. `git --version` prints a version.
 3. `command -v claude` (or `codex`) prints a path, in the same window the server starts from.
-4. `~/solofactory/start.sh` exists.
+4. `<SF>/start.sh` exists.
 5. `bash start.sh` prints the `SoloFactory → http://127.0.0.1:4173` line and keeps running.
 6. The owner has loaded that address in their browser and seen the page, with the project
    selector in the header.

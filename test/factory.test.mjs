@@ -7,7 +7,7 @@ import http from "node:http";
 import { JobStore } from "../src/store.mjs";
 import { buildRecoveryPacket, FactoryError, SoloFactory, validateMetrics } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
-import { buildPrompt, continuationPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "../src/prompts.mjs";
+import { ALL_BLOCKERS, CONTROLLER_FACTS, PLAN_CHECKLIST, buildPrompt, continuationPrompt, featurePlanPrompt, featureReviewPrompt, planAuditPrompt, planCorrectionPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "../src/prompts.mjs";
 
 const brief = {
   workingName: "Pocket Pulse",
@@ -17,6 +17,13 @@ const transcript = [
   { role: "assistant", content: "What should we build?" },
   { role: "user", content: "A daily tracker with clear acceptance behavior." },
 ];
+// A v1 slice run from before planned features (planVersion 2); these must still run and resume.
+async function legacySliceJob(store) {
+  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  delete job.planVersion;
+  await store.writeState(job);
+  return job;
+}
 
 test("metrics validation accepts route lists and aggregate route maps", () => {
   const base = { uptimeSeconds: 1, requests: { total: 2, errors: 0 }, latencyMs: { average: 3 } };
@@ -37,6 +44,37 @@ test("every worker prompt keeps owner data in data/ and tests out of it", () => 
   for (const prompt of [buildPrompt(), sliceBuildPrompt(slice, {}), sliceContinuationPrompt(slice, {}), continuationPrompt("build"), repairPrompt(".factory/logs/x.log"), reviewPrompt()]) {
     assert.match(prompt, /data\//);
   }
+});
+
+test("a repair prompt reads an oversized slice from its file instead of inlining it", () => {
+  const big = { id: "S1", title: "Big", dependsOn: [], acceptance: ["x".repeat(70_000)] };
+  const prompt = repairPrompt(".factory/logs/x.log", big);
+  assert.ok(prompt.length < 10_000);
+  assert.match(prompt, /read \.factory\/logs\/feature\.json/);
+  assert.match(repairPrompt(".factory/logs/x.log", { ...big, acceptance: ["small"] }), /small/);
+});
+
+test("the final review is scoped to integration and deploy readiness only after feature reviews", () => {
+  const scoped = reviewPrompt({ featureReviewed: true });
+  assert.match(scoped, /cross-feature/);
+  assert.match(scoped, /health endpoint/);
+  assert.doesNotMatch(reviewPrompt(), /cross-feature/);
+  // Scoping never drops the per-check verdict contract the controller validates.
+  for (const prompt of [scoped, reviewPrompt()]) {
+    assert.match(prompt, /exactly one \{id,status,evidence\} per check/);
+    // The reviewer must not spend its cap on whole-suite runs the controller repeats anyway.
+    assert.match(prompt, /never run whole suites/);
+  }
+  // A repair-plan review runs before the controller's rerun, so the prompt must not claim one already happened.
+  assert.doesNotMatch(scoped, /reran every feature/);
+});
+
+test("every worker prompt forbids installing system software", () => {
+  const slice = { id: "S1", title: "One", goal: "g", acceptance: [] };
+  const prompts = [buildPrompt(), repairPrompt(".factory/last-failure-1.txt"), reviewPrompt(), reviewPrompt({ featureReviewed: true }),
+    continuationPrompt("build"), sliceBuildPrompt(slice, { slices: [slice] }), sliceContinuationPrompt(slice, { slices: [slice] })];
+  // 2026-10-15: an agent brew-installed Docker and colima to satisfy a container test.
+  for (const prompt of prompts) assert.match(prompt, /Never install system software/);
 });
 
 test("full lifecycle reaches completed only after real health and metrics checks", async (t) => {
@@ -221,7 +259,7 @@ test("a failed build preserves its workspace and resumes the same run", async ()
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-resume-"));
   const store = new JobStore(root);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture" });
+  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "single" });
   const fixture = createFixtureProvider();
   const failingProvider = {
     id: "fixture",
@@ -266,7 +304,7 @@ test("slice strategy runs every vertical slice with per-slice gates and records 
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-slices-"));
   const store = new JobStore(root);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  const job = await legacySliceJob(store);
   const calls = [];
   const commandRunner = async ({ executable, args }) => {
     calls.push([executable, ...args].join(" "));
@@ -303,7 +341,7 @@ test("a failing gate inside a slice is repaired within that slice and the run co
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-slice-repair-"));
   const store = new JobStore(root);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  const job = await legacySliceJob(store);
   let call = 0;
   const commandRunner = async () => {
     call += 1;
@@ -378,7 +416,7 @@ test("a slice run gets a second-opinion plan review before any build turn", asyn
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-planreview-"));
   const store = new JobStore(root);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  const job = await legacySliceJob(store);
   const factory = new SoloFactory({
     store,
     provider: createFixtureProvider(),
@@ -400,7 +438,7 @@ test("a plan review that leaves the plan invalid parks the run and resume recove
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-planreview-fail-"));
   const store = new JobStore(root);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  const job = await legacySliceJob(store);
   const fixture = createFixtureProvider();
   const corruptingProvider = {
     id: "fixture",
@@ -439,7 +477,7 @@ test("a project is a git repo: app at the root, evidence gitignored, commits at 
   const project = await mkdtemp(path.join(os.tmpdir(), "solo-factory-project-"));
   const store = new JobStore(project);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture" });
+  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "single" });
   const factory = new SoloFactory({
     store,
     provider: createFixtureProvider(),
@@ -517,14 +555,16 @@ test("a project with a shipped manifest specs and slices the brief as a follow-o
   assert.equal(result.followOn, true);
   assert.match(result.baseCommit, /^[0-9a-f]{40}$/, "a follow-on records the shipped app's commit to rewind to");
   assert.equal(await store.git("show", `${result.baseCommit}:factory.json`), '{"version":1}');
-  assert.match(prompts.specification, /follow-on release/);
+  assert.match(prompts.specification, /NEXT release only/);
   assert.match(prompts.specification, /cumulative/);
-  assert.doesNotMatch(prompts.specification, /Slice 1 must be a thin walking skeleton/);
-  assert.match(prompts["plan-review"], /no\s+skeleton slice is needed/);
+  assert.match(prompts["feature-plan"], /Follow-on release/);
+  assert.match(prompts["feature-plan"], /no walking skeleton/);
+  assert.doesNotMatch(prompts["feature-plan"], /first feature carries factory\.json/);
+  assert.match(prompts["plan-review-1"], /existing app and tests/);
   const firstSlice = Object.keys(prompts).find((stage) => stage.startsWith("build-slice-"));
   assert.ok(firstSlice, JSON.stringify(Object.keys(prompts)));
-  assert.doesNotMatch(prompts[firstSlice], /walking-skeleton slice/);
-  assert.match(prompts[firstSlice], /Earlier releases already built this app/);
+  assert.doesNotMatch(prompts[firstSlice], /If factory\.json does not exist yet/);
+  assert.match(prompts[firstSlice], /Earlier releases built this app/);
 
   const greenfield = await mkdtemp(path.join(os.tmpdir(), "solo-factory-greenfield-"));
   const freshStore = new JobStore(greenfield);
@@ -539,7 +579,8 @@ test("a project with a shipped manifest specs and slices the brief as a follow-o
   }).start(fresh.id);
   assert.equal(freshResult.followOn, false);
   assert.equal(freshResult.baseCommit, undefined, "a first build has no good version to rewind to");
-  assert.match(freshPrompts.specification, /Slice 1 must be a thin walking skeleton/);
+  assert.match(freshPrompts["feature-plan"], /first feature carries factory\.json/);
+  assert.doesNotMatch(freshPrompts["feature-plan"], /Follow-on release/);
 });
 
 test("a project's next release replaces its previous live deployment", async (t) => {
@@ -571,7 +612,7 @@ test("pause during slice 1 parks before slice 2 on a committed tree; resume repl
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-pause-"));
   const store = new JobStore(root);
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "slices" });
+  const job = await legacySliceJob(store);
   const fixture = createFixtureProvider();
   const options = { commandRunner: async () => ({ code: 0, output: "passed" }), deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9975" }) };
   const factory = new SoloFactory({ ...options, store, provider: { id: "fixture", run: async (args) => {
@@ -658,6 +699,23 @@ http.createServer((q, r) => r.end(q.url === "/health" ? "ok" : JSON.stringify({ 
   }
 });
 
+test("a metrics route that answers 500 is a repairable invalid_metrics, not a park", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-metrics-500-"));
+  const store = new JobStore(root);
+  await store.init();
+  await writeFile(path.join(root, "app.mjs"), `import http from "node:http";
+http.createServer((q, r) => { if (q.url === "/health") return r.end("ok"); r.statusCode = 500; r.end("boom"); }).listen(process.env.PORT);`);
+  const manifest = { version: 1, healthPath: "/health", metricsPath: "/_factory/metrics", commands: { start: ["node", "app.mjs"] } };
+  await mkdir(path.join(root, ".factory", "logs"), { recursive: true });
+  const job = await store.create({ brief, transcript, provider: "fixture" });
+  const factory = new SoloFactory({ store, provider: createFixtureProvider() });
+  try {
+    await assert.rejects(factory.deployLocal(job, manifest, new AbortController().signal), (error) => error.code === "invalid_metrics" && /HTTP 500/.test(error.message));
+  } finally {
+    await factory.shutdown();
+  }
+});
+
 test("a set-aside follow-on that was rolled back does not block relaunching the app it restored", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-relaunch-aside-"));
   const store = new JobStore(root);
@@ -718,4 +776,60 @@ test("agent usage sums into run telemetry and each run segment lands in runs.jso
   assert.equal(last.tokens.total.inputTokens, 1000 * turns);
   assert.match(last.harness.version, /^\d+\.\d+\.\d+$/);
   assert.ok(last.wallMs > 0 && last.stageMs.specifying >= 0);
+});
+
+test("planner, plan reviewer and corrector share one checklist and the controller facts", () => {
+  // Live plans took four review rounds, each surfacing a rule the planner was never told.
+  for (const prompt of [featurePlanPrompt(), planAuditPrompt(), planCorrectionPrompt(["x"])]) {
+    assert.ok(prompt.includes(PLAN_CHECKLIST));
+    assert.ok(prompt.includes(CONTROLLER_FACTS));
+  }
+  assert.ok(planAuditPrompt().includes(ALL_BLOCKERS));
+  // Smoke 90b8b32e: reviews kept finding the untested lower end of a range, one surface at a time.
+  assert.match(PLAN_CHECKLIST, /BOTH ends/);
+  assert.match(PLAN_CHECKLIST, /every input or route that validates it/);
+  assert.match(PLAN_CHECKLIST, /step its action never performs/);
+  // Smoke 29924815: a third reviewer blocked a case-less requirement two earlier reviews accepted.
+  assert.match(PLAN_CHECKLIST, /cases are optional/);
+  assert.match(CONTROLLER_FACTS, /Never assert on git status/);
+});
+
+test("the specification turns delivery order into dependencies, never into acceptance gates", () => {
+  // A smoke brief that fixed delivery order became ACCEPTANCE gates asserting a route was still 404 and
+  // the tree was clean: one planning round, three repairs and a failed feature on nothing the product needs.
+  for (const prompt of [specificationPrompt(), specificationPrompt(true), specificationPrompt(false, { followOn: true })]) {
+    assert.match(prompt, /delivery order[^.]*dependsOn/);
+    assert.match(prompt, /never[^.]*(absence|not yet exist)/i);
+    assert.match(prompt, /never[^.]*repository state/i);
+  }
+});
+
+test("the feature reviewer judges cased checks by their tests, not by re-exploring the repo", () => {
+  const prompt = featureReviewPrompt({ id: "F2", acceptance: [] });
+  assert.match(prompt, /case[^.]*test[^.]*asserts what (the|its) case says/i);
+  assert.match(prompt, /earlier features?[^.]*(not|never)[^.]*(reread|re-read|rerun|re-run|explore)/i);
+});
+
+test("a resumed build reuses only its own feature's build session", () => {
+  const job = { agentSessions: { "build-slice-API-AUTH": "auth", "recovery-p-API-review-1": "reviewer", "recovery-p-API": "build", "build-slice-API": "api" } };
+  const factory = Object.create(SoloFactory.prototype);
+  assert.equal(factory.resumeSessionFor(job, "slice-resume-API"), "api");
+  assert.equal(factory.resumeSessionFor(job, "recovery-p-API-resume"), "build");
+  assert.equal(factory.resumeSessionFor(job, "slice-resume-API-AUTH"), "auth");
+  assert.equal(factory.resumeSessionFor(job, "slice-resume-WEB"), null);
+});
+
+// Lou, 2026-10-16: Docker is optional; container files are written, never executed by checks.
+test("every planner, builder, repair and reviewer prompt keeps checks off Docker and other operating systems", async () => {
+  const prompts = await import("../src/prompts.mjs");
+  const { repairPlanPrompt } = await import("../src/feature-recovery.mjs");
+  const slice = { id: "F", title: "F", objective: "o", acceptance: [], closes: [], dependsOn: [] };
+  const all = {
+    specification: prompts.specificationPrompt(true), featurePlan: prompts.featurePlanPrompt(), planAudit: prompts.planAuditPrompt(),
+    planCorrection: prompts.planCorrectionPrompt(["x"]), repairPlan: repairPlanPrompt("p.json", "r.json"),
+    build: prompts.featureBuildPrompt(slice, { owned: [], planDigest: "d" }), repair: prompts.repairPrompt("f.txt", slice),
+    featureReview: prompts.featureReviewPrompt(slice), review: prompts.reviewPrompt(),
+  };
+  for (const [name, text] of Object.entries(all)) assert.ok(text.includes(prompts.HOST_RULE), `${name} lacks the host rule`);
+  assert.doesNotMatch(prompts.CONTROLLER_FACTS, /Every proof of every built feature reruns/);
 });

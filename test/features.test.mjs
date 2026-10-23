@@ -1,0 +1,1195 @@
+// Planned-feature (slices.json v2) execution: the PRD acceptance matrix at the factory level.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { execFile } from "node:child_process";
+import os from "node:os";
+import { JobStore } from "../src/store.mjs";
+import { SoloFactory, continuationAction } from "../src/factory.mjs";
+import { createFixtureProvider } from "../src/fixture-provider.mjs";
+import { digest } from "../src/feature-recovery.mjs";
+import { watchConfig } from "../src/watchdog.mjs";
+
+const brief = { workingName: "Pocket Pulse", acceptanceScenarios: ["A user records a score."] };
+const transcript = [{ role: "user", content: "A daily tracker with clear acceptance behavior." }];
+const deployer = async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9981" });
+const passing = async () => ({ code: 0, output: "passed" });
+
+// A default (planned) run whose fixture turns can be post-processed per stage by `after`.
+async function plannedRun({ after = async () => {}, commandRunner = passing, uploads = {} } = {}) {
+  const store = new JobStore(await mkdtemp(path.join(os.tmpdir(), "solo-factory-features-")));
+  await store.init();
+  // Supplied specs and prototype handoffs arrive at intake and are attached by the brief's own transcript.
+  for (const [name, body] of Object.entries(uploads)) {
+    await mkdir(path.join(store.appDir(), ".factory/uploads"), { recursive: true });
+    await writeFile(path.join(store.appDir(), ".factory/uploads", name), body);
+  }
+  const attached = Object.keys(uploads).map((name) => ({ role: "user", content: `Attached file: .factory/uploads/${name}` }));
+  const job = await store.create({ brief, transcript: [...transcript, ...attached], provider: "fixture" });
+  assert.equal(job.planVersion, 2);
+  const fixture = createFixtureProvider();
+  const provider = { id: "fixture", async run(options) {
+    const result = await fixture.run(options);
+    await after(options.context.stage, options.cwd, options.context, options.prompt);
+    return result;
+  } };
+  const make = (overrides = {}) => new SoloFactory({ store, provider, commandRunner, deployer, autoStartRepairs: false, ...overrides });
+  return { store, job, make, factory: make() };
+}
+
+const json = async (file) => JSON.parse(await readFile(file, "utf8"));
+const patch = async (file, change) => { const value = await json(file); change(value); await writeFile(file, `${JSON.stringify(value, null, 2)}\n`); };
+const started = async (store, id) => (await store.events(id, 1000)).filter((event) => event.type === "agent.started").map((event) => event.message);
+const count = (messages, needle) => messages.filter((message) => message.includes(needle)).length;
+
+test("a plan verdict with the wrong digest runs zero implementation turns", async () => {
+  const { store, job, factory } = await plannedRun({ after: async (stage, cwd) => {
+    if (stage === "plan-review-1") await patch(path.join(cwd, ".factory/plan-review-result.json"), (verdict) => { verdict.planDigest = "0".repeat(64); });
+  } });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "failed");
+  assert.equal(result.error.code, "plan_verdict_invalid");
+  assert.equal(result.approvedPlan, undefined);
+  assert.equal(count(await started(store, job.id), "build-slice-"), 0);
+});
+
+test("a planning reviewer that edits the plan cannot approve it, and nothing is built", async () => {
+  const { store, job, factory } = await plannedRun({ after: async (stage, cwd) => {
+    if (stage === "plan-review-1") await patch(path.join(cwd, ".factory/slices.json"), (plan) => { plan.slices[1].title = "Reviewer rewrite"; });
+  } });
+  const result = await factory.start(job.id);
+  assert.equal(result.error.code, "plan_verdict_invalid");
+  assert.equal(count(await started(store, job.id), "build-slice-"), 0);
+});
+
+test("a planning turn that writes app source runs zero implementation turns", async () => {
+  const { store, job, factory } = await plannedRun({ after: async (stage, cwd) => {
+    if (stage === "feature-plan") await writeFile(path.join(cwd, "server.js"), "// planner wrote code\n");
+  } });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "failed");
+  assert.equal(result.error.code, "plan_mutation");
+  assert.equal(result.approvedPlan, undefined);
+  assert.equal(count(await started(store, job.id), "build-slice-"), 0);
+});
+
+test("resume after the approved plan was edited fails closed with no new build turn", async () => {
+  let crash = true;
+  const { store, job, make } = await plannedRun({ after: async (stage) => {
+    if (stage === "build-slice-SLICE-SKELETON" && crash) { crash = false; throw Object.assign(new Error("agent crashed"), { code: "unexpected_error" }); }
+  } });
+  const parked = await make().start(job.id);
+  assert.equal(parked.state, "failed");
+  assert.ok(parked.approvedPlan);
+  await patch(path.join(store.appDir(job.id), ".factory/slices.json"), (plan) => { plan.slices[0].title = "Edited after approval"; });
+  const before = count(await started(store, job.id), "build-slice-");
+  const resumed = await make().resume(job.id);
+  assert.equal(resumed.state, "failed");
+  assert.equal(resumed.error.code, "stale_plan");
+  assert.equal(count(await started(store, job.id), "build-slice-"), before);
+});
+
+test("each scoped review sees only its own feature's checks, so later features never block it", async () => {
+  const requests = {};
+  const { job, factory } = await plannedRun({ after: async (stage, cwd) => {
+    if (stage.startsWith("feature-review-")) requests[stage] = await json(path.join(cwd, ".factory/review-request.json"));
+  } });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  const ids = (stage) => requests[stage].checks.map((check) => check.id);
+  assert.deepEqual(ids("feature-review-SLICE-SKELETON-1"), ["SKELETON-1"]);
+  assert.ok(ids("feature-review-SLICE-UI-1").includes("SC-1") && ids("feature-review-SLICE-UI-1").includes("UI-1"));
+  assert.match(requests["feature-review-SLICE-UI-1"].candidate, /^[0-9a-f]{64}$/);
+});
+
+test("a feature with green gates but missing behavior is never done; resume does not refill its budget", async () => {
+  const block = async (stage, cwd) => {
+    if (!stage.startsWith("feature-review-SLICE-UI-")) return;
+    await patch(path.join(cwd, ".factory/review-result.json"), (report) => {
+      report.verdict = "blocked";
+      report.blockers = ["The score form is not wired to storage"];
+      report.checks[0].status = "missing";
+    });
+  };
+  const { store, job, make } = await plannedRun({ after: block });
+  const failed = await make().start(job.id);
+  assert.equal(failed.state, "failed");
+  assert.deepEqual(failed.sliceDone, ["SLICE-SKELETON"]);
+  assert.equal(failed.sliceIndex, 1);
+  assert.equal(failed.featureCursor.id, "SLICE-UI");
+  const events = await store.events(job.id, 1000);
+  assert.equal(events.filter((event) => event.type === "slice.completed" && event.slice === "SLICE-UI").length, 0);
+  let turns = await started(store, job.id);
+  assert.equal(count(turns, "repair-"), 2, "two repairs exhaust the feature budget");
+
+  await assert.rejects(make().resume(job.id), { code: "repair_plan_required" });
+  const after = await store.read(job.id);
+  assert.equal(after.state, "failed");
+  assert.equal(after.attempt, failed.attempt);
+  assert.deepEqual(after.sliceDone, ["SLICE-SKELETON"]);
+  turns = await started(store, job.id);
+  assert.equal(count(turns, "repair-"), 2, "resume does not replenish the feature budget");
+});
+
+test("final integration has its own two-repair budget after every feature is verified", async () => {
+  const { store, job, factory } = await plannedRun({ after: async (stage, cwd) => {
+    if (stage !== "review") return;
+    await patch(path.join(cwd, ".factory/review-result.json"), (report) => {
+      report.verdict = "blocked";
+      report.blockers = ["Whole-app regression"];
+      report.checks[0].status = "missing";
+    });
+  } });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "failed");
+  assert.deepEqual(result.sliceDone, ["SLICE-SKELETON", "SLICE-UI"]);
+  const events = await store.events(job.id, 1000);
+  const lastFeature = events.findLastIndex((event) => event.type === "slice.completed");
+  const finalRepairs = events.slice(lastFeature).filter((event) => event.type === "agent.started" && event.message.includes("repair-"));
+  assert.equal(finalRepairs.length, 2);
+  assert.equal(count(await started(store, job.id), "repair-"), 2, "no feature repairs were spent");
+});
+
+// The skeleton's own proof runs outside npm test, so only a rerun at final integration sees a later feature break it.
+const e2eSkeleton = async (stage, cwd) => {
+  if (stage === "feature-plan") await patch(path.join(cwd, ".factory/slices.json"), (plan) => { plan.slices[0].acceptance[0].proof.command = ["node", "e2e/skeleton.mjs"]; });
+};
+const gateOf = (options) => options.gate;
+
+test("a feature's checks run its own proofs without the whole suite; after a repair the failed gate runs first", async () => {
+  const order = [];
+  let failures = 1;
+  const commandRunner = async (options) => {
+    order.push(gateOf(options));
+    if (options.args[0] === "e2e/skeleton.mjs" && failures-- > 0) return { code: 1, output: "skeleton e2e failed" };
+    return { code: 0, output: "passed" };
+  };
+  const { job, factory } = await plannedRun({ after: e2eSkeleton, commandRunner });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  const failed = order.indexOf("proof-SKELETON-1");
+  assert.deepEqual(order.slice(0, failed + 1), ["install", "build", "proof-SKELETON-1"]);
+  // The repair left dependencies alone, so install does not rerun.
+  assert.deepEqual(order.slice(failed + 1, failed + 3), ["proof-SKELETON-1", "build"]);
+  assert.ok(order.includes("test"), "the whole suite still runs at final integration");
+  assert.equal(order.filter((gate) => gate === "install").length, 1, "later features and integration reuse the first install");
+});
+
+test("a final reviewer's source edit voids its pass: the change is verified, then reviewed again", async () => {
+  let reviews = 0;
+  const { store, job, factory } = await plannedRun({ after: async (stage, cwd) => {
+    if (stage === "review" && ++reviews === 1) await writeFile(path.join(cwd, "review-fix.js"), "// reviewer fix\n");
+  } });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(reviews, 2, "the edited candidate got a fresh review");
+  const events = await store.events(job.id, Infinity);
+  const voided = events.findIndex((event) => event.type === "gate.failed" && event.gate === "review" && /changed source/.test(event.message));
+  assert.ok(voided > 0, "the edited verdict is voided");
+  const second = events.findLastIndex((event) => event.type === "agent.started" && event.stage === "review");
+  assert.ok(events.slice(voided, second).some((event) => event.type === "gate.started" && event.gate === "test"), "the edit is verified before the fresh review");
+  assert.ok(events.slice(second).some((event) => event.type === "gate.skipped"), "the unedited second pass reuses that verify");
+});
+
+test("a final reviewer that keeps changing source stops the run instead of looping", async () => {
+  let reviews = 0;
+  const { job, factory } = await plannedRun({ after: async (stage, cwd) => {
+    if (stage === "review") await writeFile(path.join(cwd, "review-fix.js"), `// reviewer fix ${++reviews}\n`);
+  } });
+  const result = await factory.start(job.id);
+  assert.equal(result.error?.code, "review_rejected");
+  assert.match(result.error.message, /kept changing source/);
+  assert.equal(reviews, 3);
+});
+
+test("planning agents can run the controller's own plan validation before they finish", async () => {
+  const runs = [];
+  const after = async (stage, cwd) => {
+    if (stage !== "feature-plan") return;
+    const check = () => new Promise((resolve) => execFile(process.execPath, [".factory/check-plan.mjs"], { cwd }, (error, stdout, stderr) => resolve({ code: error?.code ?? 0, out: stdout + stderr })));
+    runs.push(await check());
+    const file = path.join(cwd, ".factory/slices.json");
+    const valid = await readFile(file, "utf8");
+    await patch(file, (plan) => { plan.contractDigest = "stale"; });
+    runs.push(await check());
+    await writeFile(file, valid);
+  };
+  const { job, factory } = await plannedRun({ after });
+  assert.equal((await factory.start(job.id)).state, "completed");
+  assert.equal(runs[0].code, 0, runs[0].out);
+  assert.match(runs[0].out, /^OK/);
+  assert.equal(runs[1].code, 1);
+  assert.match(runs[1].out, /INVALID: Feature plan does not match this run/);
+});
+
+// Neither feature's proof is the whole suite, so only final integration runs npm test.
+const scopedProofs = async (stage, cwd) => {
+  if (stage === "feature-plan") await patch(path.join(cwd, ".factory/slices.json"), (plan) => {
+    plan.slices[0].acceptance[0].proof.command = ["node", "e2e/skeleton.mjs"];
+    plan.slices[1].acceptance[0].proof.command = ["node", "--test", "ui.test.mjs"];
+  });
+};
+
+test("a later feature that breaks an earlier feature's test is caught and repaired at final integration", async () => {
+  const order = [];
+  let broken = false;
+  const after = async (stage, cwd) => {
+    await scopedProofs(stage, cwd);
+    if (stage === "build-slice-SLICE-UI") broken = true;
+    if (stage.startsWith("repair-")) { broken = false; await writeFile(path.join(cwd, "regression-fix.js"), "// fixed\n"); }
+  };
+  const commandRunner = async (options) => {
+    order.push(gateOf(options));
+    return [options.executable, ...options.args].join(" ") === "npm test" && broken ? { code: 1, output: "server.test.mjs: 1 failing" } : { code: 0, output: "passed" };
+  };
+  const { store, job, factory } = await plannedRun({ after, commandRunner });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  const events = await store.events(job.id, Infinity);
+  const lastFeature = events.findLastIndex((event) => event.type === "slice.completed");
+  assert.ok(!events.slice(0, lastFeature).some((event) => event.type === "gate.started" && event.gate === "test"), "feature checks never ran the whole suite");
+  const final = events.slice(lastFeature);
+  assert.ok(final.some((event) => event.type === "gate.failed" && event.gate === "test"), "integration caught the regression");
+  assert.equal(count(await started(store, job.id), "repair-"), 1, "one integration repair, no feature repairs");
+  assert.ok(final.findLastIndex((event) => event.type === "gate.passed" && event.gate === "test") > final.findIndex((event) => event.type === "gate.failed"), "the suite passes after the repair");
+});
+
+test("a run saved before install and integration results were recorded reinstalls and re-verifies on resume", async () => {
+  const legacy = async (store, id) => {
+    const file = path.join(store.jobDir(id), "state.json");
+    await patch(file, (state) => { delete state.installedDeps; delete state.integrationVerified; });
+  };
+  // Parked at integration: resume reinstalls and reruns the whole suite.
+  {
+    let timedOut = false;
+    const commandRunner = async (options) => {
+      const gate = gateOf(options);
+      if (gate === "test" && !timedOut) { timedOut = true; return { code: null, timedOut: true, timeoutReason: "hard", output: "interrupted" }; }
+      return { code: 0, output: "passed" };
+    };
+    const run = await plannedRun({ after: scopedProofs, commandRunner });
+    const parked = await run.factory.start(run.job.id);
+    assert.equal(parked.error?.code, "gate_timeout");
+    await legacy(run.store, run.job.id);
+    const mark = (await run.store.events(run.job.id, Infinity)).length;
+    const resumed = await run.make().resume(run.job.id);
+    assert.equal(resumed.state, "completed", resumed.error?.message);
+    const gates = (await run.store.events(run.job.id, Infinity)).slice(mark).filter((event) => event.type === "gate.passed").map((event) => event.gate);
+    assert.ok(gates.includes("install") && gates.includes("test"), `resume reinstalled and re-verified: ${gates}`);
+  }
+  // Parked mid-check on a later feature: with no install record, the resumed check reinstalls.
+  {
+    let factory, jobId, builds = 0;
+    const commandRunner = async (options) => {
+      if (gateOf(options) === "build" && ++builds === 2) { await factory.pause(jobId); return { code: 1, output: "1 failing" }; }
+      return { code: 0, output: "passed" };
+    };
+    const run = await plannedRun({ after: scopedProofs, commandRunner });
+    ({ factory } = run);
+    jobId = run.job.id;
+    const parked = await factory.start(jobId);
+    assert.equal(parked.state, "paused", parked.error?.message);
+    assert.equal(parked.featureCursor.substage, "checking");
+    assert.equal(parked.featureCursor.id, "SLICE-UI");
+    await legacy(run.store, jobId);
+    const mark = (await run.store.events(jobId, Infinity)).length;
+    const resumed = await run.make().resume(jobId);
+    assert.equal(resumed.state, "completed", resumed.error?.message);
+    const gates = (await run.store.events(jobId, Infinity)).slice(mark).filter((event) => event.type === "gate.started").map((event) => event.gate);
+    assert.equal(gates[0], "install", `the resumed check reinstalled first: ${gates}`);
+    assert.ok(resumed.installedDeps, "install result recorded again");
+  }
+  // Parked at the final review: with no recorded integration result, the post-review verify cannot be skipped.
+  {
+    let failed = false;
+    const after = async (stage, cwd) => {
+      await scopedProofs(stage, cwd);
+      if (stage === "review" && !failed) { failed = true; throw Object.assign(new Error("review turn crashed"), { code: "provider_failed" }); }
+    };
+    const run = await plannedRun({ after });
+    const parked = await run.factory.start(run.job.id);
+    assert.equal(parked.state, "failed");
+    assert.equal(parked.failedState, "reviewing");
+    await legacy(run.store, run.job.id);
+    const mark = (await run.store.events(run.job.id, Infinity)).length;
+    const resumed = await run.make().resume(run.job.id);
+    assert.equal(resumed.state, "completed", resumed.error?.message);
+    const events = (await run.store.events(run.job.id, Infinity)).slice(mark);
+    assert.ok(!events.some((event) => event.type === "gate.skipped"), "nothing is skipped without a recorded result");
+    assert.ok(events.some((event) => event.type === "gate.passed" && event.gate === "test"), "the whole suite reran before completion");
+  }
+});
+
+test("a repair that changes dependencies reinstalls before the next check", async () => {
+  const order = [];
+  let failures = 1;
+  const after = async (stage, cwd) => {
+    await e2eSkeleton(stage, cwd);
+    if (stage.startsWith("repair-")) await writeFile(path.join(cwd, "package-lock.json"), "{}\n");
+  };
+  const commandRunner = async (options) => {
+    order.push(gateOf(options));
+    if (options.args[0] === "e2e/skeleton.mjs" && failures-- > 0) return { code: 1, output: "skeleton e2e failed" };
+    return { code: 0, output: "passed" };
+  };
+  const { job, factory } = await plannedRun({ after, commandRunner });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  const failed = order.indexOf("proof-SKELETON-1");
+  assert.deepEqual(order.slice(failed + 1, failed + 4), ["install", "proof-SKELETON-1", "build"]);
+});
+
+// Lou, 2026-10-16: each feature's proofs ran until green when it was built; final integration runs the whole
+// suite, build and health once, not every feature proof again. A later regression is caught in production testing.
+test("final integration does not rerun verified features' own proofs", async () => {
+  const order = [];
+  const commandRunner = async (options) => { order.push(gateOf(options)); return { code: 0, output: "passed" }; };
+  const { store, job, factory } = await plannedRun({ after: e2eSkeleton, commandRunner });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(order.filter((gate) => gate.startsWith("proof-SLICE-")).length, 0, "no verified feature proof reruns at the end");
+  const events = await store.events(job.id, 1000);
+  const final = events.slice(events.findLastIndex((event) => event.type === "slice.completed"));
+  assert.ok(final.some((event) => event.type === "gate.passed" && event.gate === "test"), "the whole suite still runs once at the end");
+});
+
+test("a later feature's case supersedes an earlier stage obligation, so final integration does not demand the retired case", async () => {
+  // Seen live (smoke a943a5da): the plan's F1 stage gate asserted the seed script FAILS until F3 exists; F3's
+  // test replaced it, so rerunning F1's cases at integration would report the retired case missing and burn repairs.
+  const source = { path: ".factory/ACCEPTANCE.md", locator: "Acceptance contract" };
+  const stageCase = (id, expect, extra = {}) => ({ id, surface: "cli", action: "run the seed script", expect, refs: [], sources: [source], ...extra });
+  let uiBuilt = false;
+  const after = async (stage, cwd) => {
+    if (stage === "feature-plan") await patch(path.join(cwd, ".factory/slices.json"), (plan) => {
+      plan.slices[0].acceptance.push({ id: "SKELETON-STAGE", behavior: "Until the UI exists the seed script prints FAIL and exits 1", refs: [], sources: [source], proof: { command: ["node", "--test", "e2e/seed.test.mjs"], expect: "[SK-STAGE-FAIL] passes" }, cases: [stageCase("SK-STAGE-FAIL", "exit 1 with FAIL")] });
+      plan.slices[1].acceptance.push({ id: "UI-SEED", behavior: "With the UI in place the seed script prints PASS and exits 0", refs: [], sources: [source], proof: { command: ["node", "--test", "e2e/seed.test.mjs"], expect: "[UI-SEED-PASS] passes" }, cases: [stageCase("UI-SEED-PASS", "exit 0 with PASS", { supersedes: ["SKELETON-STAGE"] })] });
+    });
+    if (stage === "build-slice-SLICE-UI") uiBuilt = true;
+  };
+  const commandRunner = async (options) => {
+    if (options.args.includes("e2e/seed.test.mjs")) {
+      // The test file holds exactly one of the two named tests at a time, as the live plan's did.
+      const events = options.env.SOLOFACTORY_CASE_EVENTS;
+      await writeFile(events, `${JSON.stringify({ type: "test:pass", name: uiBuilt ? "[UI-SEED-PASS] seed passes" : "[SK-STAGE-FAIL] seed fails" })}\n`);
+    }
+    return { code: 0, output: "passed" };
+  };
+  const { store, job, factory } = await plannedRun({ after, commandRunner });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(count(await started(store, job.id), "repair-"), 0);
+  assert.equal(result.caseResults["SK-STAGE-FAIL"].status, "passed", "the stage case counted while its feature was built");
+  assert.equal(result.caseResults["UI-SEED-PASS"].status, "passed");
+});
+
+test("telemetry measures each feature's turns and gates, bound to the candidate each gate checked", async () => {
+  const { store, job, factory } = await plannedRun();
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  const { measurement } = await factory.telemetry(job.id, { probeApp: false });
+  assert.deepEqual(measurement.buckets.map((b) => b.id).sort(), ["SLICE-SKELETON", "SLICE-UI", "integration", "planning"]);
+  for (const id of ["SLICE-SKELETON", "SLICE-UI"]) {
+    const b = measurement.buckets.find((item) => item.id === id);
+    // A feature with unchanged dependencies runs only its build and its own proofs.
+    assert.ok(b.gates.runs >= 2 && b.agent.byActivity.implement >= 0 && b.agent.byActivity.review >= 0, id);
+  }
+  const gates = (await store.events(job.id, Infinity)).filter((event) => event.type === "gate.started" && event.gate !== "install");
+  assert.ok(gates.every((event) => /^[0-9a-f]{64}$/.test(event.candidate) && Array.isArray(event.command)));
+  assert.equal(measurement.buckets.reduce((n, b) => n + b.gates.candidateUnknown, 0), 0);
+});
+
+test("a reviewer that edits the candidate voids its verdict and forces fresh checks and a fresh review", async () => {
+  const { store, job, factory } = await plannedRun({ after: async (stage, cwd) => {
+    if (stage === "feature-review-SLICE-UI-1") await writeFile(path.join(cwd, "reviewer-edit.js"), "export const x = 1;\n");
+  } });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  const turns = await started(store, job.id);
+  assert.equal(count(turns, "feature-review-SLICE-UI-1"), 1);
+  assert.equal(count(turns, "feature-review-SLICE-UI-2"), 1);
+  assert.equal(result.sliceStats["SLICE-UI"].reviews, 2);
+  const events = await store.events(job.id, 1000);
+  assert.ok(events.some((event) => event.type === "gate.failed" && /verdict is void/.test(event.message)));
+});
+
+test("a reviewer that edits the candidate every time stops at the review cap", async () => {
+  let n = 0;
+  let editing = true;
+  const { store, job, make } = await plannedRun({ after: async (stage, cwd) => {
+    if (editing && stage.startsWith("feature-review-SLICE-SKELETON-")) await writeFile(path.join(cwd, "reviewer-edit.js"), `export const x = ${++n};\n`);
+  } });
+  const result = await make().start(job.id);
+  assert.equal(result.state, "failed");
+  assert.equal(result.error.code, "review_unstable");
+  assert.deepEqual(result.sliceDone ?? [], []);
+  assert.equal(count(await started(store, job.id), "build-slice-SLICE-UI"), 0, "a dependent never starts");
+  // Resume would hit the same cap, and the last verdict was a voided pass: only a repair plan can move.
+  assert.equal(continuationAction(result).action, "prepare-plan");
+  editing = false;
+  const ready = await make().planRecovery(job.id);
+  assert.equal(ready.recoveryPhase.status, "ready", ready.error?.message);
+  assert.equal(ready.recoveryPhase.request.failedGate, "review");
+  assert.ok(ready.recoveryPhase.request.blockers.some((text) => text.includes("stable reviewed candidate")));
+});
+
+for (const fixedAfter of [2, Infinity]) test(`a malformed plan ${fixedAfter === 2 ? "is fixed on the schema budget without spending a correction" : "spends the schema budget, then the corrections, then blocks"}`, async () => {
+  // Real-provider plans lost half their corrections to schema trivia; those now get their own small budget.
+  let broken = 0;
+  const { store, job, factory } = await plannedRun({ after: async (stage, cwd) => {
+    if ((stage === "feature-plan" || /^plan-(schema-fix|correction)-\d+$/.test(stage)) && broken < fixedAfter) { broken += 1; await patch(path.join(cwd, ".factory/slices.json"), (plan) => { delete plan.slices[0].demo; }); }
+  } });
+  const result = await factory.start(job.id);
+  const turns = await started(store, job.id);
+  if (fixedAfter === 2) {
+    assert.equal(result.state, "completed", result.error?.message);
+    assert.equal(count(turns, "plan-schema-fix-"), 2);
+    assert.equal(result.planCorrections, 0, "no correction spent");
+  } else {
+    assert.equal(result.error.code, "plan_blocked");
+    assert.equal(count(turns, "plan-schema-fix-"), 3);
+    assert.equal(count(turns, "plan-correction-"), 2, "the correction budget is unchanged");
+    assert.equal(count(turns, "plan-review-"), 0);
+  }
+});
+
+test("a pause requested during failing checks parks before the repair turn, and resume reruns the checks", async () => {
+  // Seen live (Codex inbox): a pending Pause let a repair turn start after a failed proof and spend quota.
+  let factory, jobId, calls = 0;
+  const commandRunner = async () => {
+    calls += 1;
+    if (calls === 1) { await factory.pause(jobId); return { code: 1, output: "1 failing" }; }
+    return { code: 0, output: "passed" };
+  };
+  const run = await plannedRun({ commandRunner });
+  ({ factory } = run);
+  jobId = run.job.id;
+  const parked = await factory.start(jobId);
+  assert.equal(parked.state, "paused", parked.error?.message);
+  assert.equal(parked.featureCursor.substage, "checking");
+  assert.equal(parked.attempt, 0, "no repair budget spent");
+  assert.doesNotMatch(parked.recovery.summary, /green/);
+  assert.equal(count(await started(run.store, jobId), "repair-"), 0, "no repair turn started");
+
+  const resumed = await run.make().resume(jobId);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+  assert.equal(count(await started(run.store, jobId), "repair-"), 0);
+  assert.equal(resumed.attempt, 0);
+});
+
+test("a pause requested during a blocking feature review parks before the repair turn; resume repairs without re-reviewing first", async () => {
+  // Inbox follow-up: bfaaacc covered gate failures only; a review blocker still launched a repair turn under a pending Pause.
+  let factory, jobId;
+  const block = async (stage, cwd) => {
+    if (stage !== "feature-review-SLICE-UI-1") return;
+    await factory.pause(jobId);
+    await patch(path.join(cwd, ".factory/review-result.json"), (report) => {
+      report.verdict = "blocked";
+      report.blockers = ["The score form is not wired to storage"];
+      report.checks[0].status = "missing";
+    });
+  };
+  const run = await plannedRun({ after: block });
+  ({ factory } = run);
+  jobId = run.job.id;
+  const parked = await factory.start(jobId);
+  assert.equal(parked.state, "paused", parked.error?.message);
+  assert.equal(parked.attempt, 0, "no repair budget spent");
+  assert.equal(parked.featureCursor.substage, "repairing");
+  assert.match(parked.recovery.summary, /review blocked/);
+  assert.equal(count(await started(run.store, jobId), "repair-"), 0, "no repair turn started");
+
+  const resumed = await run.make().resume(jobId);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+  const turns = await started(run.store, jobId);
+  assert.equal(count(turns, "repair-"), 1, "resume repairs the recorded blockers");
+  assert.equal(count(turns, "feature-review-SLICE-UI-1"), 1, "the blocking review is not repeated");
+  assert.equal(resumed.attempt, 1);
+});
+
+test("a review-blocker repair interrupted after resume does not strand the feature cursor", async () => {
+  // Codex review: resume deleted cursor.reviewFailure before the repair saved, so a shutdown mid-repair left "repairing" with no blockers.
+  let factory, jobId, blocked = false, interrupt = false;
+  const hook = async (stage, cwd) => {
+    if (stage === "feature-review-SLICE-UI-1" && !blocked) {
+      blocked = true;
+      await factory.pause(jobId);
+      await patch(path.join(cwd, ".factory/review-result.json"), (report) => {
+        report.verdict = "blocked"; report.blockers = ["The score form is not wired to storage"]; report.checks[0].status = "missing";
+      });
+    }
+    if (interrupt && stage.startsWith("repair-")) { interrupt = false; await factory.cancel(jobId, { shutdown: true }); throw new Error("worker killed by shutdown"); }
+  };
+  const run = await plannedRun({ after: hook });
+  ({ factory } = run);
+  jobId = run.job.id;
+  assert.equal((await factory.start(jobId)).state, "paused");
+  interrupt = true;
+  factory = run.make();
+  const stopped = await factory.resume(jobId);
+  assert.equal(stopped.state, "interrupted", JSON.stringify(stopped.error));
+  factory = run.make();
+  const resumed = await factory.resume(jobId);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+});
+
+test("a pause requested during a blocking final review parks before the repair turn; resume repairs without re-reviewing first", async () => {
+  // Inbox follow-up: 3dc63ac covered feature reviews; the final whole-app review still launched a repair under a pending Pause.
+  let factory, jobId, blocked = false;
+  const block = async (stage, cwd) => {
+    if (stage !== "review" || blocked) return;
+    blocked = true;
+    await factory.pause(jobId);
+    await patch(path.join(cwd, ".factory/review-result.json"), (report) => {
+      report.verdict = "blocked";
+      report.blockers = ["SC-1 is not demonstrated"];
+      report.checks.find((check) => check.id === "SC-1").status = "missing";
+    });
+  };
+  const run = await plannedRun({ after: block });
+  ({ factory } = run);
+  jobId = run.job.id;
+  const finalReviews = (turns) => turns.filter((message) => message.endsWith(" started review")).length;
+  const parked = await factory.start(jobId);
+  assert.equal(parked.state, "paused", parked.error?.message);
+  assert.equal(parked.failedState, "reviewing");
+  assert.equal(parked.attempt, 0, "no repair budget spent");
+  assert.match(parked.recovery.summary, /review blocked/);
+  assert.equal(count(await started(run.store, jobId), "repair-"), 0, "no repair turn started");
+
+  const resumed = await run.make().resume(jobId);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+  const turns = await started(run.store, jobId);
+  assert.equal(count(turns, "repair-"), 1, "resume repairs the recorded blockers");
+  assert.equal(finalReviews(turns), 2, "the blocking review is not repeated before the repair; the repaired app is reviewed once");
+  assert.equal(resumed.attempt, 1);
+  assert.equal(resumed.reviewFailure, undefined);
+});
+
+test("a pause requested during a blocking plan review parks before the correction turn; resume corrects without re-reviewing first", async () => {
+  // Inbox follow-up: planning turns ignored a pending Pause; a correction spent plan budget after the owner paused.
+  let factory, jobId, blocked = false, pendingDuringReview;
+  const block = async (stage, cwd) => {
+    if (stage !== "plan-review-1" || blocked) return;
+    blocked = true;
+    await factory.pause(jobId);
+    pendingDuringReview = factory.pausePending(jobId);
+    await patch(path.join(cwd, ".factory/plan-review-result.json"), (verdict) => { verdict.verdict = "blocked"; verdict.blockers = ["SC-1 has no executable proof"]; });
+  };
+  const run = await plannedRun({ after: block });
+  ({ factory } = run);
+  jobId = run.job.id;
+  const parked = await factory.start(jobId);
+  assert.equal(pendingDuringReview, true, "the API can show a pause that has not taken effect yet");
+  assert.equal(factory.pausePending(jobId), false);
+  assert.equal(parked.state, "paused", parked.error?.message);
+  assert.equal(parked.planCorrections, 0, "no correction budget spent");
+  assert.deepEqual(parked.planBlockers, ["SC-1 has no executable proof"]);
+  assert.match(parked.recovery.summary, /plan review blocked/);
+  assert.equal(count(await started(run.store, jobId), "plan-correction-"), 0, "no correction turn started");
+
+  const resumed = await run.make().resume(jobId);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+  const turns = await started(run.store, jobId);
+  assert.equal(count(turns, "plan-correction-"), 1, "resume corrects the recorded blockers");
+  assert.equal(count(turns, "plan-review-"), 2, "the blocking review is not repeated before the correction");
+  assert.equal(resumed.planBlockers, undefined);
+});
+
+test("a gate that hits its time limit parks without a repair turn, and resume reruns it under the configured limit", async () => {
+  // Seen live (Codex inbox): an aggregate proof hit the 5-minute cap and a repair turn spent an attempt on no assertion failure.
+  const limits = [];
+  let timedOut = false;
+  const commandRunner = async ({ timeoutMs, logPath }) => {
+    if (path.basename(logPath).startsWith("install-")) return { code: 0, output: "installed" };
+    limits.push(timeoutMs);
+    if (!timedOut) { timedOut = true; return { code: null, timedOut: true, timeoutReason: "hard", output: "▶ suite\nInterrupted while running" }; }
+    return { code: 0, output: "passed" };
+  };
+  const run = await plannedRun({ commandRunner });
+  const watch = { ...watchConfig({}), gateMs: 1_000 };
+  const parked = await run.make({ watch }).start(run.job.id);
+  assert.equal(parked.state, "failed");
+  assert.equal(parked.error.code, "gate_timeout");
+  assert.match(parked.error.message, /SOLOFACTORY_GATE_MINUTES/);
+  assert.equal(parked.attempt, 0, "no repair budget spent");
+  assert.equal(count(await started(run.store, run.job.id), "repair-"), 0, "no repair turn started");
+  assert.equal(limits[0], 1_000);
+  assert.equal(continuationAction(parked).action, "resume");
+
+  const resumed = await run.make({ watch }).resume(run.job.id);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+  assert.equal(count(await started(run.store, run.job.id), "repair-"), 0);
+});
+
+test("a pause after checks resumes at review: no rebuild, no duplicate completion", async () => {
+  let factory;
+  let jobId;
+  let paused = false;
+  const commandRunner = async () => {
+    if (!paused) { paused = true; await factory.pause(jobId); }
+    return { code: 0, output: "passed" };
+  };
+  const run = await plannedRun({ commandRunner });
+  ({ factory } = run);
+  jobId = run.job.id;
+  const result = await factory.start(jobId);
+  assert.equal(result.state, "paused");
+  assert.equal(result.featureCursor.id, "SLICE-SKELETON");
+  assert.equal(result.featureCursor.substage, "reviewing");
+
+  const resumed = await run.make().resume(jobId);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+  const turns = await started(run.store, jobId);
+  assert.equal(count(turns, "build-slice-SLICE-SKELETON") + count(turns, "slice-resume-SLICE-SKELETON"), 1, "implementation ran once");
+  assert.equal(count(turns, "feature-review-SLICE-SKELETON-"), 1, "review ran once");
+  const events = await run.store.events(jobId, 1000);
+  assert.equal(events.filter((event) => event.type === "slice.completed" && event.slice === "SLICE-SKELETON").length, 1);
+});
+
+test("a failed checkpoint commit does not advance the cursor; resume retries the commit", async () => {
+  const { store, job, make } = await plannedRun();
+  const commit = store.commit.bind(store);
+  store.commit = async (message) => {
+    if (message === "factory: feature SLICE-SKELETON verified") throw new Error("disk full");
+    return commit(message);
+  };
+  const failed = await make().start(job.id);
+  assert.equal(failed.state, "failed");
+  assert.equal(failed.error.code, "checkpoint_failed");
+  assert.deepEqual(failed.sliceDone ?? [], []);
+  assert.equal(failed.featureCursor.substage, "committing");
+
+  store.commit = commit;
+  const resumed = await make().resume(job.id);
+  assert.equal(resumed.state, "completed", resumed.error?.message);
+  assert.match(resumed.sliceStats["SLICE-SKELETON"].commit, /^[0-9a-f]{40}$/);
+  assert.equal(count(await started(store, job.id), "feature-review-SLICE-SKELETON-"), 1, "the reviewed candidate is not reviewed again");
+});
+
+test("each distinct obligation proof runs as its own gate, and a failing proof blocks the feature", async () => {
+  const calls = [];
+  const proof = ["node", "--test", "ui.test.mjs"];
+  const commandRunner = async ({ executable, args }) => {
+    const argv = [executable, ...args];
+    calls.push(argv.join(" "));
+    return argv.join(" ") === proof.join(" ") ? { code: 1, output: "ui.test.mjs: 1 failing" } : { code: 0, output: "passed" };
+  };
+  const { store, job, factory } = await plannedRun({ commandRunner, after: async (stage, cwd) => {
+    if (stage === "feature-plan") await patch(path.join(cwd, ".factory/slices.json"), (plan) => { plan.slices[1].acceptance[0].proof.command = proof; });
+  } });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "failed");
+  assert.deepEqual(result.sliceDone, ["SLICE-SKELETON"]);
+  assert.equal(calls.filter((line) => line === proof.join(" ")).length, 3, "the proof reran after each of two repairs");
+  const events = await store.events(job.id, 1000);
+  assert.ok(events.some((event) => event.type === "gate.failed" && event.gate === "proof-UI-1"));
+});
+
+test("a feature that exhausts its budget gets a repair plan that keeps verified features and the approved plan", async () => {
+  const { store, job, make } = await plannedRun({ after: async (stage, cwd) => {
+    if (!stage.startsWith("feature-review-SLICE-UI-")) return;
+    await patch(path.join(cwd, ".factory/review-result.json"), (report) => { report.verdict = "blocked"; report.blockers = ["Not wired"]; report.checks[0].status = "missing"; });
+  } });
+  const failed = await make().start(job.id);
+  assert.equal(failed.state, "failed");
+  const ready = await make().planRecovery(job.id);
+  assert.equal(ready.recoveryPhase.status, "ready", ready.error?.message);
+  assert.deepEqual(ready.recoveryPhase.request.checks.map((check) => check.id), ["SC-1"], "only checks the unfinished features close");
+  assert.deepEqual(ready.recoveryPhase.request.completed, ["SLICE-SKELETON"]);
+  assert.equal(digest(ready.recoveryPhase.request.priorPlan), digest(failed.approvedPlan.plan));
+  assert.deepEqual((await store.read(job.id)).sliceDone, ["SLICE-SKELETON"]);
+  const deployed = [];
+  const result = await make({ deployer: async (...args) => { deployed.push(args); return deployer(); } }).startRecovery(job.id, ready.recoveryPhase.planDigest);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(deployed.length, 1);
+});
+
+const late = async (cwd, name, body) => {
+  await mkdir(path.join(cwd, ".factory/uploads"), { recursive: true });
+  await writeFile(path.join(cwd, ".factory/uploads", name), body);
+};
+
+test("a supplied input edited after plan approval stops the run before review or deploy", async () => {
+  let deployed = 0;
+  const { store, job, make } = await plannedRun({ uploads: { "SPEC.md": "v1" }, after: async (stage, cwd) => {
+    if (stage === "build-slice-SLICE-UI") await late(cwd, "SPEC.md", "v2: new scope");
+  } });
+  const result = await make({ deployer: async () => { deployed++; return deployer(); } }).start(job.id);
+  assert.equal(result.state, "failed");
+  assert.equal(result.error.code, "inputs_changed");
+  assert.equal(count(await started(store, job.id), "feature-review-SLICE-UI-"), 0);
+  assert.equal(deployed, 0);
+  await assert.rejects(make().resume(job.id), { code: "repair_plan_required" });
+});
+
+test("a supplied input edited during the final review voids it and the run fails closed without deploying", async () => {
+  let deployed = 0;
+  const { job, make } = await plannedRun({ uploads: { "SPEC.md": "v1" }, after: async (stage, cwd) => {
+    if (stage === "review") await late(cwd, "SPEC.md", "v2: new scope");
+  } });
+  const result = await make({ deployer: async () => { deployed++; return deployer(); } }).start(job.id);
+  assert.equal(result.state, "failed");
+  assert.equal(result.error.code, "inputs_changed");
+  assert.equal(deployed, 0);
+});
+
+test("an upload for another brief during a run does not affect it", async () => {
+  const { job, make } = await plannedRun({ uploads: { "SPEC.md": "v1" }, after: async (stage, cwd) => {
+    if (stage === "build-slice-SLICE-UI" || stage === "review") await late(cwd, `${stage}-next-brief.png`, "image for a queued brief");
+  } });
+  const result = await make().start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.deepEqual(result.approvedPlan.sources.map((item) => item.path).filter((file) => file.includes("uploads")), [".factory/uploads/SPEC.md"]);
+});
+
+test("changed inputs get a repair plan that keeps verified features and names the change", async () => {
+  const { store, job, make } = await plannedRun({ uploads: { "SPEC.md": "v1" }, after: async (stage, cwd) => {
+    if (stage === "feature-plan") await patch(path.join(cwd, ".factory/slices.json"), (plan) => { plan.slices[1].acceptance[0].sources.push({ path: ".factory/uploads/SPEC.md", locator: "§1" }); });
+    if (stage === "build-slice-SLICE-UI") await late(cwd, "SPEC.md", "v2: new scope");
+  } });
+  const failed = await make().start(job.id);
+  assert.equal(failed.error.code, "inputs_changed");
+  const ready = await make().planRecovery(job.id);
+  assert.equal(ready.recoveryPhase.status, "ready", ready.error?.message);
+  const request = ready.recoveryPhase.request;
+  assert.equal(request.review, null);
+  assert.deepEqual(request.inputsChanged, [".factory/uploads/SPEC.md"]);
+  assert.match(request.blockers[0], /SPEC\.md changed/);
+  assert.deepEqual(request.completed, ["SLICE-SKELETON"]);
+  assert.deepEqual(request.checks.map((check) => check.id), ["SC-1"]);
+  const result = await make().startRecovery(job.id, ready.recoveryPhase.planDigest);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.deepEqual((await store.read(job.id)).sliceDone, ["SLICE-SKELETON"]);
+});
+
+for (const corrected of [false, true]) test(`a feature plan omitting detailed supplied requirements ${corrected ? "is corrected before" : "blocks before any"} build`, async () => {
+  const sourceRequests = [], reviews = {};
+  const { store, job, factory } = await plannedRun({ uploads: { "SPEC.md": "§3 EXIF offsets: group by calendar day in the capture offset.\n" }, after: async (stage, cwd, context, prompt) => {
+    const planFile = path.join(cwd, ".factory/slices.json");
+    if (stage === "feature-plan") sourceRequests.push(await json(path.join(cwd, ".factory/plan-request.json")));
+    if (stage.startsWith("plan-review-")) reviews[stage] = { request: await json(path.join(cwd, ".factory/plan-review-request.json")), prompt };
+    if (corrected && stage.startsWith("plan-correction-")) await patch(planFile, (plan) => {
+      plan.slices[1].acceptance.push({ id: "EXIF-1", behavior: "Calendar-day grouping honors EXIF offsets", refs: plan.slices[1].closes.slice(0, 1), sources: [{ path: ".factory/uploads/SPEC.md", locator: "§3 EXIF offsets" }], proof: { command: ["npm", "test"], expect: "exif offsets test passes" } });
+    });
+    if (!stage.startsWith("plan-review-")) return;
+    const cited = (await json(planFile)).slices.some((slice) => slice.acceptance.some((item) => item.sources?.some((ref) => ref.path === ".factory/uploads/SPEC.md" && /EXIF offsets/.test(ref.locator))));
+    if (!cited) await patch(path.join(cwd, ".factory/plan-review-result.json"), (verdict) => { verdict.verdict = "blocked"; verdict.blockers = ["SPEC.md §3 EXIF offsets has no obligation", "SC-1 lacks a failure case"]; });
+  } });
+  const result = await factory.start(job.id);
+  // Every blocker is recorded, not just the first, so review rounds per blocker are measurable.
+  assert.deepEqual((await store.events(job.id, Infinity)).find((event) => event.type === "plan.blocked").blockers, ["SPEC.md §3 EXIF offsets has no obligation", "SC-1 lacks a failure case"]);
+  assert.ok(sourceRequests[0].sources.some((ref) => ref.path === ".factory/uploads/SPEC.md"), "the planner sees supplied specs");
+  // The controller's own Node runs every gate; a planner that cannot run it read-only once spent a correction marking it blocked.
+  assert.equal(sourceRequests[0].toolchain.node, process.version);
+  // Smoke 90b8b32e/29924815: later rounds found new nits each time; they now judge the earlier blockers.
+  assert.equal(reviews["plan-review-1"].request.priorBlockers, undefined);
+  assert.doesNotMatch(reviews["plan-review-1"].prompt, /priorBlockers/);
+  assert.deepEqual(reviews["plan-review-2"].request.priorBlockers, ["SPEC.md §3 EXIF offsets has no obligation", "SC-1 lacks a failure case"]);
+  assert.match(reviews["plan-review-2"].prompt, /priorBlockers/);
+  if (corrected) {
+    assert.equal(result.state, "completed", result.error?.message);
+    assert.ok(result.approvedPlan.plan.slices[1].acceptance.some((item) => item.id === "EXIF-1"));
+    assert.match(result.approvedPlan.sourcesDigest, /^[0-9a-f]{64}$/);
+  } else {
+    assert.equal(result.state, "failed");
+    assert.equal(result.error.code, "plan_blocked");
+    assert.match(result.error.message, /EXIF offsets/);
+    assert.equal(count(await started(store, job.id), "build-slice-"), 0);
+  }
+});
+
+test("Resume after exhausted plan corrections refuses an unchanged plan and reviews an edited one once", async () => {
+  const exif = { id: "EXIF-1", behavior: "Calendar-day grouping honors EXIF offsets", sources: [{ path: ".factory/uploads/SPEC.md", locator: "§3 EXIF offsets" }], proof: { command: ["npm", "test"], expect: "exif offsets test passes" } };
+  const { store, job, make } = await plannedRun({ uploads: { "SPEC.md": "§3 EXIF offsets: group by calendar day in the capture offset.\n" }, after: async (stage, cwd) => {
+    if (!stage.startsWith("plan-review-")) return;
+    const cited = (await json(path.join(cwd, ".factory/slices.json"))).slices.some((slice) => slice.acceptance.some((item) => item.id === "EXIF-1"));
+    if (!cited) await patch(path.join(cwd, ".factory/plan-review-result.json"), (verdict) => { verdict.verdict = "blocked"; verdict.blockers = ["SPEC.md §3 EXIF offsets has no obligation"]; });
+  } });
+  const blocked = await make().start(job.id);
+  assert.equal(blocked.error.code, "plan_blocked");
+  const reviews = count(await started(store, job.id), "plan-review-");
+  const planFile = path.join(store.appDir(job.id), ".factory/slices.json");
+  const stateFile = path.join(store.jobDir(job.id), "state.json");
+  const saved = await readFile(stateFile, "utf8");
+  // Formatting alone is not a corrected plan.
+  await writeFile(planFile, JSON.stringify(await json(planFile)));
+  await assert.rejects(make().resume(job.id), (error) => error.code === "plan_unchanged");
+  assert.equal(count(await started(store, job.id), "plan-review-"), reviews, "an unchanged plan costs no review");
+  assert.equal(await readFile(stateFile, "utf8"), saved, "a refused Resume leaves the saved run unchanged");
+  assert.equal(continuationAction(await store.read(job.id), { maxRepairs: 2 }).action, "resume");
+
+  await patch(planFile, (plan) => { plan.slices[1].acceptance.push({ ...exif, refs: plan.slices[1].closes.slice(0, 1) }); });
+  const result = await make().resume(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(count(await started(store, job.id), "plan-review-"), reviews + 1, "an edited plan gets exactly one review");
+  assert.equal(count(await started(store, job.id), "plan-correction-"), 2, "Resume does not renew plan corrections");
+});
+
+test("Resume after exhausted plan corrections accepts owner-revised specs with a fresh correction budget", async () => {
+  const { store, job, make } = await plannedRun({ uploads: { "SPEC.md": "§3 EXIF offsets: group by calendar day in the capture offset.\n" }, after: async (stage, cwd) => {
+    if (!stage.startsWith("plan-review-")) return;
+    if (/EXIF/.test(await readFile(path.join(cwd, ".factory/uploads/SPEC.md"), "utf8"))) await patch(path.join(cwd, ".factory/plan-review-result.json"), (verdict) => { verdict.verdict = "blocked"; verdict.blockers = ["SPEC.md §3 EXIF offsets has no obligation"]; });
+  } });
+  assert.equal((await make().start(job.id)).error.code, "plan_blocked");
+  // The owner decides the requirement itself was wrong; the plan file is untouched.
+  await writeFile(path.join(store.appDir(job.id), ".factory/uploads/SPEC.md"), "§3 Group by calendar day in local time.\n");
+  const result = await make().resume(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(result.planCorrections, 0, "revised inputs get a fresh correction budget");
+  assert.ok((await store.events(job.id, 1000)).some((event) => event.type === "plan.inputs_revised"));
+});
+
+test("inputs changed after every feature verified reopen only the features that cited them", async () => {
+  const { job, make } = await plannedRun({ uploads: { "SPEC.md": "v1" }, after: async (stage, cwd) => {
+    if (stage === "feature-plan") await patch(path.join(cwd, ".factory/slices.json"), (plan) => { plan.slices[1].acceptance[0].sources.push({ path: ".factory/uploads/SPEC.md", locator: "§1" }); });
+    if (stage === "review") await late(cwd, "SPEC.md", "v2: new scope");
+  } });
+  const failed = await make().start(job.id);
+  assert.equal(failed.error.code, "inputs_changed");
+  assert.deepEqual(failed.sliceDone, ["SLICE-SKELETON", "SLICE-UI"]);
+  const ready = await make().planRecovery(job.id);
+  assert.equal(ready.recoveryPhase.status, "ready", ready.error?.message);
+  assert.deepEqual(ready.recoveryPhase.request.checks.map((check) => check.id), ["SC-1"], "SLICE-UI cited SPEC.md, so its check reopens");
+  assert.ok(ready.recoveryPhase.request.blockers.some((line) => /SC-1 was closed by a verified feature/.test(line)));
+  const result = await make().startRecovery(job.id, ready.recoveryPhase.planDigest);
+  assert.equal(result.state, "completed", result.error?.message);
+});
+
+// A proof pending integration: not run or reviewed with its feature, run before the final review,
+// and the check it proves is reported pending, not verified, until then.
+async function pendingRun(proof, { plan = () => {}, after: extra = async () => {}, commandRunner = null } = {}) {
+  const featureReviewChecks = [];
+  const commands = [];
+  const run = await plannedRun({
+    commandRunner: commandRunner ?? (async ({ args }) => { commands.push(args.join(" ")); return { code: args.includes("test/populated.test.mjs") ? proof.code : 0, output: "populated test output" }; }),
+    after: async (stage, cwd, context) => {
+      if (stage === "feature-plan") await patch(path.join(cwd, ".factory/slices.json"), (p) => {
+        const ui = p.slices[1];
+        ui.acceptance.push({ id: "POP-1", behavior: "A populated history renders once every feature is integrated", refs: ui.closes.slice(0, 1), sources: ui.acceptance[0].sources, proof: { command: ["node", "--test", "test/populated.test.mjs"], expect: "populated test passes", pending: "integration" } });
+        plan(p);
+      });
+      if (stage === "feature-review-SLICE-UI-1") featureReviewChecks.push(...(await json(path.join(cwd, ".factory/review-request.json"))).checks.map((check) => check.id));
+      await extra(stage, cwd, context);
+    },
+  });
+  const result = await run.factory.start(run.job.id);
+  const events = await run.store.events(run.job.id, 1000);
+  return { ...run, result, events, featureReviewChecks, commands };
+}
+
+test("a proof pending integration runs before the final review and its check is pending until then", async () => {
+  const { result, events, featureReviewChecks } = await pendingRun({ code: 0 });
+  assert.equal(result.state, "completed", result.error?.message);
+  const owned = result.approvedPlan.plan.slices[1].closes[0];
+  const ledger = result.outstandingProofs.find((entry) => entry.obligation.id === "POP-1");
+  assert.equal(ledger.status, "passed");
+  assert.match(ledger.candidate, /^[a-f0-9]{64}$/);
+  assert.ok(ledger.verifiedAt);
+  assert.ok(!featureReviewChecks.includes("POP-1") && !featureReviewChecks.includes(owned), "the feature review neither runs the pending proof nor verifies its check");
+  const uiDone = events.findIndex((event) => event.type === "slice.completed" && event.slice === "SLICE-UI");
+  assert.match(events[uiDone].message, new RegExp(`${owned} pending integration proof`));
+  const proofGate = events.findIndex((event) => event.type === "gate.started" && event.gate === ledger.gate);
+  assert.ok(proofGate > uiDone, "the pending proof never runs while its feature is built");
+  const finalReview = events.findIndex((event, i) => i > uiDone && event.type === "agent.started" && /\breview\b/.test(event.message) && !event.message.includes("feature-review"));
+  assert.ok(proofGate < finalReview, "the pending proof runs before the final review");
+  assert.ok(result.reviewRequest.checks.some((check) => check.id === ledger.key), "the final review covers the pending obligation");
+});
+
+test("a failing proof pending integration stops the run before it completes", async () => {
+  const { result } = await pendingRun({ code: 1 });
+  assert.equal(result.state, "failed");
+  assert.equal(result.error.code, "quality_gate_failed");
+  assert.match(result.error.details?.gate, /^proof-.*POP-1$/);
+  assert.equal(result.deployment ?? null, null);
+});
+
+test("a pending proof that exhausts its budget gets a repair plan from the failed obligation, not a review", async () => {
+  const proof = { code: 1 };
+  const { result, factory, store } = await pendingRun(proof);
+  assert.equal(result.error.code, "quality_gate_failed");
+  assert.equal(result.recovery.canResume, false);
+  await assert.rejects(factory.resume(result.id), /repair plan/i);
+  const ready = await factory.planRecovery(result.id);
+  assert.equal(ready.recoveryPhase.status, "ready", ready.error?.message);
+  const request = ready.recoveryPhase.request;
+  assert.equal(request.review, null);
+  assert.deepEqual(request.checks.map((check) => check.id), ["SC-1"]);
+  assert.ok(request.blockers.some((item) => /populated\.test\.mjs/.test(item) && /populated test output/.test(item)), request.blockers.join("\n"));
+  proof.code = 0;
+  const done = await factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);
+  assert.equal(done.state, "completed", done.error?.message);
+  assert.ok((await store.events(done.id, 2000)).some((event) => event.type === "gate.passed" && /POP-1$/.test(event.gate ?? "")), "the original pending proof still runs and passes");
+});
+
+test("a pending proof on a prerequisite keeps the check it supports pending at the closing feature", async () => {
+  const { result, events, featureReviewChecks } = await pendingRun({ code: 0 }, { plan: (p) => {
+    p.slices[1].acceptance.pop();
+    p.slices[0].acceptance.push({ id: "PRE-1", behavior: "Populated history survives a restart of the skeleton", refs: ["SC-1"], sources: p.slices[0].acceptance[0].sources, proof: { command: ["node", "--test", "test/populated.test.mjs"], expect: "populated test passes", pending: "integration" } });
+  } });
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.ok(!featureReviewChecks.includes("SC-1"), "the closing feature's review does not verify a check with proof still pending");
+  const uiDone = events.find((event) => event.type === "slice.completed" && event.slice === "SLICE-UI");
+  assert.match(uiDone.message, /SC-1 pending integration proof/);
+});
+
+test("obligation ids shared by the original and a repair plan do not collide in the final review", async () => {
+  let planned = false;
+  const { result, factory } = await pendingRun({ code: 0 }, { after: async (stage, cwd, context) => {
+    if (stage.startsWith("recovery-plan-") && !stage.includes("review")) {
+      planned = true;
+      await patch(path.join(cwd, context.job.recoveryPhase.planFile), (p) => {
+        p.slices[0].acceptance.push({ id: "POP-1", behavior: "Recovered populated history renders end to end", refs: p.slices[0].closes, sources: p.slices[0].acceptance[0].sources, proof: { command: ["node", "--test", "test/populated.test.mjs"], expect: "populated test passes", pending: "integration" } });
+      });
+    }
+    if (stage === "review" && !planned) await patch(path.join(cwd, ".factory/review-result.json"), (r) => { r.verdict = "blocked"; r.blockers = ["SC-1 is not demonstrated"]; r.checks.find((c) => c.id === "SC-1").status = "missing"; });
+  } });
+  assert.equal(result.error?.code, "review_rejected");
+  const ready = await factory.planRecovery(result.id);
+  assert.equal(ready.recoveryPhase.status, "ready", ready.error?.message);
+  const done = await factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);
+  assert.equal(done.state, "completed", done.error?.message);
+  const ids = done.reviewRequest.checks.map((check) => check.id);
+  assert.equal(new Set(ids).size, ids.length, "no duplicate review check ids");
+  assert.equal(ids.filter((id) => id.endsWith("/POP-1")).length, 2, "both plans' POP-1 obligations are reviewed");
+});
+
+
+test("a deferred proof sharing npm test keeps all its repair targets after deduplication", async () => {
+  let integrated = false;
+  const proof = { code: 1 };
+  const { result, factory } = await pendingRun(proof, {
+    plan: p => {
+      const item = p.slices[1].acceptance.at(-1);
+      item.proof.command = ["npm", "test"];
+      p.slices[1].acceptance.push({ ...structuredClone(item), id: "POP-2", behavior: "Integrated standalone detail works", refs: [] });
+    },
+    after: async stage => { if (stage === "feature-review-SLICE-UI-1") integrated = true; },
+    commandRunner: async ({ executable, args }) => ({ code: integrated && executable === "npm" && args[0] === "test" ? proof.code : 0, output: "shared integration failure" }),
+  });
+  assert.equal(result.error.code, "quality_gate_failed");
+  assert.equal(result.error.details.gate, "test");
+  assert.equal(result.recovery.canResume, false);
+  const ready = await factory.planRecovery(result.id);
+  assert.equal(ready.recoveryPhase.status, "ready", ready.error?.message);
+  assert.equal(ready.recoveryPhase.request.checks.length, 2);
+  assert.ok(ready.recoveryPhase.request.checks.some(c => c.id === "SC-1"));
+  assert.ok(ready.recoveryPhase.request.checks.some(c => c.id.endsWith("/POP-2")));
+  proof.code = 0;
+  const done = await factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);
+  assert.equal(done.state, "completed", done.error?.message);
+  assert.ok(done.outstandingProofs.every(e => e.status === "passed"));
+});
+
+test("a standalone deferred obligation is a repair target even without MH or SC refs", async () => {
+  const proof = { code: 1 };
+  const { result, factory } = await pendingRun(proof, { plan: p => { p.slices[1].acceptance.at(-1).refs = []; } });
+  const ready = await factory.planRecovery(result.id);
+  assert.equal(ready.recoveryPhase.status, "ready", ready.error?.message);
+  const check = ready.recoveryPhase.request.checks[0];
+  assert.equal(check.id, result.outstandingProofs[0].key);
+  assert.match(check.text, /populated history/);
+  proof.code = 0;
+  const done = await factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);
+  assert.equal(done.state, "completed", done.error?.message);
+});
+
+test("a deployment repair invalidates passed integration evidence and reruns its proof", async () => {
+  let deploys = 0;
+  let proofRunsAfterDeploy = 0;
+  let originalCandidate;
+  const run = await pendingRun({ code: 0 });
+  const factory = run.make({
+    deployer: async ({ job, appDir }) => {
+      deploys++;
+      if (deploys === 1) {
+        assert.equal(job.outstandingProofs[0].status, "passed");
+        originalCandidate = job.outstandingProofs[0].candidate;
+        await writeFile(path.join(appDir, "changed.js"), "// changed application candidate\n");
+        const error = new Error("launch failed"); error.code = "deployment_exited"; throw error;
+      }
+      return deployer();
+    },
+    commandRunner: async ({ args }) => {
+      if (args.includes("test/populated.test.mjs") && deploys) {
+        proofRunsAfterDeploy++;
+        const job = (await run.store.list()).find(j => j.state === "verifying");
+        assert.equal(job.outstandingProofs[0].status, "pending");
+      }
+      return passing();
+    },
+  });
+  // Fresh job in the isolated fixture; never reuse the completed run's state.
+  const job = await run.store.create({ brief, transcript, provider: "fixture" });
+  const done = await factory.start(job.id);
+  assert.equal(done.state, "completed", done.error?.message);
+  assert.equal(deploys, 2);
+  // The final reviewer changed nothing, so the verify after the deployment repair still holds: no second run.
+  assert.equal(proofRunsAfterDeploy, 1, "proof runs once after deployment repair");
+  assert.notEqual(done.outstandingProofs[0].candidate, originalCandidate);
+  assert.ok(done.outstandingProofs.every(e => e.status === "passed"));
+});
+
+
+test("each manifest gate sharing a proof command retains the integration target", async () => {
+  const { factory, store, job } = await plannedRun();
+  const key = "a".repeat(64) + ":A/B";
+  const manifest = { commands: { install: ["npm", "test"], test: ["npm", "test"], build: ["npm", "test"] } };
+  for (const failedGate of ["install", "test", "build"]) {
+    let calls = 0;
+    const at = ["install", "test", "build"].indexOf(failedGate) + 1;
+    factory.commandRunner = async () => ({ code: ++calls === at ? 1 : 0, output: "shared manifest failure" });
+    const error = await factory.verify(await store.read(job.id), manifest, undefined, {
+      includeInstall: true, proofs: [{ id: "A.B", key, proof: { command: ["npm", "test"] } }],
+    });
+    assert.equal(error.details.gate, failedGate);
+    assert.deepEqual(error.details.proofKeys, [key]);
+  }
+});
+
+
+test("integration evidence binds the source after ordinary installation creates a lockfile", async () => {
+  let integrated = false;
+  let installed = false;
+  const run = await pendingRun({ code: 0 }, {
+    after: async stage => { if (stage === "feature-review-SLICE-UI-1") integrated = true; },
+    commandRunner: async ({ executable, args, cwd }) => {
+      if (integrated && executable === "npm" && args[0] === "install" && !installed) {
+        installed = true;
+        await writeFile(path.join(cwd, "package-lock.json"), '{"lockfileVersion":3}\n');
+      }
+      return passing();
+    },
+  });
+  assert.equal(run.result.state, "completed", run.result.error?.message);
+  // Planned runs install per feature; explicitly exercise an integrated install (as deploy repairs do).
+  const checked = await run.factory.verifyWithRepairs(run.result, await run.factory.readManifest(run.store.appDir()), undefined, { includeInstall: true });
+  assert.ok(installed);
+  const reviewed = await run.factory.reviewAndVerify(checked);
+  assert.equal(reviewed.outstandingProofs[0].status, "passed");
+});
+
+// Smoke 2026-10-10: an ordinary test gate that exhausted its repairs offered Resume, which only reran it.
+test("an ordinary test gate that exhausts its repairs needs a repair plan; Resume is refused without a write", async () => {
+  let failing = false;
+  const commandRunner = async ({ executable, args }) => failing && [executable, ...args].join(" ") === "npm test" ? { code: 1, output: "ui.test.mjs: 1 failing" } : { code: 0, output: "passed" };
+  let edits = 0;
+  const { store, job, make } = await plannedRun({ commandRunner, after: async (stage, cwd) => {
+    if (stage === "build-slice-SLICE-UI") failing = true;
+    // Each repair changes the code, so this is budget exhaustion, not a repeated-failure loop.
+    if (stage.startsWith("repair-")) await writeFile(path.join(cwd, `repair-${++edits}.txt`), "attempt");
+  } });
+  const failed = await make().start(job.id);
+  assert.equal(failed.state, "failed");
+  assert.equal(failed.error.code, "quality_gate_failed");
+  assert.equal(failed.error.details.gate, "test");
+  assert.equal(failed.error.details.loop, undefined);
+  assert.equal(failed.recovery.nextAction?.action ?? continuationAction(failed).action, "prepare-plan");
+  const before = await readFile(path.join(store.jobDir(job.id), "state.json"), "utf8");
+  await assert.rejects(make().resume(job.id), { code: "repair_plan_required" });
+  assert.equal(await readFile(path.join(store.jobDir(job.id), "state.json"), "utf8"), before, "a refused Resume leaves the saved run unchanged");
+
+  failing = false;
+  const ready = await make().planRecovery(job.id);
+  assert.equal(ready.recoveryPhase.status, "ready", ready.error?.message);
+  assert.ok(ready.recoveryPhase.request.checks.some((check) => check.id === "GATE-test"), "the failed gate is a repair target");
+  assert.ok(ready.recoveryPhase.request.blockers.some((text) => text.includes("ui.test.mjs: 1 failing")), "the gate output is a planning finding");
+  const result = await make().startRecovery(job.id, ready.recoveryPhase.planDigest);
+  assert.equal(result.state, "completed", result.error?.message);
+});
+
+test("Prepare repair plan is refused while Resume is the next step, without a write", async () => {
+  let fail = true;
+  const { store, job, make } = await plannedRun({ after: async (stage) => { if (fail && stage === "build-slice-SLICE-UI") { fail = false; throw new Error("provider dropped"); } } });
+  const parked = await make().start(job.id);
+  assert.equal(parked.state, "failed");
+  assert.equal(continuationAction(parked).action, "resume");
+  const before = await readFile(path.join(store.jobDir(job.id), "state.json"), "utf8");
+  await assert.rejects(make().planRecovery(job.id), { code: "not_continuable" });
+  assert.equal(await readFile(path.join(store.jobDir(job.id), "state.json"), "utf8"), before);
+});
+
+test("an ordinary gate failure with repairs left continues with Resume", () => {
+  const job = { id: "j", state: "failed", error: { code: "quality_gate_failed", details: { gate: "test" } }, attempt: 1 };
+  assert.equal(continuationAction(job, { maxRepairs: 2 }).action, "resume");
+  assert.equal(continuationAction({ ...job, attempt: 2 }, { maxRepairs: 2 }).action, "prepare-plan");
+  assert.equal(continuationAction({ ...job, attempt: 1, repairBudgetLimit: 1 }, { maxRepairs: 2 }).action, "prepare-plan");
+});
+
+test("a build that hits the safety cap while changing files continues once in its own session", async () => {
+  // SEARCH-UI, 2026-10-14: one 45-minute build wrote ~380 lines, hit the cap and parked the run for the owner.
+  const sessions = [];
+  let capped = 0;
+  const { store, job, factory } = await plannedRun({ after: async (stage, cwd, context) => {
+    if (/^(build-slice|slice-resume)-/.test(stage)) sessions.push(stage);
+    if (stage.startsWith("build-slice-") && capped < 2) {
+      capped += 1;
+      await writeFile(path.join(cwd, `partial-${capped}.txt`), "work in progress\n");
+      throw Object.assign(new Error("Claude Code reached the 45 minutes safety cap. Partial work is preserved."),
+        { code: "agent_hard_timeout", details: { timeoutReason: "hard", sessionId: `session-${capped}` } });
+    }
+  } });
+  const result = await factory.start(job.id);
+  // First feature: capped, continued once and finished. Second feature: capped, continued once too.
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(result.attempt, 0, "a continuation is not a repair");
+  assert.equal(Object.values(result.watch.continuations).filter((used) => used === 1).length, 2);
+  const resumes = (await store.events(job.id, 1000)).filter((event) => event.type === "agent.started" && event.message.includes("slice-resume-"));
+  assert.equal(resumes.length, 2);
+  assert.match(JSON.stringify(result.agentSessions), /session-1/, "the capped turn's session is kept for its continuation");
+});
+
+test("a repair that hits the safety cap while changing files continues once in its own session", async () => {
+  let broken = false;
+  let capped = 0;
+  const after = async (stage, cwd) => {
+    await scopedProofs(stage, cwd);
+    if (stage === "build-slice-SLICE-UI") broken = true;
+    if (stage.startsWith("repair-") && !stage.endsWith("-resume")) {
+      capped += 1;
+      await writeFile(path.join(cwd, "partial-fix.js"), "// half done\n");
+      throw Object.assign(new Error("cap"), { code: "agent_hard_timeout", details: { timeoutReason: "hard", sessionId: "repair-session" } });
+    }
+    if (stage.endsWith("-resume")) broken = false;
+  };
+  const commandRunner = async (options) => [options.executable, ...options.args].join(" ") === "npm test" && broken ? { code: 1, output: "1 failing" } : { code: 0, output: "passed" };
+  const { store, job, factory } = await plannedRun({ after, commandRunner });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(capped, 1);
+  assert.equal(result.attempt, 1, "the continuation does not spend another repair");
+  assert.equal(result.watch.continuations["repair-1"], 1);
+  assert.equal(count(await started(store, job.id), "repair-1-resume"), 1);
+});
+
+test("a final review that hits the safety cap continues once in its own session", async () => {
+  let capped = 0;
+  const after = async (stage, cwd) => {
+    await scopedProofs(stage, cwd);
+    if (stage === "review") {
+      capped += 1;
+      // 2026-10-16: the medialibrary final review spent 44 of 45 minutes on suites and never wrote a verdict.
+      await rm(path.join(cwd, ".factory", "review-result.json"), { force: true });
+      throw Object.assign(new Error("cap"), { code: "agent_hard_timeout", details: { timeoutReason: "hard", sessionId: "review-session" } });
+    }
+  };
+  const { store, job, factory } = await plannedRun({ after });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(capped, 1);
+  assert.equal(result.attempt, 0, "the continuation does not spend a repair");
+  assert.equal(count(await started(store, job.id), "review-resume"), 1);
+});
+
+test("a capped build that changed nothing parks instead of continuing", async () => {
+  const { job, make } = await plannedRun();
+  const fixture = createFixtureProvider();
+  const provider = { id: "fixture", async run(options) {
+    if (options.context.stage.startsWith("build-slice-")) throw Object.assign(new Error("cap"), { code: "agent_hard_timeout", details: { timeoutReason: "hard", sessionId: "s" } });
+    return fixture.run(options);
+  } };
+  const result = await make({ provider }).start(job.id);
+  assert.equal(result.state, "failed");
+  assert.equal(result.error.code, "agent_hard_timeout");
+  assert.deepEqual(result.watch?.continuations ?? {}, {});
+});

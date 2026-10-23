@@ -94,3 +94,11 @@ test("ready rejects an oversized acceptance scenario", () => {
   const huge = `A user ${"x".repeat(420)} records a score and sees it listed.`;
   assert.throws(() => readyResult(readyBrief({ acceptanceScenarios: [huge] })), /too long/);
 });
+
+test("a full-size transcript still fits the factory's prompt limit", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { MAX_PROMPT_CHARS } = await import("../src/providers.mjs");
+  const skill = await readFile(new URL("../skills/factory-guide.md", import.meta.url), "utf8");
+  const prompt = buildInterviewPrompt({ skill, messages: [{ role: "user", content: "spec line\n".repeat(MAX_TRANSCRIPT_CHARS / 10) }], runContext: { state: "failed" } });
+  assert.ok(prompt.length < MAX_PROMPT_CHARS, `${prompt.length}`);
+});

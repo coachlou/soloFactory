@@ -56,7 +56,7 @@ solofactory", "what can I do", "how's my app"), or reply with a bare number, run
 | No projects, or none with a run | Start my first app · How does this work? | step 2 (new project) + step 3 · a 3-line explanation: you describe it, you approve the plan, it builds and checks it |
 | A completed app, nothing running | Add or change features · Start a new app · Open it | follow-on build (below) · step 2 + 3 · give `deployment.url`, `POST /relaunch` first if it doesn't load |
 | A card in `queued`…`deploying` | How far along is it? · Show me the plan · Pause it · Stop it | stage + `slices.done/total` in words · `artifacts/plan` summarized · `/pause` · `/cancel`, both after a yes |
-| A card in `parked` | What went wrong? · Pick up where it stopped · Go back to an earlier feature · Set it aside | read `recovery-packet`, explain it plainly · `/resume` (only if `recovery.canResume`) · `/restart` with a completed slice · `/dismiss`, all after a yes. Before a set-aside or start over, on an app that already shipped, say the half-built changes will be dropped; resume keeps them |
+| A card in `parked` | What went wrong? · Pick up where it stopped (or the step `nextAction` names) · Go back to an earlier feature · Start over · Set it aside | read `recovery-packet`, explain it plainly · `/resume` (only if `nextAction.action` is `resume`), else section 5 · `/restart` with a completed slice · `/retry` · `/dismiss`, all after a yes. Before a set-aside or start over, on an app that already shipped, say the half-built changes will be dropped; resume keeps them |
 | A queued card with `blockedBy` | lead with "It's waiting behind a stopped build", then the `parked` row for that build | |
 | Two or more projects with runs | Which app? (list names) · Start a new app | `POST /api/projects/select`, then re-read the row |
 
@@ -67,9 +67,9 @@ already works, including several features at once and fixes to it ("the streak c
 wrong"). Select the project and ask only about the change, one question at a time. Then write
 a brief for *this release only*. Copy the unchanged fields from the last completed job's
 `brief` and rewrite `promise`, `mustHaves`, `acceptanceScenarios`, and `nonGoals` for the
-change. The factory sees the existing app and keeps what's already delivered. Use
-`"sdlc": "slices"` when they ask for more than one feature, so each is built and checked
-before the next. Show the plan and queue only on "go", as in step 4. Features are never
+change. The factory sees the existing app and keeps what's already delivered. Every run
+plans its features first and builds each one only after the one before it passes its checks
+and review. Show the plan and queue only on "go", as in step 4. Features are never
 delivered before their checks pass. If an owner asks to skip testing, say so plainly.
 
 **Report a problem with the factory** (not with their app; that's a follow-on build). Ask
@@ -92,7 +92,8 @@ curl -sf http://127.0.0.1:4173/api/health || bash start.sh    # from the folder 
 
 If health fails, run `start.sh` as a long-lived background command (in Claude Code, use
 `run_in_background`), because a plain `&` dies when the shell call returns. Poll `/api/health`
-until it answers. `PORT=` and
+until it answers. If `start.sh` exits saying the port is in use, restart it with `PORT=5000` and use
+that port in every URL below; if it says SoloFactory is already running, use that one. `PORT=` and
 `SOLOFACTORY_DEMO=1` pass through `start.sh`. `GET /api/config` lists `providers`, and only
 ones with `"authenticated": true` can build. In demo mode the only provider is `fixture`.
 
@@ -116,7 +117,6 @@ or an empty list), has a duplicate scenario, or has a scenario over 400 characte
 ```json
 {
   "provider": "claude",
-  "sdlc": "single",
   "coverage": { "promise": "complete", "user": "complete", "…": "all 13 keys, all complete" },
   "transcript": [ { "role": "assistant", "content": "…" }, { "role": "user", "content": "…" } ],
   "brief": {
@@ -133,8 +133,8 @@ or an empty list), has a duplicate scenario, or has a scenario over 400 characte
 - Each acceptance scenario is one observable behavior a test can prove, not a bundle of them.
 - Write "None" as the single list item when there are no integrations or constraints. An empty
   list fails.
-- `sdlc`: `single` means one build turn. `slices` builds a walking skeleton first, then one
-  gated turn per slice. Use `slices` for anything with more than a handful of must-haves.
+- Leave out `sdlc`. Every new run plans its features, gets the plan reviewed, then builds,
+  checks and reviews one feature at a time. Any other `sdlc` value is refused with 400.
 
 Show the owner the brief in plain language. Queue it only after they say go.
 
@@ -156,14 +156,57 @@ this. Don't cancel anything on your own to unblock it.
 
 ## 5. When a run parks
 
-Parked states are `failed`, `interrupted`, `cancelled`, and `paused`. Ask the owner before any
-of these actions:
+Parked states are `failed`, `interrupted`, `cancelled`, and `paused`. Read `job.nextAction`
+(`{action, label, endpoint, reason}`) and offer only that; the server refuses the others with 409
+and the same `nextAction`. Ask the owner before any of these actions:
+
+| `nextAction.action` | Meaning |
+|---|---|
+| `resume` | `POST /resume` continues from the preserved files (`recovery.canResume` is true only for this). Optional `{"features":N}` batches an approved running repair plan |
+| `prepare-plan` / `retry-plan` / `revise-inputs` | `POST /recovery-plan`: the repair budget is spent, a review hit its cap, a failure repeated on unchanged code, or the specs changed. Resume cannot help |
+| `approve-plan` | a Pause left a reviewed plan unstarted: `POST /recovery-start {"planDigest":"…"}` |
+| `amend-plan` | automatic plan corrections ran out: `GET /recovery-plan-packet`, then `POST /recovery-review {"phaseId","plan"}` |
+| `stop-worker` | a worker from before a restart is still alive; wait or stop that process, then re-read |
+| `factory-fix` | the factory built an over-size prompt (limit 200,000 characters). Retrying cannot help until a fixed factory build runs; report it |
+| `none` | `cancelled` (start over), dismissed, or a worker already running |
 
 | Endpoint (POST unless noted) | Does |
 |---|---|
-| `/api/jobs/<id>/resume` | continues from the last good point (when `job.recovery.canResume`) |
-| `/api/jobs/<id>/restart` `{"fromSlice":"<slice id>"}` | re-runs from a completed slice onward |
+| `/api/jobs/<id>/restart` `{"fromSlice":"<slice id>"}` | re-runs from a completed slice onward (not the first; that is start over); keeps the repair count, drops stale sessions and repair plans |
+| `/api/jobs/<id>/retry` | start over: a fresh run from the same brief; the parked one is rolled back and dismissed |
 | `/api/jobs/<id>/dismiss` | sets the run aside and unblocks the project's queue; if the app shipped before, puts it back to that release (its `data/` is kept) |
 | `/api/jobs/<id>/pause`, `/cancel` | pauses or stops an active run, or dequeues a queued one |
 | `/api/jobs/<id>/relaunch` | restarts a completed app whose server stopped |
+| `/api/jobs/<id>/inputs?name=<file>` (raw body) | adds a spec file (md, txt, json, html, yaml, csv, pdf, image) to an idle parked run |
 | GET `/api/jobs/<id>/recovery-packet` | the diagnosis to read before suggesting a fix |
+
+Ask before each.
+
+**Switching provider** (for example when one is out of usage): no endpoint changes a run's
+provider. With the owner's yes, wait until the run is parked (Pause it first), back up
+`projects/<project>/.solofactory/runs/<id>/state.json`, set its `"provider"` to another
+authenticated provider from `GET /api/config`, restart the server, then `POST /resume`. Resume
+keeps every verified feature.
+
+## Features and repairs
+
+Each planned feature declares the files it `writes`; a feature that changes others fails its
+checks. Each gets 2 repairs, and final integration gets 2 more. A feature that exhausts its
+budget is **set aside** when independent features remain: its dependents wait, the rest keep
+building, and the run then parks with the set-aside work restored. It resumes with its
+unspent repairs. Resume never renews a spent budget.
+
+When repairs run out, `prepare-plan` plans features for the unfinished checks. Once that plan
+passes independent review, **repairs start on their own**: the owner approves nothing. Pause
+before the next feature stops them; the plan stays `ready` and `approve-plan` restarts it. Read
+the plan at `GET /api/jobs/<id>` under `job.recoveryPhase`. Plan or start requires an idle parked
+run, so Pause an active one first. `/recovery-plan` takes optional `guidance` (up to 6000
+characters) to revise a plan; the old one then can't be approved. The original full-contract
+review still gates deployment. The Guide can explain this state; chat text does not run it.
+
+Do not loop Resume after repeated review rejection; follow `nextAction`.
+
+**Safeguards** hold even when the owner asks for a shortcut:
+- Never mark a live plan failed, fake an input change to unlock planning, or reset spent repair
+  budgets.
+- Preserve completed work, evidence and approval history.

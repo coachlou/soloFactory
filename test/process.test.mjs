@@ -33,9 +33,11 @@ test("command contract rejects shell execution", () => {
 test("agent activity extends the idle deadline", async () => {
   const result = await runProcess({
     executable: process.execPath,
-    args: ["-e", "let n=0; const timer=setInterval(() => { console.log(++n); if (n === 6) clearInterval(timer); }, 30)"],
-    idleTimeoutMs: 100,
-    hardTimeoutMs: 1_000,
+    // Wide windows: under full-suite load, child startup alone can exceed a 100ms idle limit.
+    // Output spans 1.5s, longer than the 1s idle limit, so passing still proves activity extends it.
+    args: ["-e", "let n=0; console.log(n); const timer=setInterval(() => { console.log(++n); if (n === 6) clearInterval(timer); }, 250)"],
+    idleTimeoutMs: 1_000,
+    hardTimeoutMs: 10_000,
   });
   assert.equal(result.code, 0);
   assert.equal(result.timedOut, false);
@@ -64,8 +66,18 @@ test("continuous activity still respects the total safety cap", async () => {
   assert.equal(result.timeoutReason, "hard");
 });
 
+test("every provider refuses a prompt over 200K characters before spawning anything", async () => {
+  for (const id of ["codex", "claude"]) {
+    await assert.rejects(createProvider(id).run({ prompt: "x".repeat(200_001), context: { stage: "oversized" } }),
+      (error) => error.code === "prompt_too_large" && error.details.chars === 200_001 && /oversized/.test(error.message));
+  }
+});
+
 test("provider diagnostics distinguish limits from recoverable local blockers", () => {
   assert.deepEqual(detectProviderDiagnostics("usage limit exceeded").map((item) => item.code), ["usage_limit"]);
+  // The final line Claude Code printed when a real smoke run hit the subscription limit.
+  const claudeLimit = JSON.stringify({ type: "result", subtype: "success", is_error: true, api_error_status: 429, api_error: "usage_limit_reached", result: "You've hit your session limit · resets 3:30pm (America/Toronto)" });
+  assert.deepEqual(detectProviderDiagnostics(claudeLimit).map((item) => item.code), ["usage_limit"]);
   assert.deepEqual(
     detectProviderDiagnostics("The 'gpt-6-astra' model requires a newer version of Codex.").map((item) => item.code),
     ["model_cli_incompatible"],
@@ -80,6 +92,25 @@ test("provider diagnostics distinguish limits from recoverable local blockers", 
     item: { type: "command_execution", status: "completed", exit_code: 0, aggregated_output: "Camera permission denied is an acceptance scenario." },
   });
   assert.deepEqual(detectProviderDiagnostics(successfulSpecOutput), []);
+  // The line Codex printed when a repair-plan prompt inlined a 2.4M-character prior plan.
+  assert.deepEqual(detectProviderDiagnostics("turn/start failed: Input exceeds the maximum length of 1048576 characters").map((item) => item.code), ["input_too_large"]);
+});
+
+test("a Codex outage is reported as temporary, not as the local or usage blocker in older output", () => {
+  // The lines Codex printed on 2026-10-14 (run 4f2dd1cf), after a failed command earlier in the same turn.
+  const outage = [
+    { type: "item.completed", item: { type: "command_execution", status: "failed", exit_code: 1, aggregated_output: "rm: dist/cache: Permission denied\nnpm warn rate limit hit, retrying" } },
+    { type: "error", message: "Reconnecting... 5/5 (unexpected status 503 Service Unavailable: An error occurred while processing your request. You can retry your request.)" },
+    { type: "item.completed", item: { type: "error", message: "Selected model is at capacity. Please try a different model." } },
+    { type: "turn.failed" },
+  ].map((event) => JSON.stringify(event)).join("\n");
+  const diagnostics = detectProviderDiagnostics(outage);
+  assert.deepEqual(diagnostics.map((item) => item.code), ["provider_unavailable"]);
+  assert.match(diagnostics[0].action, /Resume/);
+  assert.deepEqual(detectProviderDiagnostics("unexpected status 502 Bad Gateway").map((item) => item.code), ["provider_unavailable"]);
+  // A build's own HTTP test output is not a provider outage.
+  const appTest = JSON.stringify({ type: "item.completed", item: { type: "command_execution", status: "failed", exit_code: 1, aggregated_output: "expected 200, got 503 from /api/health" } });
+  assert.deepEqual(detectProviderDiagnostics(appTest), []);
 });
 
 test("Codex makes one same-session retry after silence and does not retry a concrete blocker", async () => {
@@ -118,6 +149,8 @@ if (args[1] === "resume") {
   process.env.SOLOFACTORY_AGENT_HARD_MINUTES = "0.1";
   process.env.SOLOFACTORY_AGENT_BACKOFF_SECONDS = "0";
   process.env.FAKE_CODEX_COUNT = countFile;
+  delete process.env.SOLOFACTORY_CODEX_MODEL;
+  delete process.env.SOLOFACTORY_CODEX_REASONING_EFFORT;
   const provider = createProvider("codex");
   try {
     const events = [];
@@ -126,8 +159,8 @@ if (args[1] === "resume") {
     assert.equal(result.autoResumes, 1);
     assert.equal((await readFile(countFile, "utf8")).trim().split("\n").length, 2);
     const calls = (await readFile(countFile, "utf8")).trim().split("\n").map(JSON.parse);
-    assert.ok(calls.every((args) => args.includes("--model") && args.includes("gpt-5.6-sol")));
-    assert.ok(calls.every((args) => args.includes('model_reasoning_effort="low"')));
+    assert.ok(calls.every((args) => args.includes("--model") && args.includes("gpt-6.1-sol")));
+    assert.ok(calls.every((args) => args.includes('model_reasoning_effort="medium"')));
     assert.ok(events.some((event) => event.type === "agent.backoff"));
 
     await writeFile(countFile, "");
@@ -179,4 +212,103 @@ console.log(JSON.stringify({ type: "result", subtype: "success", result: "done",
     restoreEnv("PATH", previous.PATH);
     restoreEnv("SOLOFACTORY_AGENT_HARD_MINUTES", previous.hard);
   }
+});
+
+// Successful agent output over the 200K tail cap, full of auth-looking source constants. The tail cut
+// lands inside a JSON record; that fragment must never be read as a plain-text provider error.
+const noisyCodex = `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.FAKE_CODEX_COUNT, JSON.stringify(args) + "\\n");
+const ok = (text) => JSON.stringify({ type: "item.completed", item: { type: "command_execution", status: "completed", exit_code: 0, aggregated_output: text } }) + "\\n";
+const noise = (size) => "x".repeat(size) + " export const UNAUTHORIZED = 401; const INVALID_CREDENTIAL = 'invalid credential token'; // user is not logged in ";
+if (args[1] === "resume") {
+  fs.writeFileSync(args[args.indexOf("--output-last-message") + 1], "continued successfully\\n");
+  console.log(JSON.stringify({ type: "turn.completed" }));
+} else {
+  console.log(JSON.stringify({ type: "thread.started", thread_id: "noisy-session" }));
+  // An oversized single record, then two records the 200K tail cut lands inside.
+  process.stdout.write(ok(noise(260_000)) + ok(noise(150_000)) + ok(noise(150_000)));
+  setTimeout(() => {}, 1500);
+}
+`;
+
+test("auth-like strings in truncated successful output are not an auth diagnostic; idle auto-resume survives", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-noisy-"));
+  const bin = path.join(root, "bin");
+  await mkdir(bin);
+  await writeFile(path.join(bin, "codex"), noisyCodex);
+  await chmod(path.join(bin, "codex"), 0o755);
+  const keys = ["PATH", "SOLOFACTORY_AGENT_IDLE_MINUTES", "SOLOFACTORY_AGENT_HARD_MINUTES", "SOLOFACTORY_AGENT_BACKOFF_SECONDS", "FAKE_CODEX_COUNT"];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  process.env.PATH = `${bin}:${previous.PATH}`;
+  process.env.SOLOFACTORY_AGENT_IDLE_MINUTES = "0.01";
+  process.env.SOLOFACTORY_AGENT_HARD_MINUTES = "0.1";
+  process.env.SOLOFACTORY_AGENT_BACKOFF_SECONDS = "0";
+  process.env.FAKE_CODEX_COUNT = path.join(root, "calls.txt");
+  try {
+    const provider = createProvider("codex");
+    const result = await provider.run({ cwd: root, prompt: "build", mode: "write" });
+    assert.equal(result.message, "continued successfully");
+    assert.equal(result.autoResumes, 1);
+    await assert.rejects(
+      () => provider.run({ cwd: root, prompt: "review", mode: "read" }),
+      (error) => error.code === "agent_idle_timeout" && error.details.diagnostics.length === 0,
+    );
+  } finally {
+    for (const key of keys) restoreEnv(key, previous[key]);
+  }
+});
+
+test("a failing Claude run with auth-like strings in truncated output is not an auth diagnostic", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-noisy-claude-"));
+  const bin = path.join(root, "bin");
+  await mkdir(bin);
+  await writeFile(path.join(bin, "claude"), `#!/usr/bin/env node
+const ok = (text) => JSON.stringify({ type: "item.completed", item: { type: "command_execution", status: "completed", exit_code: 0, aggregated_output: text } }) + "\\n";
+const noise = (size) => "x".repeat(size) + " export const UNAUTHORIZED = 401; const INVALID_CREDENTIAL = 'invalid credential token'; // user is not logged in ";
+process.stdout.write(ok(noise(260_000)) + ok(noise(150_000)) + ok(noise(150_000)), () => process.exit(1));
+`);
+  await chmod(path.join(bin, "claude"), 0o755);
+  const previous = process.env.PATH;
+  process.env.PATH = `${bin}:${previous}`;
+  try {
+    await assert.rejects(
+      () => createProvider("claude").run({ cwd: root, prompt: "build", mode: "write" }),
+      (error) => error.code === "provider_failed" && error.details.diagnostics.length === 0,
+    );
+  } finally {
+    restoreEnv("PATH", previous);
+  }
+});
+
+test("process output keeps complete records for diagnostics across chunk boundaries and the tail cap", async () => {
+  const record = (n) => JSON.stringify({ type: "item.completed", item: { type: "command_execution", status: "completed", exit_code: 0, aggregated_output: `${n} ${"y".repeat(90_000)} UNAUTHORIZED` } });
+  const script = `const r=${JSON.stringify([1, 2, 3, 4].map(record))};let i=0;const out=r.join("\\n")+"\\n";const t=setInterval(()=>{process.stdout.write(out.slice(i,i+7_000));i+=7_000;if(i>=out.length)clearInterval(t);},1);`;
+  const result = await runProcess({ executable: process.execPath, args: ["-e", script], hardTimeoutMs: 10_000 });
+  assert.equal(result.code, 0);
+  assert.ok(result.output.length <= 200_000);
+  assert.ok(!result.output.startsWith("{"), "the tail cap starts mid-record");
+  assert.ok(result.lines.every((line) => JSON.parse(line)), "every diagnostic line is a complete record");
+  assert.deepEqual(detectProviderDiagnostics(result.lines.join("\n")), []);
+});
+
+test("a record cut off by a kill is not kept as diagnostic evidence; a final plain-text line is", async () => {
+  const cut = `process.stdout.write('{"type":"item.completed","item":{"aggregated_output":"UNAUTHORIZED not logged in');setInterval(()=>{},1000);`;
+  const killed = await runProcess({ executable: process.execPath, args: ["-e", cut], hardTimeoutMs: 300 });
+  assert.equal(killed.timedOut, true);
+  assert.deepEqual(killed.lines, []);
+  assert.deepEqual(detectProviderDiagnostics(killed.lines.join("\n")), []);
+  const plain = await runProcess({ executable: process.execPath, args: ["-e", `process.stdout.write("Error: Not logged in");process.exit(1)`] });
+  assert.deepEqual(detectProviderDiagnostics(plain.lines.join("\n")).map((item) => item.code), ["authentication"]);
+});
+
+test("genuine structured and plain-text authentication failures are still detected", () => {
+  const structured = [
+    JSON.stringify({ type: "thread.started", thread_id: "s" }),
+    JSON.stringify({ type: "error", message: "authentication failed: token expired" }),
+  ].join("\n");
+  assert.deepEqual(detectProviderDiagnostics(structured).map((item) => item.code), ["authentication"]);
+  assert.deepEqual(detectProviderDiagnostics(JSON.stringify({ type: "item.completed", item: { type: "error", message: "401 Unauthorized" } })).map((item) => item.code), ["authentication"]);
+  assert.deepEqual(detectProviderDiagnostics("Error: Not logged in. Please run codex login.").map((item) => item.code), ["authentication"]);
 });

@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { COVERAGE_KEYS, makeOpeningTurn } from "./interview.mjs";
 
@@ -51,6 +51,30 @@ const fixtureSlicePlan = {
   ],
 };
 
+// Version-2 plan: a skeleton prerequisite, then one feature closing every original check.
+function fixtureFeaturePlan({ jobId, contractDigest, checks }) {
+  const ids = checks.map((check) => check.id);
+  return {
+    version: 2, jobId, contractDigest, compatibility: [],
+    slices: [
+      {
+        id: "SLICE-SKELETON", title: "Walking skeleton",
+        objective: "A running, health-checked Pocket Pulse server with manifest, build, and aggregate metrics.",
+        demo: "Start the app and curl /health and /_factory/metrics; both answer with valid JSON.",
+        dependsOn: [], closes: [],
+        acceptance: [{ id: "SKELETON-1", behavior: "GET /_factory/metrics returns privacy-preserving aggregate counters", refs: [], sources: [{ path: ".factory/ACCEPTANCE.md", locator: "Acceptance contract" }], proof: { command: ["npm", "test"], expect: "server.test.mjs passes" } }],
+      },
+      {
+        id: "SLICE-UI", title: "Recording UI and docs",
+        objective: "A usable recording page with one-command README on top of the walking skeleton.",
+        demo: "Open the served page and see the record-your-score form and the README instructions.",
+        dependsOn: ["SLICE-SKELETON"], closes: ids,
+        acceptance: [{ id: "UI-1", behavior: "The served page invites the owner to record a daily score", refs: ids, sources: [{ path: ".factory/ACCEPTANCE.md", locator: "Acceptance contract" }], proof: { command: ["npm", "test"], expect: "ui.test.mjs passes" } }],
+      },
+    ],
+  };
+}
+
 export function createFixtureProvider() {
   return {
     id: "fixture",
@@ -65,20 +89,47 @@ export function createFixtureProvider() {
         };
       }
       await mkdir(path.join(cwd, ".factory"), { recursive: true });
-      if (context.stage.startsWith("specification")) {
+      if (/^recovery-plan-review-/.test(context.stage)) {
+        const request = JSON.parse(await readFile(path.join(cwd, ".factory", "plan-review-request.json"), "utf8"));
+        await writeFile(path.join(cwd, ".factory", "plan-review-result.json"), JSON.stringify({ ...request, verdict: "approve", blockers: [] }));
+      } else if (/^recovery-(plan|correction)-/.test(context.stage)) {
+        const phase = context.job.recoveryPhase;
+        const source = phase.request.sources[0].path;
+        await writeFile(path.join(cwd, phase.planFile), JSON.stringify({
+          version: 2, jobId: phase.request.jobId, requestId: phase.id, contractDigest: phase.request.contractDigest, compatibility: [],
+          slices: phase.request.checks.map((check, index) => ({
+            id: `RECOVERY-${index + 1}`, title: check.text, objective: `Recover ${check.id}`, closes: [check.id],
+            acceptance: [{ id: `RECOVERY-${index + 1}-1`, behavior: `Executes server.test.mjs to verify ${check.text}`, refs: [check.id],
+              sources: [{ path: source, locator: check.id }], proof: { command: ["npm", "test"], expect: "server.test.mjs passes" } }],
+            dependsOn: index ? [`RECOVERY-${index}`] : [], writes: ["server.mjs", "server.test.mjs"], demo: "Run the executable fixture behavior checks.",
+          })),
+        }));
+      } else if (context.stage.startsWith("specification")) {
         const body = (title) => `# ${title}\n\nPocket Pulse is a deliberately small personal SaaS fixture used to prove the complete SoloFactory lifecycle. It lets one owner record a daily score and short note, then inspect recent entries and a seven-day summary. The application has no login, billing, team features, external analytics, or remote services. Data remains in the browser.\n\nThe primary end-to-end scenario is observable: open the app, submit a score and note, see the new entry, and see the summary update. The server exposes a health endpoint and privacy-preserving aggregate request telemetry. Keyboard access, mobile layout, explicit empty states, and clear failures are required. This document is intentionally substantive enough to exercise the specification gate without hiding fixture behavior.\n`;
         await writeFile(path.join(cwd, ".factory", "PRD.md"), body("Product requirements"));
         await writeFile(path.join(cwd, ".factory", "PLAN.md"), body("Implementation plan"));
         await writeFile(path.join(cwd, ".factory", "ACCEPTANCE.md"), body("Acceptance contract"));
-        if (context.job?.sdlc === "slices") {
+        if (context.job?.sdlc === "slices" && context.job.planVersion !== 2) {
           await writeFile(path.join(cwd, ".factory", "slices.json"), `${JSON.stringify(fixtureSlicePlan, null, 2)}\n`);
         }
+      } else if (context.stage === "feature-plan" || /^plan-(correction|schema-fix)-\d+$/.test(context.stage)) {
+        const request = JSON.parse(await readFile(path.join(cwd, ".factory", "plan-request.json"), "utf8"));
+        await writeFile(path.join(cwd, ".factory", "slices.json"), `${JSON.stringify(fixtureFeaturePlan(request), null, 2)}\n`);
+      } else if (/^plan-review-\d+$/.test(context.stage)) {
+        const request = JSON.parse(await readFile(path.join(cwd, ".factory", "plan-review-request.json"), "utf8"));
+        await writeFile(path.join(cwd, ".factory", "plan-review-result.json"), JSON.stringify({ ...request, verdict: "approve", blockers: [] }));
       } else if (context.job?.sdlc === "slices" && /^(build-slice-|slice-resume-)/.test(context.stage)) {
         await writeFixtureSlice(cwd, context.job.sliceIndex ?? 0);
       } else if (context.stage === "build" || context.stage === "build-resume" || context.stage === "repair-resume") {
         await writeFixtureApp(cwd);
-      } else if (context.stage.startsWith("review")) {
+      } else if (context.stage.startsWith("review") || /^feature-review-/.test(context.stage) || /^recovery-.*-review-\d+$/.test(context.stage)) {
         await writeFile(path.join(cwd, ".factory", "REVIEW.md"), "# Review\n\nFixture contract inspected; no changes required.\n");
+        const request = JSON.parse(await readFile(path.join(cwd, ".factory", "review-request.json"), "utf8"));
+        await writeFile(path.join(cwd, ".factory", "review-result.json"), JSON.stringify({
+          version: 1, jobId: request.jobId, token: request.token, contractDigest: request.contractDigest,
+          ...(request.candidate ? { candidate: request.candidate } : {}),
+          verdict: "pass", blockers: [], checks: request.checks.map(check => ({ id: check.id, status: "pass", evidence: ["server.test.mjs"] })),
+        }));
       }
       return { message: `${context.stage} complete` };
     },

@@ -4,6 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { workerAlive } from "./watchdog.mjs";
 
 const execFileAsync = promisify(execFile);
 const templatesRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "project");
@@ -101,7 +102,8 @@ export class JobStore {
     await this.git("clean", "-qfd");
   }
 
-  async create({ brief, transcript, provider, sdlc = "single" }) {
+  // New runs are planned feature runs (planVersion 2). "single" stays only for callers that recreate history.
+  async create({ brief, transcript, provider, sdlc = "slices" }) {
     const id = `${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
     const now = new Date().toISOString();
     const job = {
@@ -126,6 +128,7 @@ export class JobStore {
       stageHistory: [],
     };
     if (sdlc === "slices") {
+      job.planVersion = 2;
       job.sliceIndex = 0;
       job.sliceDone = [];
       job.sliceStats = {};
@@ -155,6 +158,22 @@ export class JobStore {
     const enriched = { at: new Date().toISOString(), ...event };
     await appendFile(path.join(this.jobDir(id), "events.jsonl"), `${JSON.stringify(enriched)}\n`);
     return enriched;
+  }
+
+  // Stretches of the run that were not running: after a pause/stop event until the next event, or any silence over
+  // an hour (server down). The time-left estimate subtracts these so only running time counts.
+  // ponytail: re-read when the file grows; incremental parsing if events.jsonl gets huge.
+  async idleGaps(id) {
+    const file = path.join(this.jobDir(id), "events.jsonl");
+    try {
+      const { size } = await stat(file);
+      this.gapCache ??= new Map();
+      const cached = this.gapCache.get(id);
+      if (cached?.size === size) return cached.gaps;
+      const gaps = idleGapsOf(await readFile(file, "utf8"));
+      this.gapCache.set(id, { size, gaps });
+      return gaps;
+    } catch { return []; }
   }
 
   async events(id, limit = 160) {
@@ -204,7 +223,13 @@ export class JobStore {
         job.failedState = job.state;
         job.state = "interrupted";
         job.stage = "Interrupted by restart";
-        job.error = { code: "process_restarted", message: "The factory stopped during this run. Its files are preserved and can be resumed." };
+        const worker = job.worker;
+        // Restart reconciliation: a recorded worker that still exists may still write, so park on it
+        // instead of offering Resume. Downtime is never read as inactivity.
+        job.error = worker && workerAlive(worker.pid)
+          ? { code: "worker_unconfirmed", message: `The factory restarted while ${worker.label} (pid ${worker.pid}) was running, and that process still exists. Stop it before continuing; its files are preserved.`, details: { pid: worker.pid, label: worker.label, kind: worker.kind } }
+          : { code: "process_restarted", message: "The factory stopped during this run. Its files are preserved and can be resumed." };
+        delete job.worker;
         await this.writeState(job);
         await this.appendEvent(job.id, { type: "job.interrupted", state: job.state, message: job.error.message });
       }
@@ -235,4 +260,19 @@ export class JobStore {
     await stat(file);
     return { file, content: await readFile(file, "utf8") };
   }
+}
+
+const STOPPED_EVENTS = new Set(["job.paused", "job.failed", "job.cancelled", "job.interrupted"]);
+const LONG_SILENCE_MS = 60 * 60_000;
+export function idleGapsOf(text) {
+  const gaps = [];
+  let previous = null;
+  for (const line of text.split("\n")) {
+    let event; try { event = JSON.parse(line); } catch { continue; }
+    const at = Date.parse(event.at);
+    if (!Number.isFinite(at)) continue;
+    if (previous && at > previous.at && (STOPPED_EVENTS.has(previous.type) || at - previous.at > LONG_SILENCE_MS)) gaps.push([previous.at, at]);
+    previous = { at, type: event.type };
+  }
+  return gaps;
 }

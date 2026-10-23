@@ -66,7 +66,7 @@ export function discoverProviders() {
   ];
 }
 
-async function codexRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = "write", resumeSessionId = null }) {
+async function codexRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = "write", resumeSessionId = null, context = {} }) {
   await mkdir(cwd, { recursive: true });
   const idleTimeoutMs = minutesFromEnv("SOLOFACTORY_AGENT_IDLE_MINUTES", 6);
   const hardTimeoutMs = minutesFromEnv("SOLOFACTORY_AGENT_HARD_MINUTES", 45);
@@ -74,8 +74,8 @@ async function codexRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = 
   const maxAutoResumes = mode === "read" ? 0 : 1;
   // Factory runs must be reproducible across retries. Do not inherit a newly
   // selected interactive model when resuming an older subscription session.
-  const model = process.env.SOLOFACTORY_CODEX_MODEL || "gpt-5.6-sol";
-  const reasoningEffort = process.env.SOLOFACTORY_CODEX_REASONING_EFFORT || "low";
+  const model = process.env.SOLOFACTORY_CODEX_MODEL || "gpt-6.1-sol";
+  const reasoningEffort = process.env.SOLOFACTORY_CODEX_REASONING_EFFORT || "medium";
   const overallStarted = Date.now();
   let sessionId = resumeSessionId;
   let autoResumes = 0;
@@ -97,6 +97,7 @@ async function codexRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = 
       hardTimeoutMs: remainingHardMs,
       model,
       reasoningEffort,
+      context,
     });
     sessionId = attempt.sessionId ?? sessionId;
     usage = addUsage(usage, attempt.usage);
@@ -105,14 +106,17 @@ async function codexRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = 
       return { ...(schema ? JSON.parse(final) : { message: final.trim() }), sessionId, autoResumes, usage };
     }
 
-    const diagnostics = detectProviderDiagnostics(attempt.result.output);
+    const diagnostics = detectProviderDiagnostics(attempt.result.lines.join("\n"));
     const mayResume =
       attempt.result.timedOut &&
       attempt.result.timeoutReason === "idle" &&
       diagnostics.length === 0 &&
       sessionId &&
       autoResumes < maxAutoResumes &&
-      Date.now() - overallStarted + backoffMs < hardTimeoutMs;
+      Date.now() - overallStarted + backoffMs < hardTimeoutMs &&
+      // The controller's durable allowance for this stage invocation: recorded before the
+      // continuation is dispatched, and refused when an earlier process already used it.
+      (await context.allowContinuation?.() ?? true);
 
     if (mayResume) {
       autoResumes += 1;
@@ -153,6 +157,7 @@ async function runCodexAttempt({
   hardTimeoutMs,
   model,
   reasoningEffort,
+  context = {},
 }) {
   const nonce = randomUUID();
   const resultPath = path.join(cwd, ".factory", `agent-result-${nonce}.txt`);
@@ -205,6 +210,8 @@ async function runCodexAttempt({
     signal,
     idleTimeoutMs,
     hardTimeoutMs,
+    onSpawn: (child) => context.onSpawn?.(child, { hardTimeoutMs }),
+    onActivity: context.onActivity,
     onLine(line) {
       try {
         const event = JSON.parse(line);
@@ -220,19 +227,46 @@ async function runCodexAttempt({
   return { result, resultPath, sessionId: observedSessionId, usage };
 }
 
-async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = "write" }) {
+// Claude's prefix allow-list never matches compound commands: smoke 13's 24 denials were all `cd <project> && ...`,
+// pipes, loops, heredoc writes or python edits. Each denial costs the turn a round trip.
+const CLAUDE_SHELL_RULE = `Shell: you are already in the project root. Only plain single commands are approved, one per Bash
+call; a command with cd, &&, ;, |, a loop, a heredoc or a redirect is denied without running. Read files with
+Read, create and change them with Write and Edit, and search with Glob and Grep.`;
+
+async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = "write", resumeSessionId = null, context = {} }) {
   await mkdir(cwd, { recursive: true });
-  const args = ["-p", "--no-session-persistence", "--output-format", "json"];
+  const reasoningTask = /^(specification(?:-|$)|feature-plan(?:-|$)|plan-review$|plan-correction-|recovery-plan-)|(?:^|-)review(?:-|$)/.test(context.stage ?? "");
+  const model = reasoningTask
+    ? process.env.SOLOFACTORY_CLAUDE_REASONING_MODEL || "opus"
+    : process.env.SOLOFACTORY_CLAUDE_MODEL || "opus";
+  const effort = reasoningTask
+    ? process.env.SOLOFACTORY_CLAUDE_REASONING_EFFORT || "low"
+    : process.env.SOLOFACTORY_CLAUDE_EFFORT || "medium";
+  // stream-json, not json: json printed nothing until exit, so 45-minute build turns left empty logs, fed the
+  // watchdog nothing and had no session id to continue after a cap (SEARCH-UI, 2026-10-14). Sessions persist
+  // so a capped or interrupted turn resumes its own context instead of starting cold.
+  const args = ["-p", "--output-format", "stream-json", "--verbose", "--model", model, "--effort", effort];
+  if (resumeSessionId) args.push("--resume", resumeSessionId);
+  // Agent turns must not inherit the owner's personal Claude Code config: on 2026-10-12 builds ran the user's
+  // Fable advisor (62% of a feature's cost), an rtk hook that rewrote commands, and every claude.ai connector.
+  args.push("--setting-sources", "project,local", "--strict-mcp-config");
   args.push("--permission-mode", mode === "read" ? "plan" : "acceptEdits");
   // Headless acceptEdits silently denies unlisted shell commands, so repair agents shipped fixes they could not run
-  // (~20 denials per repair on 2026-09-27). Allow only the commands the controller's own gates already run.
-  if (mode !== "read") args.push("--allowedTools", "Bash(npm install:*)", "Bash(npm test:*)", "Bash(npm run build:*)");
+  // (~20 denials per repair on 2026-09-27; 46 across smoke 11's builds). Allow the commands the controller's own
+  // gates run, including the plan's proof commands, plus read-only orientation.
+  if (mode !== "read") {
+    const proofs = [...new Set((context.proofCommands ?? []).map((command) => `Bash(${command.join(" ")}:*)`))];
+    args.push("--disallowedTools", "Agent");
+    args.push("--allowedTools", "Bash(npm install:*)", "Bash(npm test:*)", "Bash(npm run build:*)", "Bash(node .factory/check-plan.mjs:*)",
+      "Bash(node --test:*)", "Bash(ls:*)", "Bash(git ls-files:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", ...proofs);
+  }
   if (schema) args.push("--json-schema", JSON.stringify(schema));
+  let sessionId = resumeSessionId;
   const result = await runProcess({
     executable: "claude",
     args,
     cwd,
-    stdin: prompt,
+    stdin: `${prompt}\n\n${CLAUDE_SHELL_RULE}`,
     logPath,
     signal,
     // `claude -p --output-format json` prints nothing until the process ends, so
@@ -241,28 +275,47 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
     // was losing real progress (observed 2026-09-03 on the Snap & Go build).
     idleTimeoutMs: null,
     hardTimeoutMs: minutesFromEnv("SOLOFACTORY_AGENT_HARD_MINUTES", 45),
+    onSpawn: (child) => context.onSpawn?.(child, { hardTimeoutMs: minutesFromEnv("SOLOFACTORY_AGENT_HARD_MINUTES", 45) }),
+    onActivity: context.onActivity,
     onLine(line) {
-      onEvent?.({ type: "agent_output", message: line.slice(0, 500) });
+      const { sessionId: seen, event } = claudeStreamLine(line);
+      sessionId = seen ?? sessionId;
+      if (event) onEvent?.(event);
     },
   });
   if (result.code !== 0) {
     throw providerFailure({
       provider: "Claude Code",
       result,
-      diagnostics: detectProviderDiagnostics(result.output),
+      diagnostics: detectProviderDiagnostics(result.lines.join("\n")),
       logPath,
-      sessionId: null,
+      sessionId,
       autoResumes: 0,
       idleTimeoutMs: minutesFromEnv("SOLOFACTORY_AGENT_IDLE_MINUTES", 6),
       hardTimeoutMs: minutesFromEnv("SOLOFACTORY_AGENT_HARD_MINUTES", 45),
     });
   }
-  // ponytail: the CLI can print a plain-text line ("Background tasks still running after
-  // 600s; terminating.") before its JSON envelope (seen 2026-09-18); the envelope is the last `{` line.
-  const envelope = JSON.parse(result.output.split("\n").filter((line) => line.startsWith("{")).at(-1) ?? result.output);
+  // The envelope is the stream's `result` event; plain-text lines ("Background tasks still running after
+  // 600s; terminating.", seen 2026-09-18) can sit between records.
+  const envelope = result.lines.map((line) => claudeStreamLine(line).record).findLast((record) => record?.type === "result");
+  if (!envelope) throw new Error(`Claude Code exited without a result record. See ${logPath}.`);
   const final = envelope.structured_output ?? envelope.result;
   const usage = claudeUsage(envelope);
-  return schema ? { ...(typeof final === "string" ? JSON.parse(final) : final), usage } : { message: String(final ?? "").trim(), usage };
+  sessionId = envelope.session_id ?? sessionId;
+  return schema ? { ...(typeof final === "string" ? JSON.parse(final) : final), usage, sessionId } : { message: String(final ?? "").trim(), usage, sessionId };
+}
+
+// One stream-json line: the session it names, and a dashboard event per tool call in the codex vocabulary
+// ("Completed Edit src/app.js"). Text, thinking and tool results stay in the log only, so the 160-event
+// window is not flooded.
+export function claudeStreamLine(line) {
+  let record;
+  try { record = JSON.parse(line); } catch { return {}; }
+  const sessionId = record?.session_id ?? null;
+  const tools = record?.type === "assistant" ? (record.message?.content ?? []).filter((block) => block.type === "tool_use") : [];
+  const target = (input = {}) => String(input.file_path ?? input.path ?? input.command ?? input.pattern ?? "").split("\n")[0].slice(0, 160);
+  const event = tools.length ? { type: "item.completed", message: tools.map((tool) => `Completed ${tool.name} ${target(tool.input)}`.trim()).join("; ").slice(0, 500) } : null;
+  return { record, sessionId, event };
 }
 
 // Token usage in one shape for both CLIs. inputTokens counts every input token, cached or not
@@ -316,6 +369,13 @@ export function detectProviderDiagnostics(output = "") {
   const diagnosticOutput = executionFailureText(output);
   const rules = [
     {
+      // Codex's own wording for a service outage (run 4f2dd1cf, 2026-10-14); Claude reports 5xx as api_error_status.
+      code: "provider_unavailable",
+      pattern: /model is at capacity|unexpected status 50[234]\b|overloaded_error|"api_error_status":\s*5\d\d/i,
+      title: "The provider's service is temporarily unavailable",
+      action: "This is a provider outage, not a problem with the run. Resume in a few minutes; the preserved files and session are kept.",
+    },
+    {
       code: "model_cli_incompatible",
       pattern: /requires a newer version of Codex|Model metadata .* not found|resuming session with different model/i,
       title: "The configured Codex model is incompatible with this run",
@@ -323,9 +383,15 @@ export function detectProviderDiagnostics(output = "") {
     },
     {
       code: "usage_limit",
-      pattern: /usage limit|rate limit|quota exceeded|too many requests|insufficient_quota/i,
+      pattern: /usage[ _]limit|session limit|rate[ _]limit|quota exceeded|too many requests|insufficient_quota/i,
       title: "Subscription usage is unavailable",
       action: "Wait for the subscription limit to reset or select another signed-in subscription provider. No automatic retry was attempted.",
+    },
+    {
+      code: "input_too_large",
+      pattern: /input_too_large|Input exceeds the maximum length/i,
+      title: "The prompt exceeded the provider's input limit",
+      action: "This is a factory defect: retrying the same input cannot fit. Report it with this log; no inference ran.",
     },
     {
       code: "authentication",
@@ -352,7 +418,9 @@ export function detectProviderDiagnostics(output = "") {
       action: "Review the named path or command permission, correct it, then resume the preserved run.",
     },
   ];
-  return rules.filter((rule) => rule.pattern.test(diagnosticOutput)).map(({ pattern, ...diagnostic }) => diagnostic);
+  const found = rules.filter((rule) => rule.pattern.test(diagnosticOutput)).map(({ pattern, ...diagnostic }) => diagnostic);
+  // An outage ends the turn, so any limit or permission text beside it came from earlier work in that turn.
+  return found[0]?.code === "provider_unavailable" ? [found[0]] : found;
 }
 
 function executionFailureText(output) {
@@ -441,8 +509,30 @@ function humanizeAgentEvent(event) {
   return String(event.message ?? event.type ?? "Agent event").slice(0, 500);
 }
 
+// Owner policy: no agent is ever sent more than INLINE_PROMPT_CHARS inline, because agents differ in how much context
+// they have. A longer prompt is written to a file in the agent's workspace and the agent is told to read it first
+// (progressive disclosure). The file itself is still capped at MAX_PROMPT_CHARS: past that, no agent could use it.
+export const INLINE_PROMPT_CHARS = 50_000;
+export const MAX_PROMPT_CHARS = 200_000;
+
+export function assertPromptSize(prompt, label = "agent") {
+  if (prompt.length <= MAX_PROMPT_CHARS) return;
+  throw Object.assign(new Error(`The ${label} prompt is ${prompt.length} characters, over SoloFactory's ${MAX_PROMPT_CHARS}-character prompt limit. This is a factory defect: retrying the same input cannot fit. Report it; no agent was started.`),
+    { code: "prompt_too_large", details: { label, chars: prompt.length, max: MAX_PROMPT_CHARS } });
+}
+
+export async function spillPrompt({ cwd, prompt, context = {} }) {
+  if (prompt.length <= INLINE_PROMPT_CHARS) return prompt;
+  assertPromptSize(prompt, context.stage);
+  const relative = `.factory/logs/prompt-${String(context.stage ?? "agent").replace(/[^a-z0-9._-]+/gi, "-").slice(0, 80)}.md`;
+  await mkdir(path.join(cwd, ".factory/logs"), { recursive: true });
+  await writeFile(path.join(cwd, relative), prompt);
+  return `Your complete instructions are in ${relative} (too long to send inline). Read that whole file first, then carry out exactly what it says; it is addressed to you.`;
+}
+
 export function createProvider(id) {
-  if (id === "codex") return { id, run: codexRun };
-  if (id === "claude") return { id, run: claudeRun };
+  const guarded = (run) => async (args) => run({ ...args, prompt: await spillPrompt(args) });
+  if (id === "codex") return { id, run: guarded(codexRun) };
+  if (id === "claude") return { id, run: guarded(claudeRun) };
   throw new Error(`Unknown provider '${id}'.`);
 }
