@@ -97,8 +97,11 @@ same check, so a missing runtime asset fails the suite). After an app change is
 committed there:
 
 ```bash
-scripts/sync-distro.sh solofactory /path/to/soloFactory   # in the ambient-library dev workspace
+scripts/sync-distro.sh --ref v<version> solofactory /path/to/soloFactory   # in the ambient-library dev workspace
 ```
+
+Always pass `--ref` with the release tag (or release branch). Without it the script syncs
+whatever the soloFactory checkout has as HEAD, which may be an unreleased feature branch.
 
 Then audit, commit, and rebuild production. Bump `distro/.claude-plugin/plugin.json`
 when the install contract changes so installed folders can see they are behind.

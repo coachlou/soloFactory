@@ -131,7 +131,7 @@
   </table>
 
   <h2 id="recovery">8. When a run parks</h2>
-  <p>A run parks when a gate fails past its repair budget, an agent hits a usage limit, sign-in, network or toolchain problem, the factory restarts mid-run, or you pause or cancel it. Known blockers are never blindly retried; a parked run holds its project's queue so nothing builds on a half-repaired tree.</p>
+  <p>A run parks when a gate fails past its repair budget, a check&rsquo;s test runner crashes after every test passed (no repair is spent on that), an agent hits a usage limit, sign-in, network or toolchain problem, the factory restarts mid-run, or you pause or cancel it. Known blockers are never blindly retried; a parked run holds its project's queue so nothing builds on a half-repaired tree.</p>
   <p>The <strong>Recovery checkpoint</strong> card explains what happened, what to do, where the preserved files are, and whether any automatic retry was spent (the <em>Token safeguard</em> line). <b class="btn">Copy recovery packet</b> puts a full handoff on your clipboard for pasting into Codex or Claude when you want to fix things by hand, then <b class="btn">Resume</b> from the preserved workspace.</p>
   <h3>A feature that keeps failing</h3>
   <ul>

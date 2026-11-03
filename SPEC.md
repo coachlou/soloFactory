@@ -254,6 +254,9 @@ Only one job may be active because the target user does not benefit from resourc
 
 - Command timeout, non-zero exit, invalid manifest, missing artifact, agent exit, and failed
   health check each produce a named error code and durable evidence.
+- A gate that times out (`gate_timeout`), or a cased gate whose node:test summary shows every
+  test passed before Node itself crashed (`gate_infrastructure`), parks without a repair turn
+  and spends no attempt: neither says anything about the app's code.
 - Logs are stored in full per stage but only bounded tails are returned to the browser.
 - Repair receives the exact failed gate and log path. It never receives authority to skip or
   rewrite a gate.
