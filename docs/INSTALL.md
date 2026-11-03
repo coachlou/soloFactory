@@ -819,6 +819,8 @@ could change or remove them:
 > in an app you built before today, copy that app's folder somewhere safe first. Apps built
 > from now on keep their records where the factory never touches them.
 
+**If they were below 0.10.3 before the update**, nothing changes for their existing apps. New builds may add a lint check (the app's `factory.json` declares it) that runs before the tests; mention it only if they ask why a run shows a *lint* step.
+
 **If they were below 0.10.2 before the update**, a run on Linux or WSL that parked as *Repair budget exhausted* even though its tests passed (the log ends in `EINVAL: invalid argument, fsync`) will pass its checks now: choose **Prepare repair plan** (Resume is refused once repairs are spent). The repair feature normally runs its checks before building anything, so a feature that passes them goes on to review without a rebuild. If the test runner ever crashes after every test passed, the run now stops with an infrastructure error instead of spending its repairs.
 
 **If they were below 0.10.1 before the update**, a run parked on a faulty review test now offers a Waive button (see Troubleshooting); mention it only if they've hit that. Newer Node majors than the spec names are accepted, and a later feature may now update an earlier feature's test.

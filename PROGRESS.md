@@ -1,3 +1,12 @@
+## 0.10.3: optional lint gate (2026-11-03)
+
+An app's factory.json may now declare commands.lint (an argument array starting with npm, node or
+npx). When it does, lint runs as a gate before the tests at every check, including features whose
+suite is skipped, and a lint failure goes to repair like any other gate. Apps without it keep the
+three required gates, so existing projects behave exactly as before. Build prompts offer the lint
+command when the stack has a standard linter or type checker. A disallowed lint executable is an
+invalid manifest. Cherry-picked from feat/lint-gate (b6d6f1b) onto the 0.10.2 release.
+
 ## 0.10.2: Linux/WSL test-reporter crash (2026-11-03)
 
 A member on WSL2 (Node 22) reported a feature parked as *Repair budget exhausted* with 4/4 tests passing.
