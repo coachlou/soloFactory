@@ -9,3 +9,6 @@ solofactory-demo/
 # local install target for testing the distro (an installed ambient folder, not source)
 # ponytail: literal name; add others here if you test-install under different names
 my-folder/
+
+# project-scoped ambient context (local)
+.aai/
