@@ -819,6 +819,8 @@ could change or remove them:
 > in an app you built before today, copy that app's folder somewhere safe first. Apps built
 > from now on keep their records where the factory never touches them.
 
+**If they were below 0.10.2 before the update**, a run on Linux or WSL that parked as *Repair budget exhausted* even though its tests passed (the log ends in `EINVAL: invalid argument, fsync`) will pass its checks now: choose **Prepare repair plan** (Resume is refused once repairs are spent). The repair feature normally runs its checks before building anything, so a feature that passes them goes on to review without a rebuild. If the test runner ever crashes after every test passed, the run now stops with an infrastructure error instead of spending its repairs.
+
 **If they were below 0.10.1 before the update**, a run parked on a faulty review test now offers a Waive button (see Troubleshooting); mention it only if they've hit that. Newer Node majors than the spec names are accepted, and a later feature may now update an earlier feature's test.
 
 **If they were below 0.10.0 before the update**, builds now go one feature at a time, and
@@ -862,6 +864,7 @@ Work these yourself. Do not read this table out loud.
 | `Run \`codex login\` and choose ChatGPT sign-in.` | Codex signed in with an API key | `codex login`, pick ChatGPT |
 | `requires a newer version of Codex` | Codex CLI is out of date | Update the Codex CLI, then restart the server |
 | Browser shows "can't connect" / "site can't be reached" | The server window was closed or `Control`+`C`'d | Restart with `cd "<SF>" && bash start.sh` and leave it running |
+| Run parks saying *every test passed, but the test runner then crashed* | Node or the factory failed after the app's tests passed; the app is not at fault | Update SoloFactory (and Node.js if the message names it), then choose **Resume**. No repair is spent |
 | Run parks as *Repair budget exhausted* | A gate kept failing after its repairs were spent | In the run view choose **Prepare repair plan**; once the independent review passes, repairs start on their own. Resume alone does not renew the budget |
 | Run parks as *Repair budget exhausted* and also shows **Waive BUG-n (faulty test)** | The review's own test, not the app, looks wrong | Read the note under the button. If the test really is wrong, type why in the box above and choose **Waive**, then Resume. Otherwise choose **Prepare repair plan** |
 | Run fails with `prompt_too_large` ("over SoloFactory's 200000-character prompt limit") | A factory defect: the input cannot fit, so retrying cannot help and no agent was started | Do not retry. Have the owner use **Report this run** (or Feedback) in the top bar |

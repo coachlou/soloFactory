@@ -1,3 +1,14 @@
+## 0.10.2: Linux/WSL test-reporter crash (2026-11-03)
+
+A member on WSL2 (Node 22) reported a feature parked as *Repair budget exhausted* with 4/4 tests passing.
+Cause: cased proof gates sent the case reporter's stream to /dev/null; Node 22 fsyncs a reporter
+destination on close and Linux refuses fsync on /dev/null, so node --test exited 1 after a clean run.
+macOS accepts it, so it never showed here. Fixed: the reporter writes to a throwaway log in the run's
+folder; NODE_OPTIONS paths are escaped (Node drops unescaped backslashes, which broke Windows paths);
+a non-zero exit after a clean node:test summary with a Node-internal stack parks as
+gate_infrastructure without a repair turn. The existing real-reporter tests in consolidation.test.mjs
+failed on Linux with the member's exact EINVAL before the fix and pass after it.
+
 # SoloFactory progress
 
 ## 0.10.1: real-provider smoke fixes (2026-10-17)

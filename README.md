@@ -166,6 +166,11 @@ file never leaves your machine; `GET /api/errors?limit=50` returns the latest en
   always gets at least 10) is stopped and the run parks with `gate_timeout`. No repair turn
   runs and no attempt is spent, because a killed command proved nothing about the app. Raise
   the limit and Resume if the checks are only slow.
+- A cased proof gate whose node:test summary shows every test passed, but which still exits
+  non-zero because Node itself then crashed (a stack only from Node's internals), parks with
+  `gate_infrastructure`. No repair turn runs: the app's code is not at fault. The factory's
+  own case reporter writes to a log in the run's folder, never `/dev/null`, which Linux and
+  WSL refuse to fsync.
 - If the server restarts while a worker it launched is still running, the run parks with
   **Stop worker** and its pid; Resume appears once that process has exited. A worker that
   started before this version recorded no pid, so its liveness cannot be checked.
