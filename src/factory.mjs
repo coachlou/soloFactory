@@ -19,6 +19,32 @@ import { amendRepairPlan, archiveReview, assertBatch, consolidationBase, keepCor
 // Which harness produced a run, so runs.jsonl can compare harness changes. Read once at load.
 const harnessRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CASE_REPORTER = fileURLToPath(new URL("./case-reporter.mjs", import.meta.url));
+// Gate failures a repair turn cannot fix: they say nothing about the app's code.
+const NO_REPAIR_GATE = new Set(["gate_timeout", "gate_infrastructure"]);
+
+// A path inside NODE_OPTIONS: quoted for spaces, and with backslashes and quotes escaped, because
+// Node's parser drops an unescaped backslash inside quotes (C:\Users\x would become C:Usersx).
+export const nodeOptionPath = (file) => `"${file.replace(/[\\"]/g, "\\$&")}"`;
+
+// node:test printed a clean summary (tests passed, none failed), then Node itself threw from its own
+// internals, as when the reporter stream's fsync on /dev/null fails under Linux. The app's tests
+// passed, so a repair turn cannot help. Returns the error line, or null for anything else.
+export function runnerCrash(output = "") {
+  const lines = output.split(/\r?\n/);
+  const end = lines.findLastIndex((line) => /^(?:ℹ|#) duration_ms /.test(line));
+  if (end < 0) return null;
+  const summary = lines.slice(Math.max(0, end - 10), end);
+  const count = (name) => {
+    const line = summary.findLast((entry) => new RegExp(`^(?:ℹ|#) ${name} \\d+$`).test(entry));
+    return line == null ? null : Number(line.split(" ").pop());
+  };
+  if (!(count("pass") > 0) || count("fail") !== 0 || count("cancelled") > 0) return null;
+  const tail = lines.slice(end + 1);
+  const frames = tail.filter((line) => /^\s+at /.test(line));
+  const error = tail.find((line) => /^\w*Error\b/.test(line));
+  return error && frames.length && frames.every((line) => /\(node:|at node:/.test(line)) ? error.trim() : null;
+}
+
 const HARNESS = {
   version: JSON.parse(await readFile(path.join(harnessRoot, "package.json"), "utf8")).version,
   commit: (() => {
@@ -867,7 +893,7 @@ export class SoloFactory {
           job = await this.stage(job, "verifying", `Checking feature ${position} before building — ${slice.title}`);
           const failure = await this.verify(job, await this.readManifest(appDir), signal, { includeInstall: true, proofs: runnable });
           // A timed-out check proved nothing for the builder; resume reruns this precheck.
-          if (failure?.code === "gate_timeout") throw failure;
+          if (NO_REPAIR_GATE.has(failure?.code)) throw failure;
           cursor.prechecked = true;
           if (!failure) {
             cursor.preVerified = true;
@@ -1270,7 +1296,7 @@ export class SoloFactory {
         await this.commit(current, `factory: ${passed} passed gates`);
         return current;
       }
-      if (failure.code === "gate_timeout") throw failure;
+      if (NO_REPAIR_GATE.has(failure.code)) throw failure;
       // A pending Pause parks before the repair turn, not after it. Nothing is recorded or spent:
       // resume reruns these checks (no budget) and repairs from a fresh failure.
       if (this.active?.pauseRequested) {
@@ -1481,8 +1507,12 @@ export class SoloFactory {
       // ponytail: node:test only; a proof that sets its own --test-reporter fails loudly on the mismatch.
       const events = cases.length ? path.join(this.store.jobDir(job.id), `cases-${gate}-${job.attempt ?? 0}.jsonl`) : null;
       if (events) await rm(events, { force: true });
+      // The case reporter writes its events itself; its stream output goes to a throwaway file in the run's
+      // folder. Never /dev/null: Node 22 fsyncs the destination on close, and Linux (WSL too) refuses fsync on
+      // /dev/null, so the run exits 1 after every test passed. The run's folder also works on Windows.
+      const discard = events ? path.join(this.store.jobDir(job.id), `reporter-${gate}-${job.attempt ?? 0}.log`) : null;
       // An inherited NODE_TEST_CONTEXT makes node --test skip its files and report nothing, so cased gates drop it.
-      const env = events ? { NODE_OPTIONS: [process.env.NODE_OPTIONS, `--test-reporter="${CASE_REPORTER}" --test-reporter-destination=/dev/null --test-reporter=spec --test-reporter-destination=stdout`].filter(Boolean).join(" "), SOLOFACTORY_CASE_EVENTS: events, NODE_TEST_CONTEXT: undefined } : {};
+      const env = events ? { NODE_OPTIONS: [process.env.NODE_OPTIONS, `--test-reporter=${nodeOptionPath(CASE_REPORTER)} --test-reporter-destination=${nodeOptionPath(discard)} --test-reporter=spec --test-reporter-destination=stdout`].filter(Boolean).join(" "), SOLOFACTORY_CASE_EVENTS: events, NODE_TEST_CONTEXT: undefined } : {};
       let spawned;
       let result;
       try {
@@ -1528,6 +1558,14 @@ export class SoloFactory {
         await this.emit(job.id, { type: "gate.failed", state: job.state, gate, feature, durationMs, message: `${gate} timed out` });
         return new FactoryError("gate_timeout", `${gate} did not finish within its ${timeoutMs / 60_000}-minute limit, so no repair turn ran: a timeout is not a failed check. If the checks are only slow, restart SoloFactory with SOLOFACTORY_GATE_MINUTES set higher (at most 60), then Resume. If they hang, the app needs fixing.`, {
           gate, command, durationMs, proofKeys, timeoutMs, timeoutReason: result.timeoutReason, output: result.output,
+        });
+      }
+      const crash = events && result.code !== 0 && !caseFailure ? runnerCrash(result.output) : null;
+      if (crash) {
+        // Every case passed and node:test reported no failures; Node crashed afterwards. Not the app's fault.
+        await this.emit(job.id, { type: "gate.failed", state: job.state, gate, feature, durationMs, cases: caseCounts(result.caseResults), message: `${gate}: the test runner crashed after its tests passed` });
+        return new FactoryError("gate_infrastructure", `${gate}: every test passed, but the test runner then crashed (${crash}), so no repair turn ran: the app's code is not at fault. Update SoloFactory or Node.js, then Resume.`, {
+          gate, command, durationMs, proofKeys, ...(result.caseResults ? { cases: result.caseResults } : {}), output: result.output,
         });
       }
       if (result.code !== 0 || caseFailure) {

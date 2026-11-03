@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { JobStore } from '../src/store.mjs';
-import { SoloFactory } from '../src/factory.mjs';
+import { SoloFactory, nodeOptionPath, runnerCrash } from '../src/factory.mjs';
 import { assertConsolidation, caseResults, validateFeaturePlan } from '../src/wbs.mjs';
 import { REVIEW_BAR, featureBuildPrompt, featureReviewPrompt, repairPrompt } from '../src/prompts.mjs';
 
@@ -252,4 +253,87 @@ test('a kept obligation keeps its behavior, expected result, proof command and c
   assert.throws(() => assertConsolidation(plan([requirement({ proof: { ...proof, command: ['node', '--test', 'test/smoke.test.mjs'], expect: 'passes' } })]), base), /changes its expected result, proof command/);
   assert.throws(() => assertConsolidation(plan([requirement({ cases: cases().slice(0, 2) })]), base), /drops or changes cases UP-UI-BIG/);
   assert.throws(() => assertConsolidation(plan([requirement({ cases: cases().map(c => c.id === 'UP-API-BIG' ? { ...c, expect: '400' } : c) })]), base), /drops or changes cases UP-API-BIG/);
+});
+
+// Output of a cased gate on Linux / WSL with Node 22 when the reporter destination was /dev/null:
+// every test passed, then the reporter stream's fsync failed and Node exited 1.
+const FSYNC_CRASH = `✔ [UP-API-OK] accepts a small photo (0.9ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 129.66
+node:events:497
+      throw er; // Unhandled 'error' event
+      ^
+
+Error: EINVAL: invalid argument, fsync
+Emitted 'error' event on WriteStream instance at:
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3)
+    at process.processTicksAndRejections (node:internal/process/task_queues:89:21) {
+  errno: -22,
+  code: 'EINVAL',
+  syscall: 'fsync'
+}
+
+Node.js v22.22.1`;
+
+test('cased gates never send the reporter to /dev/null, and quote its paths for NODE_OPTIONS', async t => {
+  let options = null;
+  const env = await harness(t, async ({ env = {} }) => {
+    if (!env.SOLOFACTORY_CASE_EVENTS) return { code: 0, output: 'ok' };
+    options = env.NODE_OPTIONS;
+    await writeFile(env.SOLOFACTORY_CASE_EVENTS, ['UP-API-OK', 'UP-API-BIG', 'UP-UI-BIG'].map(id => JSON.stringify({ type: 'test:pass', name: `[${id}] test` })).join('\n'));
+    return { code: 0, output: 'ok' };
+  });
+  assert.equal(await env.verify(), null);
+  assert.doesNotMatch(options, /dev\/null/);
+  const destination = options.match(/--test-reporter-destination=("(?:[^"\\]|\\.)*")/)?.[1];
+  assert.ok(destination, options);
+  // The harness root has a space in it, so an unquoted path would split.
+  assert.ok(JSON.parse(destination).startsWith(env.root), destination);
+});
+
+test('a NODE_OPTIONS path keeps its spaces, backslashes and quotes', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'solo factory paths-'));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
+  // A backslash is a separator on Windows and a legal name character elsewhere; either way Node must see it.
+  const dir = path.join(root, process.platform === 'win32' ? 'a b' : 'a\\b "c"');
+  await mkdir(dir);
+  const file = path.join(dir, 'probe.cjs');
+  await writeFile(file, 'process.stdout.write("loaded")');
+  assert.equal(nodeOptionPath('C:\\Users\\x y\\r.mjs'), '"C:\\\\Users\\\\x y\\\\r.mjs"');
+  const out = execFileSync(process.execPath, ['-e', ''], { env: { ...process.env, NODE_OPTIONS: `--require=${nodeOptionPath(file)}` }, encoding: 'utf8' });
+  assert.equal(out, 'loaded');
+});
+
+test('a Node crash after every test passed is told apart from a failing test', () => {
+  assert.equal(runnerCrash(FSYNC_CRASH), 'Error: EINVAL: invalid argument, fsync');
+  assert.equal(runnerCrash(FSYNC_CRASH.replace('ℹ fail 0', 'ℹ fail 1')), null, 'a failed test is a real failure');
+  assert.equal(runnerCrash(FSYNC_CRASH.replace('ℹ pass 3', 'ℹ pass 0')), null, 'nothing passed');
+  assert.equal(runnerCrash(FSYNC_CRASH.replace('(node:internal/streams/destroy:170:8)', '(file:///app/server.mjs:12:3)')), null, 'an error from the app\'s own code is the app\'s');
+  assert.equal(runnerCrash('ℹ pass 3\nℹ fail 0\nℹ duration_ms 5\nsh: 1: lint: not found'), null, 'a later step failing without a Node stack');
+  assert.equal(runnerCrash(''), null);
+});
+
+test('a cased gate whose runner crashed after its tests passed parks without a repair turn', async t => {
+  const env = await harness(t, async ({ env = {} }) => {
+    if (!env.SOLOFACTORY_CASE_EVENTS) return { code: 0, output: 'ok' };
+    await writeFile(env.SOLOFACTORY_CASE_EVENTS, ['UP-API-OK', 'UP-API-BIG', 'UP-UI-BIG'].map(id => JSON.stringify({ type: 'test:pass', name: `[${id}] test` })).join('\n'));
+    return { code: 1, output: FSYNC_CRASH };
+  });
+  const failure = await env.verify();
+  assert.equal(failure.code, 'gate_infrastructure');
+  assert.match(failure.message, /every test passed, but the test runner then crashed \(Error: EINVAL: invalid argument, fsync\), so no repair turn ran/);
+  // The same exit code with a failed case is still the app's failure.
+  const real = await harness(t, async ({ env = {} }) => {
+    if (!env.SOLOFACTORY_CASE_EVENTS) return { code: 0, output: 'ok' };
+    await writeFile(env.SOLOFACTORY_CASE_EVENTS, JSON.stringify({ type: 'test:fail', name: '[UP-API-OK] test' }));
+    return { code: 1, output: FSYNC_CRASH };
+  });
+  assert.equal((await real.verify()).code, 'quality_gate_failed');
 });
