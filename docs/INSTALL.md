@@ -69,8 +69,8 @@ Nothing is written to a file this time — the app checks for the CLI every time
 But if they open the web page before signing in, they see a dead provider list, conclude the
 install failed, and you spend the next ten minutes undoing that impression.
 
-Correct order, both platforms: **git → Node 24 LTS → coding agent (installed AND logged in) →
-SoloFactory installer → start it.**
+Correct order, both platforms: **git → Node 24 LTS → coding agent (installed AND logged in) → `gh` signed in (online
+install only) → SoloFactory installer → start it.**
 
 ---
 
@@ -84,6 +84,9 @@ there, and never touches `projects/`. It comes in two forms:
   the release from a private GitHub repo (the AIMM members' repo, `coachlou/aimm`), so it needs the `gh` CLI signed in to an account
   with access (`gh auth status`), or `GITHUB_TOKEN` set. Without that it stops with a line
   saying to *ask for an invite to the AIMM repo* — that is not a broken machine; switch to the zip.
+  A bash `syntax error near unexpected token` or `Not Found` right after the `gh api` line is
+  the same no-access case (signed in as an uninvited account, or an expired sign-in): go to
+  GitHub access below.
 - **From a zip:** if the owner was sent a `solofactory-<version>.zip` (testers are), have
   them unzip it — double-clicking it is enough — and find the installer:
 
@@ -206,7 +209,8 @@ echo "macOS: $(sw_vers -productVersion)"; \
 echo "git: $(git --version 2>/dev/null || echo MISSING)"; \
 echo "node: $(node --version 2>/dev/null || echo MISSING)"; \
 echo "claude: $(command -v claude 2>/dev/null || echo MISSING)"; \
-echo "codex: $(command -v codex 2>/dev/null || echo MISSING)"
+echo "codex: $(command -v codex 2>/dev/null || echo MISSING)"; \
+echo "gh: $(command -v gh 2>/dev/null || echo MISSING)"
 ```
 
 > This just looks around and tells me what's already on your machine. It changes nothing.
@@ -219,6 +223,7 @@ Read the report yourself. Then handle only what's missing:
 | `git: MISSING` | A3 |
 | `node: MISSING`, below `v22`, or `v25` and up | A4 |
 | both `claude:` and `codex:` are `MISSING` | A5 |
+| `gh: MISSING`, or not signed in (`gh auth status`) | only needed for the online install; see GitHub access above, or use the zip |
 | everything present and `node` is v22, v23 or v24 | skip to A6 |
 
 **Reading the node version:** it prints like `v22.12.0` or `v24.3.0`. The requirement is
@@ -263,7 +268,7 @@ Do **not** send a non-technical owner to Homebrew. Use Apple's own installer pac
 >
 > 1. Go to **https://nodejs.org/dist/latest-v24.x/**
 > 2. It's a plain list of files. Click the one ending in **.pkg** (it looks like
->    `node-v24.21.0.pkg`).
+>    `node-v24.x.y.pkg`).
 > 3. Open the file that lands in your Downloads folder.
 > 4. Click Continue / Agree / Install through the windows. It will ask for your Mac password
 >    near the end — type it and press Enter. The password stays invisible while you type;
@@ -527,7 +532,8 @@ echo "git: $(git --version 2>/dev/null || echo MISSING)"; \
 echo "curl: $(command -v curl 2>/dev/null || echo MISSING)"; \
 echo "rsync: $(command -v rsync 2>/dev/null || echo MISSING)"; \
 echo "node: $(node --version 2>/dev/null || echo MISSING)"; \
-echo "claude: $(command -v claude 2>/dev/null || echo MISSING)"
+echo "claude: $(command -v claude 2>/dev/null || echo MISSING)"; \
+echo "gh: $(command -v gh 2>/dev/null || echo MISSING)"
 ```
 
 > This just looks around and reports back. It changes nothing.
@@ -874,11 +880,10 @@ Work these yourself. Do not read this table out loud.
 | Run fails with `prompt_too_large` ("over SoloFactory's 200000-character prompt limit") | A factory defect: the input cannot fit, so retrying cannot help and no agent was started | Do not retry. Have the owner use **Report this run** (or Feedback) in the top bar |
 | `Port 4173 is in use by another app` | Another app already uses port 4173 | Start with a different port: `cd "<SF>" && PORT=5000 bash start.sh`, then use `http://127.0.0.1:5000` everywhere this guide says 4173 |
 | `SoloFactory is already running at …` | A factory from an earlier window is still running | Open that address; don't start a second one |
-| `ask for an invite to that repo` right after the `gh api` line | No GitHub access to the AIMM members' repo | `gh auth login` with an account that has access, or use a zip — see **The install command** |
+| `ask for an invite to the AIMM repo`, or a bash `syntax error near unexpected token` / `Not Found`, right after the `gh api` line | No GitHub access to the AIMM members' repo | `gh auth login` with an account that has access, or use a zip — see **The install command** |
 | `rsync: command not found` | Ubuntu missing rsync | B2 |
 | `curl: command not found` | Ubuntu missing curl | B2 |
 | `git: command not found` | git missing | A3 / B2 |
-| `install: refused — these paths already exist with different contents` | A previous half-install left conflicting files | Do **not** delete anything. Show the owner the listed paths and ask whether they installed here before. Only proceed once they confirm the folder is disposable. |
 | `command not found` right after installing something | Shell has a stale PATH | Fresh terminal window, then retry. This resolves it the overwhelming majority of the time. |
 | Windows: odd filesystem, permission or exec failures with no other explanation | Running on WSL1, not WSL2 | `wsl --list --verbose` in PowerShell; if VERSION is 1, convert per B1d |
 | Windows: `'wsl' is not recognized` after `wsl --install` | Windows build too old for WSL2 | `winver`; needs Win11 or Win10 build 19041+. Windows Update first, then stop |

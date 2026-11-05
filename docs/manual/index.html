@@ -58,7 +58,7 @@
 
   <h2 id="projects">2. Projects</h2>
   <p>A project is the folder the factory builds into. The first selector in the header switches between them; <em>New project…</em> asks for a name in a small dialog. Each project is its own git repository with the app at the root, a <code>.aai/</code> folder of project context you can edit, and a run history.</p>
-  <p>Projects live under the factory home (<code>~/.solofactory/projects/</code> by default). A folder you create there by hand shows up too. Switching projects never interrupts a run.</p>
+  <p>Projects live under the factory home (<code>.solofactory/projects/</code> inside the SoloFactory folder by default). A folder you create there by hand shows up too. Switching projects never interrupts a run.</p>
 
   <h2 id="interview">3. Shape the brief</h2>
   <figure>
@@ -153,7 +153,7 @@
   <h2 id="settings">10. Settings</h2>
   <table>
     <tr><th>Variable</th><th>Meaning</th></tr>
-    <tr><td><code>SOLOFACTORY_HOME</code></td><td>Where runs, projects and the demo live. Default <code>~/.solofactory</code>.</td></tr>
+    <tr><td><code>SOLOFACTORY_HOME</code></td><td>Where runs, projects and the demo live. Default <code>.solofactory/</code> inside the SoloFactory folder (installed folders use <code>.aai/memory/solofactory/</code>).</td></tr>
     <tr><td><code>SOLOFACTORY_ROOT</code></td><td>Where projects are discovered. Default: the home.</td></tr>
     <tr><td><code>SOLOFACTORY_MAX_ACTIVE_RUNS</code></td><td>How many projects may build at once. Default 1.</td></tr>
     <tr><td><code>SOLOFACTORY_AGENT_IDLE_MINUTES</code></td><td>Agent idle deadline, reset by any output. Default 6.</td></tr>

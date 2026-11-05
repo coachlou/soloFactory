@@ -10,7 +10,7 @@ It does not request or store an OpenAI or Anthropic API key.
 
 ## Requirements
 
-- Node.js 22 or newer; Node 24 LTS is the recommended version. The installer warns on Node 25 and up, because some packages the factory builds with ship no prebuilt files for it yet.
+- Node.js 22 to 24; Node 24 LTS is the recommended version. The installer warns on Node 25 and up (it still installs), because some packages the factory builds with ship no prebuilt files for it yet.
 - Codex CLI signed in with ChatGPT (`codex login status` should say `Logged in using ChatGPT`),
   or Claude Code signed in with a subscription account.
 - npm, available on `PATH`.

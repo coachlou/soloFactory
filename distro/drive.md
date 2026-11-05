@@ -20,7 +20,7 @@ shows up on the board, and a run started in the browser can be watched from here
   model between you and the owner. Read `app/skills/factory-guide.md` (next to this file) and
   follow its conversation rules: one question per turn, plain product language, and push vague
   words into observable behavior.
-- The server binds to `127.0.0.1` and dies with its terminal. Start it in the background and
+- The server binds to `127.0.0.1` (HOST may name another loopback address; anything else is refused) and dies with its terminal. Start it in the background and
   keep it running while the build or the built app is in use.
 - Never edit `state.json` or `events.jsonl` by hand. Every recovery action has an endpoint.
 - **Log every failed factory call** so it can be analyzed later: when a request returns an error
@@ -166,6 +166,7 @@ and the same `nextAction`. Ask the owner before any of these actions:
 | `prepare-plan` / `retry-plan` / `revise-inputs` | `POST /recovery-plan`: the repair budget is spent, a review hit its cap, a failure repeated on unchanged code, or the specs changed. Resume cannot help |
 | `approve-plan` | a Pause left a reviewed plan unstarted: `POST /recovery-start {"planDigest":"…"}` |
 | `amend-plan` | automatic plan corrections ran out: `GET /recovery-plan-packet`, then `POST /recovery-review {"phaseId","plan"}` |
+| `waive-proof` (in `alternatives`) | a reviewer's own test is wrong: ask the owner for a reason, Pause first, then `POST /waive-proof {"proof":"<BUG id>","reason":"…"}` (409 unless paused) |
 | `stop-worker` | a worker from before a restart is still alive; wait or stop that process, then re-read |
 | `factory-fix` | the factory built an over-size prompt (limit 200,000 characters). Retrying cannot help until a fixed factory build runs; report it |
 | `none` | `cancelled` (start over), dismissed, or a worker already running |

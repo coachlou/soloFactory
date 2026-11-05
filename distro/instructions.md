@@ -12,7 +12,7 @@ library reachable.
 
 ## Important
 
-- **Node 22+ is required** and a signed-in `codex` or `claude` CLI. The
+- **Node 22 to 24 is required** (24 LTS recommended; newer installs with a warning) and a signed-in `codex` or `claude` CLI. The
   installer warns if node is missing but still writes the scaffold.
 - **Building spends subscription quota.** Never start a real build on the
   owner's behalf without an explicit go-ahead. `SOLOFACTORY_DEMO=1` is free.
@@ -53,7 +53,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/library/ambient-folder/install.sh" solofactory <targ
 ├── .ailib/                    # VENDORED — re-synced on every install
 │   ├── manifest.yaml
 │   ├── ambient-folder/        #   generic install/update script (dependency)
-│   ├── ambient-folder/        #   generic install/update script (dependency)
+│   ├── dev-rules/             #   coding rules (dependency)
 │   └── solofactory/           #   this capability: run.sh, app/, templates/
 ├── start.sh                   #   root-level launcher → .ailib/solofactory/run.sh
 ├── projects/                  # one workspace per project (from the app, or a folder you make)
