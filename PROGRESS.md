@@ -1,3 +1,13 @@
+## 0.10.4: audit hardening (2026-11-05)
+
+Ten fixes from the process audit. The server refuses to start on a non-loopback HOST. Cancel and the
+watchdog stop an agent's whole process group, and a worker counts as alive while any member of its
+group lives. events.jsonl appends are serialized per job. Plan approval fails when its commit fails,
+so a restart cannot erase the plan. An app that exits right after launch is recorded as stopped, not
+live. Sign-in, network and permission outages are read only from provider transport lines. Deep globs
+that reach into a literal write directory are caught. Agent changes to data/ are reported after each
+turn. Two unbounded test wait loops now fail after 30s instead of hanging.
+
 ## 0.10.3: optional lint gate (2026-11-03)
 
 An app's factory.json may now declare commands.lint (an argument array starting with npm, node or
