@@ -1,3 +1,7 @@
+## 0.10.5: docs audit (2026-11-05)
+
+Docs only. The install runbook now checks `gh` and names the bash syntax error a signed-in but uninvited member sees; the Node range reads 22 to 24 everywhere; drive.md covers waive-proof and HOST; the manual's home path is corrected.
+
 ## 0.10.4: audit hardening (2026-11-05)
 
 Ten fixes from the process audit. The server refuses to start on a non-loopback HOST. Cancel and the
