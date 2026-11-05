@@ -279,7 +279,7 @@ test('a shutdown during an amendment review saves the run interrupted, and the r
   const env = await setup(t); const turns = env.stages.length;
   env.ctl.block = false; env.ctl.hang = true;
   const running = submit(env, candidate(env.blocked));
-  while (!env.ctl.release) await new Promise(resolve => setTimeout(resolve, 5));
+  for (const deadline = Date.now() + 30_000; !env.ctl.release; await new Promise(resolve => setTimeout(resolve, 5))) assert.ok(Date.now() < deadline, 'the review never reached its hang');
   // What server close() does for each live run.
   await env.factory.cancel(env.blocked.id, { shutdown: true });
   env.ctl.release();

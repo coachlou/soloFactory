@@ -406,7 +406,7 @@ test("briefs queue per project, overlap across projects, and wait behind a parke
   assert.equal((await waitForJob(base, a3.id, ["failed"])).state, "failed");
   assert.equal((await getJson(`${base}/api/jobs/${a5.id}`)).job.state, "queued", "the start still waits behind the re-parked run");
   // The parked state lands just before the run releases the project.
-  while ((await getJson(`${base}/api/health`)).activeRuns.length) await new Promise((resolve) => setTimeout(resolve, 20));
+  for (const deadline = Date.now() + 30_000; (await getJson(`${base}/api/health`)).activeRuns.length; await new Promise((resolve) => setTimeout(resolve, 20))) assert.ok(Date.now() < deadline, "the parked run never released the project");
   // Setting aside a failed follow-on rewinds the app to the release before it, keeping owner data.
   await writeFile(path.join(dirA, "half-built.js"), "// left by the failed run\n");
   await mkdir(path.join(dirA, "data"), { recursive: true });
