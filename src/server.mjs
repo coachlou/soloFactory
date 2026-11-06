@@ -301,7 +301,7 @@ export async function createSoloFactoryServer(options = {}) {
           featureRecovery: current.recoveryPhase ? { status: current.recoveryPhase.status, done: current.recoveryPhase.done, current: current.recoveryPhase.current,
             // The plan stays on disk (up to MAX_AMENDED_PLAN_BYTES); the guide reads it from the project when it needs it.
             planFile: current.recoveryPhase.planFile ?? null, features: current.recoveryPhase.plan?.slices.length ?? 0, gaps: current.recoveryPhase.request?.checks ?? [], planBlockers: current.recoveryPhase.planBlockers ?? [], remainingRepairs: Math.max(0, (current.repairBudgetLimit ?? 0) - current.attempt) } : null,
-          recoveryPacket: PARKED.has(current.state) ? buildRecoveryPacket({ ...current, recovery: current.recovery ?? buildRecovery(current, active.dir) }) : null,
+          recoveryPacket: PARKED.has(current.state) ? buildRecoveryPacket(withContinuation({ ...current, recovery: current.recovery ?? buildRecovery(current, active.dir, undefined, { maxRepairs }) }, { maxRepairs })) : null,
         } : { project: active.id, state: "no-runs" };
         const guide = providerFactory(provider);
         const result = await runGuideTurn((prompt) => guide.run({

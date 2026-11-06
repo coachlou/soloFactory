@@ -1157,7 +1157,12 @@ test("an ordinary gate failure with repairs left continues with Resume", () => {
   // Recorded on another build: integration and recovery-phase gates rerun first too, like feature gates.
   const other = { ...job, planVersion: 2, attempt: 2, error: { ...job.error, details: { gate: "test", build: "0.10.1+0000000" } } };
   assert.equal(continuationAction(other, { maxRepairs: 2 }).action, "resume", "integration gate");
-  assert.equal(continuationAction({ ...other, featureCursor: { id: "F" }, recoveryPhase: { status: "running" } }, { maxRepairs: 2 }).action, "resume", "recovery-phase gate");
+  assert.equal(continuationAction({ ...other, recoveryPhase: { status: "running", cursor: { id: "F", substage: "checking" } } }, { maxRepairs: 2 }).action, "resume", "recovery-phase feature gate");
+  // A built phase reviews before it verifies, and a batch re-grants its repair budget on Resume: both keep the repair plan.
+  assert.equal(continuationAction({ ...other, recoveryPhase: { status: "built", cursor: null } }, { maxRepairs: 2 }).action, "prepare-plan", "built recovery phase");
+  assert.equal(continuationAction({ ...other, recoveryPhase: { status: "running", cursor: null } }, { maxRepairs: 2 }).action, "prepare-plan", "recovery batch");
+  const bug = { id: "BUG-1", proof: { command: ["node", "--test", "qa/x.test.mjs"] }, description: "x" };
+  assert.equal(continuationAction({ ...other, bugProofs: [bug] }, { maxRepairs: 2 }).alternatives?.[0]?.proof, "BUG-1", "the waiver stays offered beside the rerun");
 });
 
 test("a build that hits the safety cap while changing files continues once in its own session", async () => {
