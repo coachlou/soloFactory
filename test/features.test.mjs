@@ -1,7 +1,7 @@
 // Planned-feature (slices.json v2) execution: the PRD acceptance matrix at the factory level.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import os from "node:os";
@@ -1096,6 +1096,34 @@ test("an ordinary test gate that exhausts its repairs needs a repair plan; Resum
   assert.ok(ready.recoveryPhase.request.blockers.some((text) => text.includes("ui.test.mjs: 1 failing")), "the gate output is a planning finding");
   const result = await make().startRecovery(job.id, ready.recoveryPhase.planDigest);
   assert.equal(result.state, "completed", result.error?.message);
+});
+
+// Member run, 2026-11-03: a gate failure recorded on 0.10.1 was planned around on 0.10.3 without rerunning the gate.
+test("a spent gate failure recorded on another SoloFactory build is rerun by Resume, and a pass continues the build with no repair plan", async () => {
+  let failing = false;
+  const commandRunner = async ({ executable, args }) => failing && [executable, ...args].join(" ") === "npm test" ? { code: 1, output: "ui.test.mjs: runner crashed" } : { code: 0, output: "passed" };
+  let edits = 0;
+  const { store, job, make } = await plannedRun({ commandRunner, after: async (stage, cwd) => {
+    if (stage === "build-slice-SLICE-UI") failing = true;
+    if (stage.startsWith("repair-")) await writeFile(path.join(cwd, `repair-${++edits}.txt`), "attempt");
+  } });
+  const failed = await make().start(job.id);
+  assert.equal(failed.error.code, "quality_gate_failed");
+  const build = failed.error.details.build;
+  assert.ok(build, "the parked failure names the build that recorded it");
+  assert.ok(failed.watch.attempts.length && failed.watch.attempts.every((attempt) => attempt.build === build), "each attempt names its build");
+  assert.equal(continuationAction(failed).action, "prepare-plan", "same build: a repair plan, as before");
+  // Harness A recorded the failure; this process is harness B, whose gate passes.
+  const saved = await store.read(job.id);
+  saved.error.details.build = "0.10.1+0000000";
+  await store.writeState(saved);
+  assert.equal(continuationAction(saved).action, "resume");
+  failing = false;
+  const result = await make().resume(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(result.recoveryPhase ?? null, null);
+  assert.equal(count(await started(store, job.id), "recovery-plan"), 0, "no repair plan was prepared");
+  assert.deepEqual((await readdir(store.jobDir(job.id))).filter((name) => /^recovery-.*-request\.json$/.test(name)), [], "no recovery request was written");
 });
 
 test("Prepare repair plan is refused while Resume is the next step, without a write", async () => {

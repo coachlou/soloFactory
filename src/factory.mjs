@@ -1106,7 +1106,8 @@ export class SoloFactory {
     job.error = interrupted ? { code: "process_restarted", message: "The factory stopped during this run. Its files are preserved and can be resumed.", details: {} } : {
       code: cancelled ? "cancelled" : error.code ?? "unexpected_error",
       message: cancelled ? "The owner cancelled this run." : error.message,
-      details: OVERSIZED_PROMPT.has(error.code) ? { ...error.details, build: BUILD_ID } : error.details ?? {},
+      // The build that recorded the failure: an oversized prompt waits for another build, and a gate failure is rerun on one.
+      details: { ...error.details, build: BUILD_ID },
     };
     job.recovery = buildRecovery(job, this.store.appDir(jobId), undefined, { maxRepairs: this.maxRepairs });
     job.watch = { ...job.watch, observed: { ...this.supervision(jobId), status: "Action needed", monitoring: false } };
@@ -1501,7 +1502,7 @@ export class SoloFactory {
     try { candidate = await sourceBaseline(this.store, { head: false }); } catch {}
     const scope = `${slice?.id ?? job.recoveryPhase?.cursor?.id ?? job.featureCursor?.id ?? "app"}:${failure.details?.gate ?? failure.code}`;
     job.watch ??= {};
-    job.watch.attempts = [...(job.watch.attempts ?? []), { ...failureSignature(failure, { scope, candidate }), log: failure.details?.gate ? gateLog(job, failure.details.gate) : null, at: new Date().toISOString() }].slice(-30);
+    job.watch.attempts = [...(job.watch.attempts ?? []), { ...failureSignature(failure, { scope, candidate }), log: failure.details?.gate ? gateLog(job, failure.details.gate) : null, build: BUILD_ID, at: new Date().toISOString() }].slice(-30);
     await this.store.writeState(job);
   }
 
@@ -1925,6 +1926,10 @@ export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
   if (phase === "planning" || phase === "plan_failed") return next("retry-plan", "Retry repair-plan preparation", "recovery-plan", `${phase === "planning" ? "Repair-plan preparation stopped before it finished" : "Repair-plan preparation failed"}, so no plan is approved. Retry repair-plan preparation; Resume cannot continue an unapproved plan.`);
   if (phase === "ready") return { ...next("approve-plan", "Approve and continue repairs", "recovery-start", "The repair plan passed independent review, but a Pause stopped it before repairs started. Approve and continue repairs to start it; Resume does not start an unapproved plan."),
     alternatives: [next("amend-plan", "Submit corrected plan for review", "recovery-review", "Replaces the ready plan with your corrected plan. The ready plan stays in history as evidence but can no longer be approved. The replacement gets one independent review and no automatic corrections; if it passes, repairs start on their own.")] };
+  // Member run, 2026-11-03: a 0.10.1 gate failure (Node's fsync crash, fixed in 0.10.2) was planned around on 0.10.3
+  // from its stored output. A feature gate recorded by another build is rerun by Resume first; a missing stamp predates them.
+  // ponytail: ordinary feature build only; integration and recovery-phase gates keep today's routing.
+  if (job.planVersion === 2 && job.featureCursor && !job.recoveryPhase && job.error?.code === "quality_gate_failed" && job.error.details?.build !== BUILD_ID) return next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", "SoloFactory changed since this gate failed. Resume reruns the gate on this build first; only a failure here leads to a repair plan.");
   if (repairsExhausted(job, maxRepairs)) return { ...next("prepare-plan", "Prepare repair plan", "recovery-plan", "The repair budget is exhausted. Prepare a repair plan; once it passes independent review, repairs start on their own. Resume does not renew the budget or rerun the same review."),
     ...(job.bugProofs?.length ? { alternatives: job.bugProofs.map((bug) => ({ ...next("waive-proof", `Waive ${bug.id} (faulty test)`, "waive-proof", `Use only if the reviewer's test ${bug.proof.command.at(-1)} is itself wrong: ${bug.description}. Type why in the box above first; it is required.`), proof: bug.id, repairerNote: job.lastRepairNote?.text ?? null })) } : {}) };
   // Resume would hit the same review cap; only a repair plan can move this feature.
