@@ -823,7 +823,7 @@ export class SoloFactory {
     const ref = `refs/factory/set-aside/${slice.id}`;
     await this.store.git("update-ref", ref, "HEAD");
     // State first: a crash after the reset still finds the ref to restore from.
-    (job.setAside ??= []).push({ id: slice.id, ref, base: cursor.base, cursor, remaining: job.repairBudgetLimit == null ? null : job.repairBudgetLimit - (job.attempt ?? 0), limit: job.repairBudgetLimit, error: { code: error.code, message: error.message, details: error.details } });
+    (job.setAside ??= []).push({ id: slice.id, ref, base: cursor.base, cursor, remaining: job.repairBudgetLimit == null ? null : job.repairBudgetLimit - (job.attempt ?? 0), limit: job.repairBudgetLimit, error: { code: error.code, message: error.message, details: { ...error.details, build: BUILD_ID } } });
     job.featureCursor = null;
     await this.store.writeState(job);
     await this.store.reset(cursor.base);
@@ -1106,8 +1106,8 @@ export class SoloFactory {
     job.error = interrupted ? { code: "process_restarted", message: "The factory stopped during this run. Its files are preserved and can be resumed.", details: {} } : {
       code: cancelled ? "cancelled" : error.code ?? "unexpected_error",
       message: cancelled ? "The owner cancelled this run." : error.message,
-      // The build that recorded the failure: an oversized prompt waits for another build, and a gate failure is rerun on one.
-      details: { ...error.details, build: BUILD_ID },
+      // The build that recorded the failure (a set-aside feature keeps its own): an oversized prompt waits for another build, and a gate failure is rerun on one.
+      details: { build: BUILD_ID, ...error.details },
     };
     job.recovery = buildRecovery(job, this.store.appDir(jobId), undefined, { maxRepairs: this.maxRepairs });
     job.watch = { ...job.watch, observed: { ...this.supervision(jobId), status: "Action needed", monitoring: false } };

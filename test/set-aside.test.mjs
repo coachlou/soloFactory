@@ -24,6 +24,7 @@ async function setAsideRun({ unstable = false } = {}) {
   const job = await store.create({ brief, transcript, provider: "fixture" });
   const fixture = createFixtureProvider();
   const builds = [];
+  const stamps = []; // the build each set-aside entry recorded its gate failure on
   let blockUI = true;
   const provider = { id: "fixture", async run(options) {
     const { stage } = options.context;
@@ -46,7 +47,7 @@ async function setAsideRun({ unstable = false } = {}) {
     // A stray write the gate rejects: it rides along in the set-aside commit but belongs to EXTRA.
     if (!unstable && stage === "build-slice-SLICE-UI") { await fixture.run(options); await mkdir(path.join(options.cwd, "extra"), { recursive: true }); await writeFile(path.join(options.cwd, "extra/extra.test.mjs"), "// ui stray\n"); return { message: "built" }; }
     if (unstable && stage.startsWith("feature-review-SLICE-UI-")) { await fixture.run(options); await writeFile(path.join(options.cwd, "index.html"), `${await readFile(path.join(options.cwd, "index.html"), "utf8")}<!-- ${stage} -->\n`); return { message: "reviewed" }; }
-    if (stage === "build-slice-SLICE-EXTRA") { await mkdir(path.join(options.cwd, "extra"), { recursive: true }); await writeFile(path.join(options.cwd, "extra/extra.test.mjs"), "export {};\n"); return { message: "built" }; }
+    if (stage === "build-slice-SLICE-EXTRA") { stamps.push((await store.read(job.id)).setAside?.[0]?.error.details?.build); await mkdir(path.join(options.cwd, "extra"), { recursive: true }); await writeFile(path.join(options.cwd, "extra/extra.test.mjs"), "export {};\n"); return { message: "built" }; }
     if (stage === "build-slice-SLICE-LATER") { await mkdir(path.join(options.cwd, "later"), { recursive: true }); await writeFile(path.join(options.cwd, "later/later.test.mjs"), "export {};\n"); return { message: "built" }; }
     return fixture.run(options);
   } };
@@ -58,11 +59,11 @@ async function setAsideRun({ unstable = false } = {}) {
     return blockUI && !unstable && name.startsWith("proof-UI-") ? { code: 1, output: "ui failed" } : { code: 0, output: "passed" };
   };
   const make = () => new SoloFactory({ store, provider, commandRunner, autoStartRepairs: false, deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9985" }) });
-  return { store, job, builds, make, unblock: () => { blockUI = false; } };
+  return { store, job, builds, stamps, make, unblock: () => { blockUI = false; } };
 }
 
 test("a blocked feature is set aside, independent features still build, and the run parks with its work restored", async () => {
-  const { store, job, builds, make, unblock } = await setAsideRun();
+  const { store, job, builds, stamps, make, unblock } = await setAsideRun();
 
   const parked = await make().start(job.id);
   assert.equal(parked.state, "failed");
@@ -70,6 +71,8 @@ test("a blocked feature is set aside, independent features still build, and the 
   assert.ok(!builds.includes("SLICE-LATER"), "the dependent feature waited");
   assert.equal(parked.featureCursor?.id, "SLICE-UI", "the run parks on the blocked feature, as before");
   assert.match(parked.error.message, /SLICE-LATER/);
+  assert.ok(stamps[0], "the set-aside entry names the build its gate failed on");
+  assert.equal(parked.error.details.build, stamps[0], "the parked failure keeps that build, not the one that parked it");
   assert.match(await readFile(path.join(store.appDir(job.id), "index.html"), "utf8"), /Record your daily score/, "its work is back in the tree");
   assert.equal(await readFile(path.join(store.appDir(job.id), "extra/extra.test.mjs"), "utf8"), "export {};\n", "only the feature's declared writes come back");
   const events = await store.events(job.id, 1000);
