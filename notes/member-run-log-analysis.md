@@ -36,7 +36,7 @@ The fix for the crash (commit 17cba54, "Stop cased gates crashing on Linux after
 
 6. **Planning itself was cheap and clean.** One plan blocker only (plan-review-1: MH-1/SC-21 "12:30 CET half never proved; zone CET/CEST never pinned"), fixed in one correction, approved on review 2. $10, 24 min.
 
-## Corrections to `docs/prd-audit-job-match-prototype.md`
+## Corrections to `notes/prd-audit-job-match-prototype.md`
 
 | audit claim | verdict | evidence |
 |---|---|---|
