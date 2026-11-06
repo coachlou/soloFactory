@@ -1,3 +1,7 @@
+## 0.10.8: stale gate failures rerun first (2026-11-06)
+
+From the same member's run: a 0.10.1 gate failure (Node's fsync crash, fixed in 0.10.2) was still planned around on 0.10.3 from its stored output. Every gate failure now records the SoloFactory build that saw it. When the factory has changed since, Resume reruns that gate on the new build first, at no model cost, and only a failure there leads to a repair plan; the run card says why. A set-aside feature keeps the build that recorded its failure, and waive-proof stays offered.
+
 ## 0.10.7: provable briefs (2026-11-06)
 
 From the same member's run: its PRD froze checks no offline proof could pass (live Gmail, a Windows scheduled task at 09:00, `D:\` paths), so every review re-blocked them. The Guide now knows what the factory can prove and rewrites such checks (sample files, logged OS commands, a test clock, `<DocsRoot>`), moving the live part to `manualChecks`, which the spec writes into a "Checked by hand after install" PRD section that planning, audit and review never cover. A keyword scan sends a ready brief back to the Guide once when it still finds such a check; leftovers and a brief above 12 checks show as notes on the review screen. Runaway guards: any owner step after the worker ceiling (retry plan, approve, Resume) now grants the next allotment, where before a ceiling hit during repair planning had no way forward; the recovery approval screen says how many approvals in a row verified no feature.
