@@ -436,7 +436,7 @@ function setInterviewBusy(value) {
 function showReview() {
   $("#interview-view").classList.add("hidden");
   $("#review-view").classList.remove("hidden");
-  renderBrief(state.guide.brief);
+  renderBrief(state.guide.brief, state.guide.notices);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -445,8 +445,9 @@ $("#back-button").addEventListener("click", () => {
   $("#interview-view").classList.remove("hidden");
 });
 
-function renderBrief(brief) {
+function renderBrief(brief, notices = []) {
   const sections = [
+    ...(notices.length ? [["Before you start", notices, true]] : []),
     ["Promise", brief.promise, true],
     ["Primary user", brief.primaryUser],
     ["Problem", brief.problem],
@@ -458,6 +459,7 @@ function renderBrief(brief) {
     ["Visual direction", brief.visualDirection],
     ["Deployment", brief.deployment],
     ["Constraints", brief.constraints, true],
+    ...(brief.manualChecks?.length ? [["Checked by hand after install", brief.manualChecks, true]] : []),
   ];
   $("#brief").replaceChildren(...sections.map(([title, value, wide]) => {
     const section = document.createElement("section");

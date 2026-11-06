@@ -912,6 +912,9 @@ test("every planner, builder, repair and reviewer prompt keeps checks off Docker
     featureReview: prompts.featureReviewPrompt(slice), review: prompts.reviewPrompt(),
   };
   for (const [name, text] of Object.entries(all)) assert.ok(text.includes(prompts.HOST_RULE), `${name} lacks the host rule`);
+  // By-hand checks (brief.manualChecks) stay out of every prompt that writes, plans or audits the contract.
+  for (const name of ["specification", "featurePlan", "planAudit", "planCorrection", "repairPlan", "review"]) assert.ok(all[name].includes(prompts.MANUAL_RULE), `${name} lacks the by-hand rule`);
+  assert.match(prompts.specificationPrompt(false), /Checked by hand after install/);
   assert.doesNotMatch(prompts.CONTROLLER_FACTS, /Every proof of every built feature reruns/);
 });
 

@@ -9,7 +9,7 @@ import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, admitsPlanning, assertPlan
 import { watchConfig } from "./watchdog.mjs";
 import {
   INTERVIEW_RESPONSE_SCHEMA,
-  buildInterviewPrompt,
+  runGuideTurn,
   makeOpeningTurn,
   validateInterviewResult,
   validateMessages,
@@ -303,17 +303,18 @@ export async function createSoloFactoryServer(options = {}) {
             planFile: current.recoveryPhase.planFile ?? null, features: current.recoveryPhase.plan?.slices.length ?? 0, gaps: current.recoveryPhase.request?.checks ?? [], planBlockers: current.recoveryPhase.planBlockers ?? [], remainingRepairs: Math.max(0, (current.repairBudgetLimit ?? 0) - current.attempt) } : null,
           recoveryPacket: PARKED.has(current.state) ? buildRecoveryPacket({ ...current, recovery: current.recovery ?? buildRecovery(current, active.dir) }) : null,
         } : { project: active.id, state: "no-runs" };
-        const result = await providerFactory(provider).run({
+        const guide = providerFactory(provider);
+        const result = await runGuideTurn((prompt) => guide.run({
           // The guide runs inside the active project so its transcript is that project's memory
           // and the CLI picks up the project's own CLAUDE.md/.aai.
           cwd: active.dir,
-          prompt: buildInterviewPrompt({ skill, messages, runContext }),
+          prompt,
           schema: INTERVIEW_RESPONSE_SCHEMA,
           mode: "read",
           logPath: path.join(active.dir, ".aai", "memory", "interviews", "guide.log"),
           context: { stage: "interview" },
-        });
-        return json(response, 200, validateInterviewResult(result));
+        }), { skill, messages, runContext });
+        return json(response, 200, result);
       }
       if (request.method === "POST" && url.pathname === "/api/errors") {
         const body = await readJson(request);

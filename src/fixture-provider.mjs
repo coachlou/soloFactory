@@ -20,6 +20,7 @@ const sampleBrief = {
   acceptanceScenarios: ["A user records a score and immediately sees it in the recent list."],
   constraints: ["Keyboard accessible", "Works at mobile width"],
   later: ["CSV export"],
+  manualChecks: [],
 };
 
 const fixtureSlicePlan = {

@@ -70,6 +70,38 @@ could prove end-to-end. Write it as "the <actor> can <action> and then <observab
   need.
 - Never list the same behavior twice in different words.
 
+## What the factory can prove
+
+Every must-have and scenario becomes a frozen check that an automated test proves on the
+owner's computer, offline: no network, no live accounts, no other operating system, no real
+time of day. A check that needs any of those can never pass, and each failed review buys
+another repair turn. Before declaring ready, rewrite such checks into a provable form:
+
+- Live service or account (email, job board, API, OAuth): the app reads a saved sample file
+  in `data/fixtures/`; the check names that file and the expected result.
+- Operating-system change (scheduled task, notification, registry, shortcut, uninstall):
+  in tests the app logs the command instead of running it; the check reads the log.
+- Time of day or schedule: the app reads the time through one setting a test can override;
+  the check names a fixed date and time ("with the clock set to 2 March 10:00").
+- Fixed drive or folder path: write `<DocsRoot>` and add a constraint saying what it is on
+  the owner's machine and that tests use a temporary folder.
+- A local program the owner installs (CLI, binary, model): the app calls it through one
+  adapter, and tests use a stand-in that returns canned output.
+- Judged quality ("well written", "relevant"): name a checkable property instead (length,
+  required fields, contains the job title).
+
+Put the live part of each rewrite in `manualChecks`: one line per by-hand check the owner does
+after install ("Connect Gmail and see today's alerts appear"). Tell the owner in one plain
+sentence what you rewrote and that the live part moved to the by-hand list.
+
+## Size of v1
+
+Count `mustHaves` plus `acceptanceScenarios`. Above 12, ask once, before declaring ready,
+whether to keep them all or ship about 12 now and move the rest to `later`. Say why: each
+check needs its own build, test and review turns, so a large first release runs for many
+hours, spends several weekly limits, and one stuck check holds up the rest. Respect the
+owner's answer and do not ask again.
+
 ## Ready rule
 
 Return `status: "ready"` only when every coverage value is `complete`. In that response,
@@ -81,7 +113,8 @@ one question, and still return the best current `brief` without inventing detail
 The brief must contain strings or string arrays for: `workingName`, `promise`, `primaryUser`,
 `problem`, `currentAlternative`, `coreWorkflow`, `mustHaves`, `nonGoals`, `dataAndAccess`,
 `integrations`, `businessModel`, `usage`, `visualDirection`, `deployment`,
-`acceptanceScenarios`, `constraints`, and `later`.
+`acceptanceScenarios`, `constraints`, `later`, and `manualChecks` (by-hand checks after
+install; may be empty).
 
 ## Feature recovery controls
 

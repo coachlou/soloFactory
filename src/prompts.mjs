@@ -14,6 +14,12 @@ aggregate fields are fine; different names for these are a deployment failure.`;
 export const LINT_RULE = `Optionally add commands.lint (an argument array starting with npm, node or npx) when the
 stack has a standard linter or type checker; it then runs as a gate before the tests at every check.`;
 
+// The Guide moves the live part of an unprovable check (real mailbox, OS scheduler, time of day) to
+// brief.manualChecks; the owner does those after install, so no proof, plan or review may chase them.
+export const MANUAL_RULE = `The "Checked by hand after install" section of .factory/PRD.md lists checks the owner does by
+hand after install. They are outside the automated contract: no acceptance item, plan feature,
+proof or review blocker may cover them.`;
+
 // Lou, 2026-10-16: Docker is not required. Run 4f2dd1cf turned a spec's "include a container configuration"
 // into executed Linux-image proofs, and an agent installed Docker to pass them. A Linux host gets its own
 // container build and test as a separate request, outside the factory, when one is actually needed.
@@ -123,6 +129,9 @@ Rewrite exactly these three substantive files and no application code yet:
   implementation plan, deployment behavior, and risks. Avoid enterprise components.
 - .factory/ACCEPTANCE.md: numbered, observable end-to-end scenarios plus negative and
   failure cases. Each must be testable.`}
+If requirements.json has a nonempty brief.manualChecks, end PRD.md with a section headed
+"Checked by hand after install" listing those items verbatim, and never turn them into
+acceptance scenarios. ${MANUAL_RULE}
 ACCEPTANCE.md describes the finished product. A brief's delivery order, "defer X until Y" or
 "ship A before B" is a planning constraint: it becomes dependsOn between features, never an
 acceptance item. Never write a scenario that asserts a feature's absence or that something does
@@ -309,7 +318,7 @@ node:http and prove the header arrived (for example by echoing it from a stub se
 export function reviewPrompt({ featureReviewed = false } = {}) {
   return `You are the final implementation reviewer. Audit the current app against every
 requirement in .factory/PRD.md and every scenario in .factory/ACCEPTANCE.md. Inspect the real
-code and tests.${featureReviewed ? FEATURE_REVIEWED_SCOPE + "\n" : ""} Do not change application source: report each
+code and tests. ${MANUAL_RULE}${featureReviewed ? FEATURE_REVIEWED_SCOPE + "\n" : ""} Do not change application source: report each
 correctness, wiring, error-handling, accessibility, privacy or operator-documentation gap as a
 blocker, and a repair turn fixes it under the checks. If you change source, the controller discards
 a passing verdict and reviews again. Do not deploy and do not claim a
@@ -404,7 +413,8 @@ export const CONTROLLER_FACTS = `How the controller runs proofs:
   suite there, so a proof must stay true as later features land. An obligation that is only true until a later feature exists (a stage gate
   asserting a route or file is still absent) must be retired by that later feature: one of its
   cases lists the obligation id in supersedes, and integration then skips it.
-- ${HOST_RULE}`;
+- ${HOST_RULE}
+- ${MANUAL_RULE}`;
 
 // One checklist for planner, reviewer and corrector: the planner self-checks against exactly what
 // the reviewer blocks on, so a review round is not spent discovering a rule.
