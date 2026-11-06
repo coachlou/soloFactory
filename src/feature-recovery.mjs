@@ -307,13 +307,16 @@ async function replanForGate(factory, job, signal, guidance, { prior, executed }
   const blockers = [unstable ? job.error.message : `The ${gate} gate failed with its repairs spent: ${command.join(' ')}${output ? `\nGate output (tail):\n${String(output).slice(-2000)}` : ''}`];
   const sources = await sourceSet(appDir, runInputs(job));
   const request = { id: randomUUID(), jobId: job.id, contractDigest: frozen, review: null, reviewToken: null, failedGate: unstable ? 'review' : gate, checks, blockers, sources, sourcesDigest: digest(sources), baseline: await sourceBaseline(factory.store), guidance, priorPlan: plan, completed: done };
-  const failed = executed && !unstable ? plan?.slices.findIndex(slice => slice.id === (prior.cursor?.id ?? prior.current)) : -1;
+  // The feature whose gate failed: the recovery phase's, or the ordinary build's when no recovery ran yet.
+  // A parked-but-unexecuted phase or a whole-app failure has no current feature and stays unscoped.
+  const current = executed ? prior.cursor?.id ?? prior.current : prior ? null : job.featureCursor?.id;
+  const failed = current && !unstable ? plan?.slices.findIndex(slice => slice.id === current) ?? -1 : -1;
   if (failed >= 0) {
     const slice = plan.slices[failed];
     request.scope = { feature: slice.id, checks: [...open.filter(check => sliceChecks(slice).includes(check.id)).map(check => check.id), `GATE-${gate}`] };
     request.keep = plan.slices.slice(failed + 1).filter(slice => !done.includes(slice.id));
     // Checks an earlier re-plan already closed left that plan's request; carry them so kept refs stay known.
-    request.closedChecks = [...(prior.request.closedChecks ?? []), ...prior.request.checks.filter(check => closed.has(check.id))];
+    request.closedChecks = [...(prior?.request.closedChecks ?? []), ...(prior?.request.checks ?? originalChecks(job.brief)).filter(check => closed.has(check.id))];
   }
   return draftRepairPlan(factory, job, signal, request, prior);
 }
