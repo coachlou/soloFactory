@@ -1,3 +1,7 @@
+## 0.10.9: docs for 0.10.8 and Windows (2026-11-06)
+
+Docs only. The install runbook's update notes match 0.10.8: a gate that failed on an older build offers Resume (a free rerun) instead of a repair plan, and a new note covers the spend line, the run worker ceiling and the Guide's check rewriting. Windows (WSL2) is stated plainly: python3 in the Ubuntu essentials, Windows `/mnt/c` copies of node or claude, CRLF, `gh` on Ubuntu 20.04, an agent with a Windows shell hands commands to the Ubuntu window, and Track B is marked untested on a real Windows machine. The manual, drive.md and README catch up (0.10 badge, `bash start.sh`, `projects/`, `manualChecks`, `SOLOFACTORY_MAX_RUN_WORKERS`).
+
 ## 0.10.8: stale gate failures rerun first (2026-11-06)
 
 From the same member's run: a 0.10.1 gate failure (Node's fsync crash, fixed in 0.10.2) was still planned around on 0.10.3 from its stored output. Every gate failure now records the SoloFactory build that saw it. When the factory has changed since, Resume reruns that gate on the new build first, at no model cost, and only a failure there leads to a repair plan; the run card says why. A set-aside feature keeps the build that recorded its failure, and waive-proof stays offered.
