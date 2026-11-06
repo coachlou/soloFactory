@@ -95,9 +95,18 @@ export function createFixtureProvider() {
       } else if (/^recovery-(plan|correction)-/.test(context.stage)) {
         const phase = context.job.recoveryPhase;
         const source = phase.request.sources[0].path;
+        // A scoped request replaces one feature and keeps its id, as the prompt requires; kept features may depend on it.
+        const scope = phase.request.scope;
+        const priorEntry = scope && phase.request.priorPlan?.slices.find((slice) => slice.id === scope.feature);
+        const scoped = scope && [{
+          id: scope.feature, title: `Replace ${scope.feature}`, objective: `Recover ${scope.checks.join(", ")}`, closes: scope.checks,
+          acceptance: [{ id: `${scope.feature}-R1`, behavior: `Executes server.test.mjs to verify ${scope.checks.join(", ")}`, refs: scope.checks,
+            sources: [{ path: source, locator: scope.checks[0] }], proof: { command: ["npm", "test"], expect: "server.test.mjs passes" } }],
+          dependsOn: priorEntry?.dependsOn ?? [], writes: ["server.mjs", "server.test.mjs"], demo: "Run the executable fixture behavior checks.",
+        }];
         await writeFile(path.join(cwd, phase.planFile), JSON.stringify({
           version: 2, jobId: phase.request.jobId, requestId: phase.id, contractDigest: phase.request.contractDigest, compatibility: [],
-          slices: phase.request.checks.map((check, index) => ({
+          slices: scoped || phase.request.checks.map((check, index) => ({
             id: `RECOVERY-${index + 1}`, title: check.text, objective: `Recover ${check.id}`, closes: [check.id],
             acceptance: [{ id: `RECOVERY-${index + 1}-1`, behavior: `Executes server.test.mjs to verify ${check.text}`, refs: [check.id],
               sources: [{ path: source, locator: check.id }], proof: { command: ["npm", "test"], expect: "server.test.mjs passes" } }],
