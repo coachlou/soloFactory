@@ -594,7 +594,7 @@ export async function createSoloFactoryServer(options = {}) {
         const jobStore = storeFor(projectId);
         const original = await jobStore.read(retryMatch[1]);
         if (runs.get(projectId)?.jobId === original.id) return json(response, 409, { error: "That run is still active." });
-        const job = await jobStore.create({ brief: original.brief, transcript: original.transcript, provider: original.provider });
+        const job = await jobStore.create({ brief: original.brief, transcript: original.transcript, provider: original.provider, notices: briefNotices(original.brief) });
         // Starting over replaces the original, so it no longer holds the queue, and the new run goes first.
         if (PARKED.has(original.state)) {
           await rollBack(original, jobStore);

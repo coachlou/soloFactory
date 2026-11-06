@@ -137,8 +137,10 @@ or an empty list), has a duplicate scenario, or has a scenario over 400 characte
   check that needs a real folder on the owner's computer, a real date, or a live outside service
   into one the factory can prove (a fixture in `data/fixtures/`, a logged command, a test clock,
   a `<DocsRoot>` setting, an adapter stand-in), and put what only a person can check in
-  `manualChecks`. Keep a first release to about 12 checks. The browser interview scans for these
-  and warns; `POST /api/jobs` does not, so the chat is the only check on this path. On Windows the
+  `manualChecks`. Keep a first release to about 12 checks. `POST /api/jobs` runs the same scan as the
+  browser interview and returns any warnings as `notices`; it still queues the brief. Before you
+  tell the owner it is queued, relay every notice in plain words. If they want to act on one,
+  `/cancel` the job, fix the brief and post it again. On Windows the
   app runs inside Ubuntu: a folder like `D:\Docs` is `/mnt/d/Docs` there.
 - Leave out `sdlc`. Every new run plans its features, gets the plan reviewed, then builds,
   checks and reviews one feature at a time. Any other `sdlc` value is refused with 400.
@@ -148,7 +150,7 @@ Show the owner the brief in plain language. Queue it only after they say go.
 ## 4. Queue and watch
 
 ```bash
-curl -s -X POST localhost:4173/api/jobs -H 'content-type: application/json' --data @brief.json   # 202 {job}
+curl -s -X POST localhost:4173/api/jobs -H 'content-type: application/json' --data @brief.json   # 202 {job, notices}
 curl -s localhost:4173/api/jobs/<id>              # {job: {state, stage, queuePosition, blockedBy, deployment}, events}
 curl -s localhost:4173/api/jobs/<id>/telemetry    # stage timings and token use
 curl -s localhost:4173/api/board                  # every project, by column
