@@ -1,3 +1,7 @@
+## 0.10.10: notices for chat-posted briefs (2026-11-06)
+
+A brief posted straight to `POST /api/jobs` (the chat path, no Guide turn) skipped the brief scan, so unprovable checks (live Gmail, scheduled tasks, fixed drive paths) and the over-12-checks warning never showed. The handler now runs the same brief notices as the Guide's review screen, returns them in the `202 {job, notices}` response and stores them as `job.notices`; it never blocks. `/retry` carries the notices onto the new job, and drive.md documents both.
+
 ## 0.10.9: docs for 0.10.8 and Windows (2026-11-06)
 
 Docs only. The install runbook's update notes match 0.10.8: a gate that failed on an older build offers Resume (a free rerun) instead of a repair plan, and a new note covers the spend line, the run worker ceiling and the Guide's check rewriting. Windows (WSL2) is stated plainly: python3 in the Ubuntu essentials, Windows `/mnt/c` copies of node or claude, CRLF, `gh` on Ubuntu 20.04, an agent with a Windows shell hands commands to the Ubuntu window, and Track B is marked untested on a real Windows machine. The manual, drive.md and README catch up (0.10 badge, `bash start.sh`, `projects/`, `manualChecks`, `SOLOFACTORY_MAX_RUN_WORKERS`).
