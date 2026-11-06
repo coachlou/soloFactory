@@ -25,11 +25,11 @@ When it's done, tell me which version it reports. Don't resume my job-match-prot
 
 Before you rerun, one thing. The factory proves every check on a laptop with no network, no Windows and no live accounts, and some of yours can't pass there. So:
 
-1. **Fixtures, not live services.** Intake reads Job-Room JSON and sample emails from `data/fixtures/`; live Gmail and Job-Room stay outside acceptance.
-2. **One sample `.eml` per job board**, or one generic parser for v1.
-3. **Record the Windows command, don't run it.** "The scheduler's last recorded call is `schtasks /Create … /ST 09:00`." Same for notifications and uninstall (a real uninstall test deletes the app it's testing).
-4. **An injected clock.** "With the clock at 2 March 10:00 and the last run on 1 March, catch-up fires once." No waiting for 12:30 CET.
-5. **`<DocsRoot>`, not `D:\`.** Swap every drive letter for `<DocsRoot>` and state the test default once.
+1. **Replace live services with sample files.** Wherever the PRD says the app fetches from Job-Room or Gmail, change it to read a saved file in `data/fixtures/`. Example: instead of "Intake pulls new jobs from Job-Room," write "Intake reads `data/fixtures/jobroom.json` and creates one Inbox card per listing." Keep the live connection in the PRD as a separate step that you test by hand. Don't make it an acceptance check.
+2. **Add one saved alert email per job board.** For each job board whose alert emails the app reads, save one real alert as a `.eml` file in `data/fixtures/emails/` (remove your personal details first). Then write the check against that file, for example "Parsing `data/fixtures/emails/jobs-ch.eml` produces 3 cards." If you'd rather not collect them, write "v1 uses one generic email parser" and drop the per-board checks.
+3. **Log Windows actions instead of running them.** Scheduling, desktop notifications and uninstall all change Windows itself, so in a test the app writes the command to a log file instead of running it. Write each check against the log, for example "After setup, the last logged scheduler command is `schtasks /Create … /ST 09:00`." This matters most for uninstall: a real uninstall in a test deletes the app being tested.
+4. **Give every time-based check a fixed time.** The app reads the current time through one setting that a test can override. Write each check with an exact date and time, for example "With the clock set to 2 March 10:00 and the last run on 1 March, catch-up runs exactly once." Remove any check that means waiting for a real time of day, like 12:30 CET.
+5. **Replace drive letters with `<DocsRoot>`.** Change every path like `D:\Bewerbungen\…` to `<DocsRoot>\Bewerbungen\…`. Add one line near the top of the PRD: "`<DocsRoot>` is a setting. On my PC it is `D:\`. In tests it is a temporary folder."
 
 Then cut v1 to about 10 checks: fixture intake, region/fit filter, dedup, the Inbox/Shortlist/Bewerbungen cards, your decision actions and the Markdown archive. The rest becomes follow-on briefs once that skeleton runs.
 
