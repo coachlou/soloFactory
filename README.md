@@ -166,7 +166,9 @@ file never leaves your machine; `GET /api/errors?limit=50` returns the latest en
   off). The next worker is not started: the run parks with `run_budget_reached`, naming what
   it has spent, and Resume allows another allotment of the same size. Every recovery approval
   screen also shows the run's spend so far (workers, tokens, cost when known, elapsed time)
-  and how many repair turns the approval grants.
+  and how many repair turns the approval grants, plus how many recent approvals in a row
+  verified no feature. Any owner step after the ceiling (retry plan, approve, Resume) grants
+  the next allotment.
 - A test or proof gate that runs past `SOLOFACTORY_GATE_MINUTES` (default 5, 1–60; install
   always gets at least 10) is stopped and the run parks with `gate_timeout`. No repair turn
   runs and no attempt is spent, because a killed command proved nothing about the app. Raise

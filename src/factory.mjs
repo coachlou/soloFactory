@@ -209,8 +209,12 @@ export class SoloFactory {
       // `admit` validates under ownership before the incident below is cleared; a refusal writes nothing.
       try { await admit?.(); } catch (error) { rejected = true; throw error; }
       const job = await this.store.read(jobId).catch(() => null);
-      if (job?.watch?.incident || job?.watch?.observed) {
-        delete job.watch.incident; delete job.watch.observed;
+      // Every owner continuation (Resume, retry plan, approve, restart) after the worker ceiling consents to another allotment;
+      // granting only in Resume left a ceiling hit during repair planning with no way forward (the plan retry hit it again).
+      const grant = job?.error?.code === "run_budget_reached" && maxRunWorkers();
+      if (grant) job.workerAllowance = job.error.details.workers + grant;
+      if (grant || job?.watch?.incident || job?.watch?.observed) {
+        delete job.watch?.incident; delete job.watch?.observed;
         await this.store.writeState(job);
       }
       return runner(controller.signal);
@@ -328,11 +332,6 @@ export class SoloFactory {
     const next = continuationAction(job, { maxRepairs: this.maxRepairs });
     if (next.action !== "resume") {
       throw new FactoryError(["prepare-plan", "revise-inputs", "amend-plan"].includes(next.action) ? "repair_plan_required" : "recovery_approval_required", `${next.reason} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next });
-    }
-    // Resume is the owner's consent to spend another allotment after the run-wide worker ceiling stopped it.
-    if (job.error?.code === "run_budget_reached" && maxRunWorkers()) {
-      job.workerAllowance = job.error.details.workers + maxRunWorkers();
-      await this.store.writeState(job);
     }
     if (job.recoveryPhase?.status === "running") return runFeatureRecovery(this, jobId, signal, null, { features });
     if (job.recoveryPhase?.status === "built") {
@@ -2179,12 +2178,19 @@ export const maxRunWorkers = () => /^\d+$/.test(process.env.SOLOFACTORY_MAX_RUN_
 export function runSpend(job, events, maxRepairs = 2, now = Date.now()) {
   const { total } = usageTotals(events);
   const features = job.recoveryPhase?.plan?.slices?.length;
+  // Recent approvals in a row that verified no feature: each refilled the repair budget and bought nothing.
+  let idleApprovals = 0;
+  for (const phase of [...(job.recoveryPhaseHistory ?? []), job.recoveryPhase].filter((item) => item?.approvedAt && item.status !== "discarded").reverse()) {
+    if (phase.done?.length) break;
+    idleApprovals += 1;
+  }
   return {
     workers: events.filter((event) => event.type === "agent.started").length,
     tokens: total ? total.inputTokens + total.outputTokens : 0,
     costUsd: total?.costUsd ?? null,
     elapsedMs: Math.max(0, now - Date.parse(job.startedAt ?? job.createdAt)),
     grantTurns: features == null ? null : maxRepairs * (features + 1),
+    idleApprovals,
   };
 }
 
