@@ -162,6 +162,11 @@ file never leaves your machine; `GET /api/errors?limit=50` returns the latest en
   `SOLOFACTORY_LOOP_THRESHOLD` times (default 3, 2–10) on unchanged code, the factory stops
   repairing and says so instead of spending the rest of the repair budget. Repairs that do
   change the code are still bounded by the normal budget.
+- A whole run is capped at `SOLOFACTORY_MAX_RUN_WORKERS` workers (default 150, `0` turns it
+  off). The next worker is not started: the run parks with `run_budget_reached`, naming what
+  it has spent, and Resume allows another allotment of the same size. Every recovery approval
+  screen also shows the run's spend so far (workers, tokens, cost when known, elapsed time)
+  and how many repair turns the approval grants.
 - A test or proof gate that runs past `SOLOFACTORY_GATE_MINUTES` (default 5, 1–60; install
   always gets at least 10) is stopped and the run parks with `gate_timeout`. No repair turn
   runs and no attempt is spent, because a killed command proved nothing about the app. Raise

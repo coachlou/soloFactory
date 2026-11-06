@@ -329,6 +329,11 @@ export class SoloFactory {
     if (next.action !== "resume") {
       throw new FactoryError(["prepare-plan", "revise-inputs", "amend-plan"].includes(next.action) ? "repair_plan_required" : "recovery_approval_required", `${next.reason} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next });
     }
+    // Resume is the owner's consent to spend another allotment after the run-wide worker ceiling stopped it.
+    if (job.error?.code === "run_budget_reached" && maxRunWorkers()) {
+      job.workerAllowance = job.error.details.workers + maxRunWorkers();
+      await this.store.writeState(job);
+    }
     if (job.recoveryPhase?.status === "running") return runFeatureRecovery(this, jobId, signal, null, { features });
     if (job.recoveryPhase?.status === "built") {
       try {
@@ -1175,9 +1180,25 @@ export class SoloFactory {
     }
   }
 
+  // Backstop for a whole run: every worker spawns through invoke(), so the ceiling is checked here once.
+  // The count is the run's agent.started events; Resume after this stop raises job.workerAllowance by one ceiling.
+  async assertWorkerBudget(job) {
+    const ceiling = maxRunWorkers();
+    if (!ceiling) return;
+    const events = await this.store.events(job.id, Infinity);
+    const workers = events.filter((event) => event.type === "agent.started").length;
+    if (workers < (job.workerAllowance ?? ceiling)) return;
+    const spend = runSpend(job, events, this.maxRepairs);
+    throw new FactoryError("run_budget_reached", `This run has started ${workers} workers, the ceiling of ${ceiling} (SOLOFACTORY_MAX_RUN_WORKERS). So far: ${spendLine(spend)}. Resume allows another ${ceiling} workers.`, {
+      workers, ceiling, spend,
+      diagnostics: [{ code: "run_budget_reached", title: `Run worker ceiling reached (${workers} workers)`, action: `Review the spend so far (${spendLine(spend)}). Resume grants another ${ceiling} workers; the preserved files and session are kept.` }],
+    });
+  }
+
   async invoke(job, label, prompt, signal, { resumeSessionId = null } = {}) {
     const appDir = this.store.appDir(job.id);
     const logPath = path.join(appDir, ".factory", "logs", `${label}.log`);
+    await this.assertWorkerBudget(job);
     await this.emit(job.id, { type: "agent.started", state: job.state, stage: label, feature: featureOf(job), promptChars: prompt.length, message: `${this.provider.id} started ${label}` });
     const monitor = this.monitorOf(job);
     const dataBefore = await dataSnapshot(appDir);
@@ -1753,6 +1774,7 @@ export class SoloFactory {
       job: { id: job.id, state: job.state, stage: job.stage, attempt: job.attempt, sdlc: job.sdlc ?? "single" },
       sliceStats: job.sliceStats ?? {},
       summary,
+      spend: runSpend(job, allEvents, this.maxRepairs),
       measurement,
       stageDurations,
       events,
@@ -2147,6 +2169,29 @@ export function usageTotals(events) {
     total = addUsage(total, event.usage);
   }
   return { total, byStage, turnsWithoutUsage };
+}
+
+// Workers per run; 0 disables the ceiling. Read per call so tests and an owner restart can change it.
+export const maxRunWorkers = () => /^\d+$/.test(process.env.SOLOFACTORY_MAX_RUN_WORKERS ?? "") ? Number(process.env.SOLOFACTORY_MAX_RUN_WORKERS) : 150;
+
+// What the run has spent so far, shown before the owner approves more. costUsd is null when any worker reported none (Codex).
+// grantTurns mirrors the refill in runFeatureRecovery: maxRepairs * (features + 1) repair turns once a plan exists.
+export function runSpend(job, events, maxRepairs = 2, now = Date.now()) {
+  const { total } = usageTotals(events);
+  const features = job.recoveryPhase?.plan?.slices?.length;
+  return {
+    workers: events.filter((event) => event.type === "agent.started").length,
+    tokens: total ? total.inputTokens + total.outputTokens : 0,
+    costUsd: total?.costUsd ?? null,
+    elapsedMs: Math.max(0, now - Date.parse(job.startedAt ?? job.createdAt)),
+    grantTurns: features == null ? null : maxRepairs * (features + 1),
+  };
+}
+
+export function spendLine({ workers, tokens, costUsd, elapsedMs }) {
+  const count = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
+  const minutes = Math.round(elapsedMs / 60000);
+  return `${workers} worker${workers === 1 ? "" : "s"}, ${count(tokens)} tokens, cost ${costUsd == null ? "unknown" : `$${costUsd.toFixed(2)}`}, ${minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`} elapsed`;
 }
 
 // Time and usage per pipeline state, plus the current step alone, so the run screen leads with what is
