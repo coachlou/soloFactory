@@ -282,6 +282,33 @@ test('a spent feature gate replans only its replacement and reviews the merged p
   await validateRecoveryApproval(env.factory, ready, phase.planDigest);
 });
 
+test('a first gate failure in the ordinary build replans only the failed feature', async t => {
+  const env = await setup(t, async args => {
+    const phase = args.context.job.recoveryPhase;
+    if (!phase?.request.scope || !/^recovery-plan-(?!review)/.test(args.context.stage)) return;
+    const file = path.join(args.cwd, phase.planFile); const p = JSON.parse(await readFile(file, 'utf8'));
+    const replacement = structuredClone(phase.request.priorPlan.slices[0]);
+    replacement.closes = phase.request.scope.checks; replacement.acceptance[0].refs = phase.request.scope.checks;
+    p.slices = [replacement]; await writeFile(file, JSON.stringify(p));
+  });
+  const first = await env.factory.planRecovery(env.failed.id);
+  const saved = await env.store.read(first.id); const plan = structuredClone(saved.recoveryPhase.plan);
+  // The approved plan closes every original check: the first feature owns MH-1 and MH-2, the second SC-1.
+  plan.slices[0].closes = plan.slices[0].acceptance[0].refs = ['MH-1', 'MH-2'];
+  const kept = structuredClone(plan.slices[1]);
+  // Rewind to an ordinary build: approved plan, no recovery phase, feature 0 mid-build when its gate failed.
+  Object.assign(saved, { recoveryPhase: null, approvedPlan: { plan, contractDigest: saved.recoveryPhase.request.contractDigest }, sliceDone: [], featureCursor: { id: plan.slices[0].id },
+    state: 'failed', failedState: 'verifying', attempt: 1, repairBudgetLimit: 1,
+    error: { code: 'quality_gate_failed', message: 'Metrics proof failed', details: { gate: 'proof-CORE-METRICS', command: ['node', '--test'], output: 'no metrics' } } });
+  await env.store.writeState(saved);
+  const ready = await env.factory.planRecovery(saved.id); const phase = ready.recoveryPhase;
+  assert.equal(phase.status, 'ready', ready.error?.message);
+  assert.equal(phase.request.scope.feature, plan.slices[0].id);
+  assert.ok(phase.request.scope.checks.includes('GATE-proof-CORE-METRICS'));
+  assert.deepEqual(phase.request.keep, [kept]);
+  assert.deepEqual(phase.plan.slices.map(slice => slice.id), [plan.slices[0].id, kept.id]);
+});
+
 test('keepCorrecting continues past the budget only while blockers shrink, up to 3x', () => {
   assert.equal(keepCorrecting(0, 2), true);
   assert.equal(keepCorrecting(2, 2, [5, 3]), true);
