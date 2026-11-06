@@ -1,8 +1,8 @@
 # {{NAME}} — Behavior
 
-This is one project inside a SoloFactory workspace. The parent folder's
-`.aai/instructions.md` (two levels up) governs the factory as a whole; if it
-exists, load it first, then this file.
+This is one project inside a SoloFactory workspace. Build workers get their
+instructions from the factory's stage prompt; this file is for anyone who opens
+the project directly. Read nothing outside this folder.
 
 - The contract is `.factory/{PRD,PLAN,ACCEPTANCE}.md`. Build to it; propose
   changes to it rather than silently drifting.

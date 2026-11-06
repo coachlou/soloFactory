@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>soloFactory × Claude Code: environment audit</title>
+<style>
+  :root { --ink:#1b1b1b; --muted:#5f5f5f; --rule:#e3e0d8; --bg:#fbfaf7; --card:#fff; --red:#a33; --amber:#8a5a00; --green:#2a6b3a; --blue:#2b4f8a; }
+  html { background:var(--bg); }
+  body { max-width: 900px; margin: 0 auto; padding: 32px 20px 80px; font: 16px/1.55 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color: var(--ink); }
+  h1 { font-size: 30px; line-height:1.2; margin: 0 0 6px; }
+  h2 { font-size: 21px; margin: 44px 0 12px; padding-top: 14px; border-top: 1px solid var(--rule); }
+  h3 { font-size: 17px; margin: 26px 0 6px; }
+  p, li { max-width: 72ch; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .lede { background: var(--card); border: 1px solid var(--rule); border-left: 4px solid var(--blue); padding: 16px 20px; border-radius: 6px; }
+  .lede p { margin: 6px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0 18px; font-size: 14.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 7px 9px; border-bottom: 1px solid var(--rule); }
+  th { font-weight: 600; background: #f3f1ea; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  code { font: 13.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: #f1efe8; padding: 1px 5px; border-radius: 4px; }
+  pre { background: #f1efe8; padding: 12px 14px; border-radius: 6px; overflow-x: auto; font-size: 13px; line-height: 1.45; }
+  .tag { display:inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-right: 6px; vertical-align: middle; }
+  .verified { background:#dff1e3; color: var(--green); }
+  .inferred { background:#fbe9c6; color: var(--amber); }
+  .unknown { background:#eee; color: #444; }
+  .sev-high { color: var(--red); font-weight: 600; }
+  .sev-med { color: var(--amber); font-weight: 600; }
+  .sev-low { color: var(--muted); font-weight: 600; }
+  .finding { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 18px; margin: 14px 0; }
+  .finding h3 { margin: 0 0 8px; }
+  .finding p { margin: 6px 0; }
+  .label { font-weight: 600; color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .04em; }
+  small { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>soloFactory × Claude Code: environment audit</h1>
+<p class="sub">What a Claude worker actually loads when soloFactory runs in this repo, where that context overlaps, conflicts or goes missing, and what the only Claude-provider run on this machine measured. Written 2026-11-05 against soloFactory 0.10.3 and Claude Code 2.1.296.</p>
+
+<div class="lede">
+  <p><strong>Bottom line.</strong> The launch flags do their job: user plugins, hooks, MCP servers and output style are excluded from workers (verified in a real worker's init record). What still reaches every worker is a chain of instruction files that each tell it to go read more files under <code>~/.aai</code>, several of which it is <em>not allowed</em> to read in headless mode, plus a shell rule and an allowlist that the workers kept bumping into. None of that is the dominant cost. The dominant cost is turn count: the one Claude run with logs here spent 2,729 turns across 71 workers at roughly 70K tokens of context per turn, with 3 to 4 MB recovery-request files sitting in <code>.factory/</code> for workers to read. Antigravity sees none of the ambient chain and none of the factory's repair/recovery loop.</p>
+  <p><strong>Caveat.</strong> The run Lou described (the PRD that exhausted the weekly limit without producing an app) was not found on this machine. The numbers below come from the medialibrary run under <code>~/Documents/photo-library-prototype</code>, which did reach "live and verified" on 2026-10-16 after nine days. It is the closest evidence available, not the failing run itself.</p>
+</div>
+
+<h2>1. The launch contract</h2>
+<p>Every stage spawns one <code>claude -p</code> process with the project folder as cwd (<code>src/providers.mjs</code>, <code>claudeRun</code>):</p>
+<pre>claude -p --output-format stream-json --verbose
+       --model opus --effort medium           # reasoning stages: opus, effort low
+       --setting-sources project,local --strict-mcp-config
+       --permission-mode acceptEdits          # read stages: plan
+       --disallowedTools Agent
+       --allowedTools "Bash(npm install:*)" "Bash(npm test:*)" "Bash(npm run build:*)"
+                      "Bash(node .factory/check-plan.mjs:*)" "Bash(node --test:*)"
+                      "Bash(ls:*)" "Bash(git ls-files:*)" "Bash(git status:*)"
+                      "Bash(git diff:*)" "Bash(git log:*)" + proof commands
+stdin: &lt;stage prompt&gt; + "Shell: ... Only plain single commands are approved ...
+        a command with cd, &amp;&amp;, ;, |, a loop, a heredoc or a redirect is denied"</pre>
+<p>Hard timeout 45 minutes per worker, no idle timeout, API-key environment stripped so the subscription is billed.</p>
+
+<h2>2. What a worker actually loads</h2>
+<p>Read from the <code>system/init</code> record of a real medialibrary worker (repair-53, 2026-10-15) and from Claude Code's documented memory walk.</p>
+<table>
+  <tr><th>Layer</th><th>Loaded?</th><th>Status</th><th>Note</th></tr>
+  <tr><td>User plugins (ponytail, ambient, codex, 25 others)</td><td>No</td><td><span class="tag verified">verified</span></td><td>Init lists only 3 builtin plugins.</td></tr>
+  <tr><td>User hooks (rtk, Orca, format-check, stop-gate, guards)</td><td>No</td><td><span class="tag verified">verified</span></td><td>No hook output in any worker log.</td></tr>
+  <tr><td>MCP servers / claude.ai connectors</td><td>No</td><td><span class="tag verified">verified</span></td><td><code>mcp_servers: []</code>.</td></tr>
+  <tr><td>Output style, advisor model, user model/effort</td><td>No</td><td><span class="tag verified">verified</span></td><td>Style <code>default</code>, model <code>claude-opus-5-5</code> from the flag.</td></tr>
+  <tr><td>User <code>~/.claude/CLAUDE.md</code> (the Claude Runtime Adapter)</td><td>No</td><td><span class="tag verified">verified</span></td><td>Excluded by <code>--setting-sources project,local</code>.</td></tr>
+  <tr><td>58 builtin skills / slash commands</td><td>Yes</td><td><span class="tag verified">verified</span></td><td>Cannot be excluded. Their descriptions sit in every call.</td></tr>
+  <tr><td>Builtin <code>cc-plugin-agents-md</code></td><td>Yes</td><td><span class="tag verified">verified</span></td><td>Project <code>AGENTS.md</code> is a byte-for-byte copy of <code>CLAUDE.md</code>; the anchor likely enters twice. <span class="tag inferred">inferred</span></td></tr>
+  <tr><td>Project <code>CLAUDE.md</code> anchor → <code>.aai/instructions.md</code> → parent <code>.aai/instructions.md</code></td><td>Yes</td><td><span class="tag verified">verified</span></td><td>The ambient chain. See findings 1 to 3.</td></tr>
+  <tr><td>Ancestor <code>/Volumes/Extreme Pro/users/loudalo/.claude/CLAUDE.md</code> + <code>.claude/rules/{content,coding,skills}.md</code></td><td>Yes, in this repo only</td><td><span class="tag inferred">inferred</span></td><td>18.5K chars. Claude Code walks every ancestor of cwd for project memory, and setting-sources does not stop the walk. The medialibrary run lived under <code>~/Documents</code> and did not have this ancestor, so no worker init confirms it.</td></tr>
+  <tr><td>soloFactory's own <code>.claude/settings.local.json</code> and <code>launch.json</code></td><td>No</td><td><span class="tag inferred">inferred</span></td><td>The project root for a worker is the inner <code>.solofactory/projects/default/.git</code>, not this repo.</td></tr>
+  <tr><td>User env (autocompact 75%, 250K compact window)</td><td>Unknown</td><td><span class="tag unknown">unknown</span></td><td>Not in the init record. Max single-call context seen was 176K tokens, which is consistent with compaction firing late.</td></tr>
+</table>
+
+<h2>3. Findings, ranked</h2>
+
+<div class="finding">
+  <h3><span class="sev-high">High</span> · 1. Instruction chain points workers at files they cannot read</h3>
+  <p><span class="label">What</span> The project anchor says read <code>.aai/instructions.md</code>; that file says load the parent folder's instructions first; the parent says load <code>~/.aai/identity.md, purpose.md, context.md, memory.md</code> and <code>~/.aai/rules/core.md</code>, then <code>~/.aai/rules/coding.md</code>. In this repo the ancestor <code>.claude/CLAUDE.md</code> repeats the same demand and adds <code>~/.aai/rules/operational.md</code> and the identity modules.</p>
+  <p><span class="label">Evidence</span> Workers obeyed. Three medialibrary workers called Read on <code>~/.aai/rules/coding.md</code>; all three were denied (<code>permission_denied</code>, "needs approval") because headless mode confines Read to the project tree. One more tried the vendored copy under the parent's <code>.ailib/</code>, also denied. <span class="tag verified">verified</span></p>
+  <p><span class="label">Why it hurts</span> Each attempt is a wasted turn, and the worker then proceeds without the rules it was told are mandatory, having been primed that it is working out of compliance. The instruction can never be satisfied from inside a project folder.</p>
+  <p><span class="label">Fix</span> Remove every "read <code>~/.aai/...</code>" instruction from the build-side chain (project anchor, project <code>instructions.md</code>, parent <code>instructions.md</code> template, ancestor <code>.claude/CLAUDE.md</code> when the project lives under it). What a worker must obey belongs in the stage prompt the factory already builds, which is the one channel the factory controls.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev-high">High</span> · 2. Parent-folder instructions written for a human-driven session, read by the build worker</h3>
+  <p><span class="label">What</span> The medialibrary parent <code>.aai/instructions.md</code> says: run <code>make</code> to see the pipeline, read <code>HANDOFF.md</code> and <code>checkpoint.md</code> "at session start", change <code>spec/</code> by decision, "<code>make release</code> owns VERSION", rewrite HANDOFF before ending. In this repo the equivalent my-folder instructions say "do not drive the interview", "never start a real build", and describe a <code>projects/&lt;id&gt;/app/</code> layout that no longer exists.</p>
+  <p><span class="label">Evidence</span> Parent <code>HANDOFF.md</code> is 70K chars and <code>checkpoint.md</code> is 101K chars. <code>make</code> is not in the allowlist. The factory's contract is <code>.factory/{PRD,PLAN,ACCEPTANCE}.md</code>, which the project instructions name one paragraph later. <span class="tag verified">verified</span></p>
+  <p><span class="label">Why it hurts</span> Two governing documents, two different process models, loaded in the same turn. The worker either burns context reading 170K chars of handoff it cannot act on, or ignores a file it was told governs "the factory as a whole".</p>
+  <p><span class="label">Fix</span> The project <code>instructions.md</code> template should stop chaining to the parent. The parent folder governs the operator's session with the factory, not the worker's build.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev-high">High</span> · 3. Live-app section tells the agent in the project folder to refuse the work</h3>
+  <p><span class="label">What</span> <code>live-app.md</code> is appended to every project's <code>.aai/instructions.md</code>: "If the owner opened you here directly and asks to change the app, recommend the factory instead… make the smallest edit and tell them the factory doesn't know about it." The factory's own worker runs in exactly that folder with exactly that file loaded.</p>
+  <p><span class="label">Evidence</span> Present in <code>templates/project/live-app.md</code> and in the medialibrary project. <span class="tag verified">verified</span> Whether a worker ever acted on it is not measurable from the logs. <span class="tag unknown">unknown</span></p>
+  <p><span class="label">Fix</span> Gate it: "If no <code>.factory/</code> run is in progress…" or move the owner-facing advice to a README the worker is not told to obey.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev-med">Medium</span> · 4. Shell rule and allowlist fight the model's habits</h3>
+  <p><span class="label">What</span> The stdin rule forbids <code>cd</code>, <code>&amp;&amp;</code>, pipes and redirects and says to search with Grep. The allowlist covers nine command shapes. Opus reaches for <code>grep -n</code>, <code>git grep</code>, <code>node -e</code>, <code>git stash</code>, <code>git worktree add</code> and <code>node tools/build.mjs</code> anyway.</p>
+  <p><span class="label">Evidence</span> 287 permission denials across the run, about 10% of all 2,729 turns. Joined to their commands: Bash <code>grep</code>/<code>git grep</code> variants dominate, then <code>node -e</code> one-liners, then git stash/restore/worktree, then reads of files in <code>/var/folders</code> and the scratchpad that the worker itself had written. <span class="tag verified">verified</span></p>
+  <p><span class="label">Why it hurts</span> Every denial is a full round trip at ~70K tokens of context, and the retry is usually a longer command.</p>
+  <p><span class="label">Fix</span> Allow <code>Bash(grep:*)</code>, <code>Bash(git grep:*)</code>, <code>Bash(node -e:*)</code> and <code>Bash(node tools/*:*)</code>, or state in the shell rule that Grep is the only search path and <code>node -e</code> is denied, so the model stops guessing. Add <code>--add-dir</code> for the scratchpad if workers are expected to read their own task output.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev-med">Medium</span> · 5. Recovery artifacts in <code>.factory/</code> are megabytes, and workers read them</h3>
+  <p><span class="label">What</span> <code>recovery-request-*.json</code> files are 2.4 to 3.9 MB; <code>recovery-plan-*.json</code> 2.4 to 3.1 MB. Workers read <code>.factory/</code> 185 times for 13.6 MB total, and shelled <code>node -e "require('./.factory/recovery-request-…json')"</code> to dig into them (denied, see finding 4).</p>
+  <p><span class="label">Evidence</span> File sizes from <code>ls -S .factory</code>; read census from tool_use records. <span class="tag verified">verified</span> Lou's standing rule is no agent prompt over 200K chars.</p>
+  <p><span class="label">Fix</span> Upstream: the factory should write the worker a slice-sized request file and keep the full ledger elsewhere. This is factory code, not environment, but it is the single largest measurable input cost.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev-med">Medium</span> · 6. Irrelevant project memory in this repo's ancestor</h3>
+  <p><span class="label">What</span> When the default project under <code>.solofactory/projects/default</code> is used, every worker turn carries <code>/Volumes/Extreme Pro/users/loudalo/.claude/CLAUDE.md</code> plus three rule files: writing/voice rules, skill-authoring rules, a Notion MCP workaround, an SVG-to-Notion workflow, and a pointer to the coding rules it cannot read (finding 1). 18.5K chars, roughly 5K tokens, on every call. <span class="tag inferred">inferred</span> from the documented memory walk; the medialibrary run was not under this ancestor.</p>
+  <p><span class="label">Fix</span> Either run builds under a folder with no <code>.claude/CLAUDE.md</code> ancestor (as the medialibrary install did), or add a <code>CLAUDE.md</code> at the project root that says nothing beyond the factory anchor and rely on <code>SOLOFACTORY_ROOT</code> pointing outside the ancestor chain. Cheapest check: run one worker with <code>--debug</code> and inspect which memory files it lists.</p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev-low">Low</span> · 7. Duplicate anchor via AGENTS.md</h3>
+  <p>Project <code>AGENTS.md</code> and <code>CLAUDE.md</code> are identical. The builtin agents-md plugin is active in workers, so the anchor is probably loaded twice. Small cost, easy delete: keep <code>AGENTS.md</code> for Codex and let <code>CLAUDE.md</code> hold only what differs. <span class="tag inferred">inferred</span></p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev-low">Low</span> · 8. Effort and model choices</h3>
+  <p>Reasoning stages (specification, plan, review, recovery-plan) run Opus at <strong>effort low</strong>; build stages at medium. All 60 worker inits in the medialibrary run were <code>claude-opus-5-5</code>. Low effort on the plan and review stages is a plausible contributor to the repair loop (15 repair workers, 53 recovery slices) that then costs far more than a higher-effort plan would have. <span class="tag inferred">inferred</span></p>
+</div>
+
+<div class="finding">
+  <h3><span class="sev-low">Low</span> · 9. Omissions</h3>
+  <ul>
+    <li>No <code>CLAUDE.md</code> or <code>AGENTS.md</code> at the soloFactory repo root, so nothing shields the default project from the ancestor files.</li>
+    <li>No project-level <code>.claude/settings.json</code> in the generated project, so no deny rules protect <code>data/</code> or <code>.env</code> in headless mode; the user-level deny list is excluded by design.</li>
+    <li>Stale <code>launch.json</code> entries in this repo point at old scratchpad paths. Harmless to workers, confusing to the operator.</li>
+    <li>User env inheritance (compaction thresholds) is undocumented under <code>--setting-sources</code>; the 176K-token single call suggests the 75% / 250K settings may be reaching workers. Worth one <code>--debug</code> run.</li>
+  </ul>
+</div>
+
+<h2>4. Measurements from the medialibrary run</h2>
+<p>Run <code>2026-10-07-4f2dd1cf</code>, provider claude, created 2026-10-07, "live and verified" 2026-10-16. 1,823 log files; 71 contain a worker result record.</p>
+<table>
+  <tr><th>Metric</th><th>Value</th></tr>
+  <tr><td>Workers with a result record</td><td class="num">71</td></tr>
+  <tr><td>Agent turns</td><td class="num">2,729</td></tr>
+  <tr><td>Cache-read input tokens</td><td class="num">193.1 M</td></tr>
+  <tr><td>Cache-write input tokens</td><td class="num">7.6 M</td></tr>
+  <tr><td>Output tokens</td><td class="num">1.2 M</td></tr>
+  <tr><td>API-equivalent cost reported by the CLI</td><td class="num">$255.77</td></tr>
+  <tr><td>Average context per turn</td><td class="num">≈ 70 K tokens</td></tr>
+  <tr><td>Median first-call input (fixed preamble)</td><td class="num">28.8 K tokens</td></tr>
+  <tr><td>Largest single call</td><td class="num">176 K tokens</td></tr>
+  <tr><td>Permission denials</td><td class="num">287</td></tr>
+  <tr><td>Background bash tasks started</td><td class="num">162</td></tr>
+  <tr><td>Longest worker</td><td class="num">32.5 min (cap 45)</td></tr>
+  <tr><td>Repair workers / recovery slices / gate failures</td><td class="num">15 / 53 / 95</td></tr>
+</table>
+<p>Where the reads went: project code and docs 496 reads (29.8 MB), <code>.factory/</code> 185 reads (13.6 MB), project <code>.aai/</code> 20 reads (26 KB), <code>~/.aai</code> 3 attempts (all denied). The ambient chain is a correctness and conflict problem, not the token problem. The token problem is turns times context, driven by the repair/recovery loop and by oversized factory artifacts.</p>
+
+<h2>5. What Antigravity does not see</h2>
+<ul>
+  <li>No ancestor memory walk, so none of the <code>.claude/CLAUDE.md</code> or rules files.</li>
+  <li>No <code>.aai/</code> chain unless the agent is told to read it; it is not.</li>
+  <li>No 58 builtin skill descriptions in every call.</li>
+  <li>No per-command allowlist denials; the agent runs the shell it wants.</li>
+  <li>No factory repair/recovery loop. One agent, one conversation, one PRD, the operator watching. The comparison is therefore between a single long session and 71 cold-started workers that each re-read the project.</li>
+</ul>
+
+<h2>6. What to do first</h2>
+<ol>
+  <li>Strip every "read <code>~/.aai/…</code>" from the build chain and cut the parent-folder chaining in <code>templates/project/instructions.md</code>. One edit, removes findings 1 to 3.</li>
+  <li>Widen the allowlist to the commands workers actually asked for, or make the shell rule name the denied shapes explicitly. Removes most of the 10% denial tax.</li>
+  <li>Cap the request file a worker is pointed at (slice-sized, under 200K chars). Largest measurable input saving.</li>
+  <li>Raise reasoning-stage effort from low to medium or high and measure repair count on the next run.</li>
+  <li>Run one worker with <code>--debug</code> to settle the two unknowns: which memory files load in this repo, and whether user env reaches the worker.</li>
+</ol>
+
+<h2>Open question</h2>
+<p>Where did the Antigravity-comparison PRD run? No <code>.factory/</code> or <code>.solofactory/</code> folder for it exists under this repo, <code>~/chat-n-build-*</code>, or the code-experiments folders. Its logs would show the permission denials, context sizes and repair count directly, and would settle whether that run sat under the <code>/Volumes/…/.claude</code> ancestor.</p>
+
+<p><small>Sources: <code>src/providers.mjs</code>, <code>src/store.mjs</code>, <code>templates/project/*</code>, <code>my-folder/.aai/instructions.md</code>, <code>/Volumes/Extreme Pro/users/loudalo/.claude/</code>, <code>~/Documents/photo-library-prototype/{.aai,projects/medialibrary}</code>, worker logs in <code>projects/medialibrary/.factory/logs/*.log</code> (stream-json), run events in <code>.solofactory/runs/2026-10-07-4f2dd1cf/events.jsonl</code>.</small></p>
+
+</body>
+</html>

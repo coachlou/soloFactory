@@ -47,7 +47,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/library/ambient-folder/install.sh" solofactory <targ
 <target>/
 ├── .aai/                      # OWNED — written once, never overwritten
 │   ├── identity.md            #   the workspace's identity
-│   ├── instructions.md        #   behavior: build/resume/inspect/report; layers ~/.aai if present
+│   ├── instructions.md        #   behavior: build/resume/inspect/report
 │   ├── context.md             #   routing map
 │   └── memory/solofactory/    #   which project is active + errors.jsonl (created on first run)
 ├── .ailib/                    # VENDORED — re-synced on every install
