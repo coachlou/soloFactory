@@ -31,7 +31,7 @@
 </head>
 <body>
 <main>
-  <p class="top"><strong class="accent">SoloFactory 0.9</strong> <a href="/">← Back to SoloFactory</a></p>
+  <p class="top"><strong class="accent">SoloFactory 0.10</strong> <a href="/">← Back to SoloFactory</a></p>
   <h1>User manual</h1>
   <p class="lede">From a conversation to a running, verified app on your own machine. Your Codex or Claude subscription does the AI work; SoloFactory owns the process, the gates and the evidence.</p>
 
@@ -52,13 +52,14 @@
   </nav>
 
   <h2 id="start">1. Start the factory</h2>
-  <p>You need Node 22 or newer and a signed-in Codex or Claude Code command line. Then:</p>
-  <pre><code>npm start</code></pre>
+  <p>You need Node 22 to 24 (Node 24 LTS recommended) and a signed-in Codex or Claude Code command line, on macOS or Linux. On Windows, SoloFactory runs inside the Ubuntu (WSL2) window: run every command there and open the address in your usual Windows browser. In an installed SoloFactory folder, start it with:</p>
+  <pre><code>bash start.sh</code></pre>
+  <p>(From a source checkout, <code>npm start</code> does the same.)</p>
   <p>Open <a href="http://127.0.0.1:4173">http://127.0.0.1:4173</a>. The status pill top right reads <em>Factory ready</em> when a provider is signed in. No API key is ever asked for or stored; the agents run under your subscription. If another app already uses port 4173, the factory says so and stops; start it on a free port with <code>PORT=5000 npm start</code> and open <a href="http://127.0.0.1:5000">http://127.0.0.1:5000</a> instead.</p>
 
   <h2 id="projects">2. Projects</h2>
   <p>A project is the folder the factory builds into. The first selector in the header switches between them; <em>New project…</em> asks for a name in a small dialog. Each project is its own git repository with the app at the root, a <code>.aai/</code> folder of project context you can edit, and a run history.</p>
-  <p>Projects live under the factory home (<code>.solofactory/projects/</code> inside the SoloFactory folder by default). A folder you create there by hand shows up too. Switching projects never interrupts a run.</p>
+  <p>In an installed SoloFactory folder, projects live in its <code>projects/</code> folder (from a source checkout, under <code>.solofactory/projects/</code>). A folder you create there by hand shows up too. Switching projects never interrupts a run.</p>
 
   <h2 id="interview">3. Shape the brief</h2>
   <figure>
@@ -72,6 +73,8 @@
     <figcaption>The frozen brief. Review it and queue it.</figcaption>
   </figure>
   <p><strong>Every run plans its features first.</strong> There is no strategy to pick. Before any code is written the factory drafts a feature plan, and an independent review has to pass it. Each feature then declares the files it creates or edits (its <em>writes</em>), is built, tested, reviewed and committed before the next starts, and may change only those files. Features fail smaller than one big build, and a parked run can be restarted from a chosen feature.</p>
+  <p><strong>Checks the factory can prove.</strong> The factory can only prove what a test can run on its own. When a check needs a real folder on your computer, a real calendar date or a live outside service, the Guide rewrites it to use sample files, a test clock, a setting for the folder (such as <code>&lt;DocsRoot&gt;</code>) or a stand-in. What only a person can confirm goes in a <em>Checked by hand after install</em> list on the review screen and in the PRD. On Windows the app runs inside Ubuntu, so a folder like <code>D:\Docs</code> is <code>/mnt/d/Docs</code> to it; that is the value to give the folder setting.</p>
+  <p>Anything the Guide could not resolve, and a brief with more than 12 checks (each one costs its own build, test and review turns), shows as a note under <em>Before you start</em> on the review screen. Read those before you queue the brief.</p>
   <p><b class="btn">Continue interview</b> reopens the conversation if something is missing.</p>
 
   <h2 id="queue">4. Queue a run</h2>
@@ -122,7 +125,7 @@
   <table>
     <tr><th>Control</th><th>When it shows</th><th>What it does</th></tr>
     <tr><td><b class="btn">Pause</b></td><td>While a stage is running</td><td>Lets the run finish the stage it is in, commits the green tree, and parks before the next one. The button reads <em>Pausing after …</em> until the run parks, also after a page reload. No new agent turn starts once you press it: a failed check, a blocked review or a blocked plan parks before its repair or correction, and Resume picks that up without re-running the review. Pausing while a repair plan is being prepared stops that preparation; prepare the plan again to continue. Nothing is lost and nothing is replayed on resume.</td></tr>
-    <tr><td><b class="btn">Resume</b></td><td>On a paused, failed or interrupted run, when the recovery card allows it</td><td>Continues the same run, same files, from the stage it stopped at. Goes to the front of the project's queue. It does not renew a spent repair budget; when the budget is spent the card offers <em>Prepare repair plan</em> instead.</td></tr>
+    <tr><td><b class="btn">Resume</b></td><td>On a paused, failed or interrupted run, when the recovery card allows it</td><td>Continues the same run, same files, from the stage it stopped at. Goes to the front of the project's queue. It does not renew a spent repair budget; when the budget is spent the card offers <em>Prepare repair plan</em> instead. One exception: after an update, a check that failed on the older SoloFactory shows Resume with <em>SoloFactory changed since this gate failed</em>; Resume reruns that check on the new version first, at no model cost, and only a repeat failure leads to a repair plan.</td></tr>
     <tr><td><b class="btn">Cancel run</b></td><td>While active</td><td>Stops work now. The workspace stays as it was.</td></tr>
     <tr><td><b class="btn">Restart from slice</b></td><td>On a parked run, for every completed feature after the first</td><td>Rewinds the tree to the commit before that slice and rebuilds it and everything after, exactly once. Earlier slices keep their commits.</td></tr>
     <tr><td><b class="btn">Prepare repair plan</b>, <b class="btn">Approve and continue repairs</b></td><td>On a parked run that cannot simply resume</td><td>Plans the unfinished work as repair features; see <a href="#recovery">When a run parks</a>. The recovery card offers this instead of Resume when Resume would only hit the same wall.</td></tr>
@@ -138,7 +141,9 @@
     <li><strong>Set aside.</strong> When a feature runs out of repairs, the factory saves its work aside and keeps building every later feature that does not depend on it. Features that do depend on it wait, and the activity stream says so. Because every feature declares its writes, the independent work does not collide with the set-aside files. This only happens when later independent work remains. At the end the run parks once, with the set-aside feature's own files restored and its unspent repairs given back; the message lists which features were built and which are still waiting.</li>
     <li><strong>Repair plan.</strong> When Resume would only repeat the failure (repairs spent, the same failure on unchanged code, a feature that never reached a stable review, or specs changed), the card offers <b class="btn">Prepare repair plan</b>. The factory plans the unfinished work as repair features from the review findings and every spec and prototype input; each feature lists the checks it closes, what it depends on and the files it writes. An independent review has to pass the plan, and then <strong>repairs start on their own</strong>. The card shows the features (verified, current, pending), a strip with one cell per feature, and the checks still open. Add a spec or prototype file, or type <em>Changes for the repair plan</em>, before preparing it if the inputs need correcting.</li>
     <li><strong>If you pause while the plan is being prepared,</strong> a plan that passed review waits for <b class="btn">Approve and continue repairs</b>. A preparation that stopped or failed offers <b class="btn">Retry repair-plan preparation</b>; a plan still blocked after its automatic corrections offers <b class="btn">Submit corrected plan for review</b> (a .json file under <em>Advanced</em>, with a <b class="btn">Download plan help packet</b> to help write it) or <b class="btn">Revise inputs and prepare a new plan</b> if the specs themselves are wrong.</li>
-    <li><strong>Repair budget.</strong> Each feature gets two repair attempts and the final full review gets two more; spent attempts are never refilled by Resume, Retry or a restart. The card shows <em>Repair attempts used: This feature 1 of 2 · Plan: 3 of 8</em> while repairs run.</li>
+    <li><strong>Repair budget.</strong> Each feature gets two repair attempts and the final full review gets two more; spent attempts are never refilled by Resume, Retry or a restart. The card shows <em>Repair attempts used: This feature 1 of 2 · Plan: 3 of 8</em> while repairs run. A first gate failure gets a repair plan for the failed feature only.</li>
+    <li><strong>What it has spent.</strong> Every parked run shows <em>Spent so far</em> (workers, tokens, cost and time), how many repair turns approving grants, and how many recent approvals verified no features, so you can decide before you approve more.</li>
+    <li><strong>Spending ceiling.</strong> A run that has started 150 workers parks as <em>Run worker ceiling reached</em>. Nothing is lost; review the spend and <b class="btn">Resume</b> to grant another allotment. <code>SOLOFACTORY_MAX_RUN_WORKERS</code> changes the ceiling.</li>
     <li><strong>Resume, Retry or Start over?</strong> <em>Resume</em> continues the approved repair plan from the feature it stopped on, never replaying verified ones. <em>Retry</em> (of plan preparation) keeps the prior plan and the features already built. <em>Start over</em> makes a new run from the same brief and sets the parked one aside.</li>
   </ul>
   <h3>Release QA</h3>
@@ -156,6 +161,7 @@
     <tr><td><code>SOLOFACTORY_HOME</code></td><td>Where runs, projects and the demo live. Default <code>.solofactory/</code> inside the SoloFactory folder (installed folders use <code>.aai/memory/solofactory/</code>).</td></tr>
     <tr><td><code>SOLOFACTORY_ROOT</code></td><td>Where projects are discovered. Default: the home.</td></tr>
     <tr><td><code>SOLOFACTORY_MAX_ACTIVE_RUNS</code></td><td>How many projects may build at once. Default 1.</td></tr>
+    <tr><td><code>SOLOFACTORY_MAX_RUN_WORKERS</code></td><td>Workers one run may start before it parks for your go-ahead (Resume grants another allotment). Default 150; 0 turns the ceiling off.</td></tr>
     <tr><td><code>SOLOFACTORY_AGENT_IDLE_MINUTES</code></td><td>Agent idle deadline, reset by any output. Default 6.</td></tr>
     <tr><td><code>SOLOFACTORY_AGENT_HARD_MINUTES</code></td><td>Agent total safety cap. Default 45.</td></tr>
     <tr><td><code>SOLOFACTORY_AGENT_BACKOFF_SECONDS</code></td><td>Wait before the one automatic Codex resume. Default 15.</td></tr>

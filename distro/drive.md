@@ -123,7 +123,7 @@ or an empty list), has a duplicate scenario, or has a scenario over 400 characte
     "workingName": "", "promise": "", "primaryUser": "", "problem": "", "currentAlternative": "",
     "businessModel": "", "usage": "", "visualDirection": "", "deployment": "",
     "coreWorkflow": [], "mustHaves": [], "nonGoals": [], "dataAndAccess": [],
-    "integrations": [], "acceptanceScenarios": [], "constraints": [], "later": []
+    "integrations": [], "acceptanceScenarios": [], "manualChecks": [], "constraints": [], "later": []
   }
 }
 ```
@@ -133,6 +133,13 @@ or an empty list), has a duplicate scenario, or has a scenario over 400 characte
 - Each acceptance scenario is one observable behavior a test can prove, not a bundle of them.
 - Write "None" as the single list item when there are no integrations or constraints. An empty
   list fails.
+- Apply the "What the factory can prove" rules in `skills/factory-guide.md` yourself: rewrite a
+  check that needs a real folder on the owner's computer, a real date, or a live outside service
+  into one the factory can prove (a fixture in `data/fixtures/`, a logged command, a test clock,
+  a `<DocsRoot>` setting, an adapter stand-in), and put what only a person can check in
+  `manualChecks`. Keep a first release to about 12 checks. The browser interview scans for these
+  and warns; `POST /api/jobs` does not, so the chat is the only check on this path. On Windows the
+  app runs inside Ubuntu: a folder like `D:\Docs` is `/mnt/d/Docs` there.
 - Leave out `sdlc`. Every new run plans its features, gets the plan reviewed, then builds,
   checks and reviews one feature at a time. Any other `sdlc` value is refused with 400.
 
@@ -162,8 +169,8 @@ and the same `nextAction`. Ask the owner before any of these actions:
 
 | `nextAction.action` | Meaning |
 |---|---|
-| `resume` | `POST /resume` continues from the preserved files (`recovery.canResume` is true only for this). Optional `{"features":N}` batches an approved running repair plan |
-| `prepare-plan` / `retry-plan` / `revise-inputs` | `POST /recovery-plan`: the repair budget is spent, a review hit its cap, a failure repeated on unchanged code, or the specs changed. Resume cannot help |
+| `resume` | `POST /resume` continues from the preserved files (`recovery.canResume` is true only for this). Optional `{"features":N}` batches an approved running repair plan. Read `reason`: *SoloFactory changed since this gate failed* means Resume reruns a check that failed on an older build, with no model call (a repeat failure parks again and offers the repair plan); `run_budget_reached` means the run hit `SOLOFACTORY_MAX_RUN_WORKERS` and Resume grants another allotment, so show the owner the spend first |
+| `prepare-plan` / `retry-plan` / `revise-inputs` | `POST /recovery-plan`: the repair budget is spent, a review hit its cap, a failure repeated on unchanged code, or the specs changed. Resume cannot help (a check that failed on an older build gets `resume` instead, above) |
 | `approve-plan` | a Pause left a reviewed plan unstarted: `POST /recovery-start {"planDigest":"…"}` |
 | `amend-plan` | automatic plan corrections ran out: `GET /recovery-plan-packet`, then `POST /recovery-review {"phaseId","plan"}` |
 | `waive-proof` (in `alternatives`) | a reviewer's own test is wrong: ask the owner for a reason, Pause first, then `POST /waive-proof {"proof":"<BUG id>","reason":"…"}` (409 unless paused) |
@@ -195,7 +202,8 @@ Each planned feature declares the files it `writes`; a feature that changes othe
 checks. Each gets 2 repairs, and final integration gets 2 more. A feature that exhausts its
 budget is **set aside** when independent features remain: its dependents wait, the rest keep
 building, and the run then parks with the set-aside work restored. It resumes with its
-unspent repairs. Resume never renews a spent budget.
+unspent repairs. Resume never renews a spent budget; the one free retry is the rerun of a check
+that failed on an older SoloFactory build (see `resume` above).
 
 When repairs run out, `prepare-plan` plans features for the unfinished checks. Once that plan
 passes independent review, **repairs start on their own**: the owner approves nothing. Pause

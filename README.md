@@ -11,6 +11,7 @@ It does not request or store an OpenAI or Anthropic API key.
 ## Requirements
 
 - Node.js 22 to 24; Node 24 LTS is the recommended version. The installer warns on Node 25 and up (it still installs), because some packages the factory builds with ship no prebuilt files for it yet.
+- macOS or Linux. On Windows it runs inside WSL2 (Ubuntu); there is no native-Windows path. See `docs/INSTALL.md` Track B, which has not yet been walked end to end on a real Windows machine.
 - Codex CLI signed in with ChatGPT (`codex login status` should say `Logged in using ChatGPT`),
   or Claude Code signed in with a subscription account.
 - npm, available on `PATH`.
@@ -237,7 +238,8 @@ Final integration reruns every verified feature's build-time proofs once, so a l
 breaks an earlier one is caught before the final review. A repair run reruns its own features'
 proofs and the original plan's built features' proofs; a repair feature with the same id replaces the original.
 Plans get two corrections (more while each review finds fewer blockers, at most three times
-that); features and final integration each get two repairs. Resume never refills them. There is
+that); features and final integration each get two repairs. Resume never refills them; a gate
+that failed on an older SoloFactory build is rerun once on the new build, free, before any repair plan. There is
 no single-build option for new runs; older single and slice runs still resume. Details:
 [SPEC.md §12](SPEC.md).
 

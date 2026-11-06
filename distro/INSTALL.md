@@ -123,9 +123,12 @@ gh auth status
 
 - **`command not found`** — install it. macOS: `brew install gh` if `brew` exists; otherwise
   have them download the installer from https://cli.github.com and open it. Ubuntu/WSL:
-  `sudo apt update && sudo apt install -y gh`. Then check again.
+  `sudo apt update && sudo apt install -y gh` (if it says *Unable to locate package*, see
+  **Fixing a bad install**). Then check again.
 - **Not logged in** — `gh auth login`: GitHub.com, HTTPS, "Login with a web browser". It
-  prints a one-time code; they paste it into the page it opens and approve. Then check again.
+  prints a one-time code; they paste it into the page it opens and approve. In the Ubuntu
+  window the page often does not open by itself: have them hold `Control` and click
+  `https://github.com/login/device`, or type it into their Windows browser. Then check again.
 - **Signed in but the install says it cannot read `coachlou/aimm`** — they signed in with a
   different GitHub account than the one that was invited. Run `gh auth status` and compare
   the username to the invite; `gh auth login` again with the right one.
@@ -168,7 +171,8 @@ Then route:
 
 Have them open the text window (Terminal on a Mac — see A1; the Ubuntu window on Windows —
 see B1e; if there is no Ubuntu window at all, it is a new install: go to **Track B**) and
-paste:
+paste (on Windows, never run it in PowerShell or a Windows shell of your own: see the start
+of Track B):
 
 ```sh
 [ -f "<SF>/start.sh" ] && { echo "INSTALLED at <SF>"; grep -m1 'app:' "<SF>/.ailib/manifest.yaml"; } || echo "NOT INSTALLED at <SF>"
@@ -210,7 +214,8 @@ echo "git: $(git --version 2>/dev/null || echo MISSING)"; \
 echo "node: $(node --version 2>/dev/null || echo MISSING)"; \
 echo "claude: $(command -v claude 2>/dev/null || echo MISSING)"; \
 echo "codex: $(command -v codex 2>/dev/null || echo MISSING)"; \
-echo "gh: $(command -v gh 2>/dev/null || echo MISSING)"
+echo "gh: $(command -v gh 2>/dev/null || echo MISSING)"; \
+echo "python3: $(command -v python3 2>/dev/null || echo MISSING)"
 ```
 
 > This just looks around and tells me what's already on your machine. It changes nothing.
@@ -220,7 +225,7 @@ Read the report yourself. Then handle only what's missing:
 
 | Line says | What to do |
 |---|---|
-| `git: MISSING` | A3 |
+| `git: MISSING` or `python3: MISSING` | A3 (the same Command Line Tools install provides both) |
 | `node: MISSING`, below `v22`, or `v25` and up | A4 |
 | both `claude:` and `codex:` are `MISSING` | A5 |
 | `gh: MISSING`, or not signed in (`gh auth status`) | only needed for the online install; see GitHub access above, or use the zip |
@@ -382,6 +387,16 @@ and after setup it is just "the Ubuntu window." Nothing more.
 The good news: the browser part still works normally. They will open Chrome or Edge on
 Windows as usual and go to the same address.
 
+**If you, the agent, have a shell of your own on a Windows machine** (paths like
+`C:\Users\...`, or PowerShell or Git Bash), it is the wrong side. Do not run this runbook's
+`sh` commands there: `$HOME`, `<SF>` and `gh` would all refer to Windows, so the Step 0
+check reports NOT INSTALLED even when SoloFactory is in Ubuntu. Hand each command to the
+owner for the Ubuntu window, or run it as `wsl -e bash -lc '<command>'`.
+
+**Tested status:** this track follows Microsoft's and NodeSource's documented steps, but it
+has not yet been walked end to end on a real Windows machine. If a step behaves differently
+from what is written here, believe the machine, fix it, and tell the factory's maintainer.
+
 ## B1. Set up the Linux window (WSL2)
 
 **WSL2 is a hard requirement on Windows.** WSL1 is not sufficient — it emulates Linux
@@ -531,6 +546,7 @@ Unlike macOS, a fresh Ubuntu has almost none of this. Check first:
 echo "git: $(git --version 2>/dev/null || echo MISSING)"; \
 echo "curl: $(command -v curl 2>/dev/null || echo MISSING)"; \
 echo "rsync: $(command -v rsync 2>/dev/null || echo MISSING)"; \
+echo "python3: $(command -v python3 2>/dev/null || echo MISSING)"; \
 echo "node: $(node --version 2>/dev/null || echo MISSING)"; \
 echo "claude: $(command -v claude 2>/dev/null || echo MISSING)"; \
 echo "gh: $(command -v gh 2>/dev/null || echo MISSING)"
@@ -538,12 +554,15 @@ echo "gh: $(command -v gh 2>/dev/null || echo MISSING)"
 
 > This just looks around and reports back. It changes nothing.
 
-Then install whatever is missing. `rsync` is genuinely required — the installer copies files
-with it — and a fresh Ubuntu usually lacks it. This one block covers git, curl and rsync
-together:
+A path for `node` or `claude` that starts with `/mnt/c/` is the Windows copy showing through,
+not a Linux one: treat it as MISSING and install it in B3 / B4.
+
+Then install whatever is missing. `rsync` and `python3` are genuinely required (the installer
+copies files with rsync and writes its manifest with python3), and a fresh Ubuntu may lack
+rsync. This one block covers git, curl, rsync and python3 together:
 
 ```sh
-sudo apt update && sudo apt install -y git curl rsync
+sudo apt update && sudo apt install -y git curl rsync python3
 ```
 
 > This installs the missing pieces. It will ask for the password you just created for Ubuntu
@@ -596,7 +615,8 @@ Verify — same protective check:
 command -v claude
 ```
 
-**If this prints nothing, stop and fix it before installing SoloFactory.**
+**If this prints nothing, or a path starting with `/mnt/`, stop and fix it before installing
+SoloFactory** (a `/mnt/` path is the Windows copy; open a fresh Ubuntu window and check again).
 
 ## B5. Install SoloFactory
 
@@ -829,7 +849,14 @@ could change or remove them:
 
 **If they were below 0.10.3 before the update**, nothing changes for their existing apps. New builds may add a lint check (the app's `factory.json` declares it) that runs before the tests; mention it only if they ask why a run shows a *lint* step.
 
-**If they were below 0.10.2 before the update**, a run on Linux or WSL that parked as *Repair budget exhausted* even though its tests passed (the log ends in `EINVAL: invalid argument, fsync`) will pass its checks now: choose **Prepare repair plan** (Resume is refused once repairs are spent). The repair feature normally runs its checks before building anything, so a feature that passes them goes on to review without a rebuild. If the test runner ever crashes after every test passed, the run now stops with an infrastructure error instead of spending its repairs.
+**If they were below 0.10.8 before the update**, a few things look different, so say in one breath that the factory now shows what a run has spent before it asks to approve more work, can stop a long run at a spending ceiling (Resume carries on), and may rewrite some of their checks before a build. What you need to know yourself:
+
+- Every parked run shows a *Spent so far* line (workers, tokens, cost, time) and how many repair turns approving grants. A first gate failure gets a repair plan for that one feature only.
+- A run can now park as *Run worker ceiling reached* (`run_budget_reached`) once it has started 150 workers (`SOLOFACTORY_MAX_RUN_WORKERS`; `0` turns it off). Review the spend line with the owner; **Resume** grants another allotment.
+- The Guide rewrites checks the factory cannot prove (a real folder on their computer, a real calendar date, a live outside service) into ones it can, and lists the rest under *Checked by hand after install* on the review screen and in the PRD. Notes it could not resolve, and a brief with more than 12 checks, appear under *Before you start* on the review screen.
+- A run that parked on a failed check **before** this update, on a feature, the final integration, or a repair feature still being built, now offers **Resume** with the reason *SoloFactory changed since this gate failed*. Resume reruns that check on the new version first, with no model call and without refilling the budget; only if it fails again does the card offer a repair plan. Other parked runs (a repair phase already built, a batch) still offer **Prepare repair plan**.
+
+**If they were below 0.10.2 before the update**, a run on Linux or WSL that parked as *Repair budget exhausted* even though its tests passed (the log ends in `EINVAL: invalid argument, fsync`) will pass its checks now. If the card offers **Resume** (it says *SoloFactory changed since this gate failed*), choose it: the check reruns for free and the run carries on. Otherwise choose **Prepare repair plan**. The repair feature normally runs its checks before building anything, so a feature that passes them goes on to review without a rebuild. If the test runner ever crashes after every test passed, the run now stops with an infrastructure error instead of spending its repairs.
 
 **If they were below 0.10.1 before the update**, a run parked on a faulty review test now offers a Waive button (see Troubleshooting); mention it only if they've hit that. Newer Node majors than the spec names are accepted, and a later feature may now update an earlier feature's test.
 
@@ -875,7 +902,8 @@ Work these yourself. Do not read this table out loud.
 | `requires a newer version of Codex` | Codex CLI is out of date | Update the Codex CLI, then restart the server |
 | Browser shows "can't connect" / "site can't be reached" | The server window was closed or `Control`+`C`'d | Restart with `cd "<SF>" && bash start.sh` and leave it running |
 | Run parks saying *every test passed, but the test runner then crashed* | Node or the factory failed after the app's tests passed; the app is not at fault | Update SoloFactory (and Node.js if the message names it), then choose **Resume**. No repair is spent |
-| Run parks as *Repair budget exhausted* | A gate kept failing after its repairs were spent | In the run view choose **Prepare repair plan**; once the independent review passes, repairs start on their own. Resume alone does not renew the budget |
+| Run parks as *Repair budget exhausted* | A gate kept failing after its repairs were spent | If the card says *SoloFactory changed since this gate failed* and offers **Resume**, choose it: the check reruns on this version for free. Otherwise choose **Prepare repair plan**; once the independent review passes, repairs start on their own. Resume does not renew a spent budget |
+| Run parks as *Run worker ceiling reached* (`run_budget_reached`) | The run started as many workers as `SOLOFACTORY_MAX_RUN_WORKERS` allows (default 150) | Read the *Spent so far* line with the owner. If they want to go on, choose **Resume**, which grants another allotment. Nothing is lost |
 | Run parks as *Repair budget exhausted* and also shows **Waive BUG-n (faulty test)** | The review's own test, not the app, looks wrong | Read the note under the button. If the test really is wrong, type why in the box above and choose **Waive**, then Resume. Otherwise choose **Prepare repair plan** |
 | Run fails with `prompt_too_large` ("over SoloFactory's 200000-character prompt limit") | A factory defect: the input cannot fit, so retrying cannot help and no agent was started | Do not retry. Have the owner use **Report this run** (or Feedback) in the top bar |
 | `Port 4173 is in use by another app` | Another app already uses port 4173 | Start with a different port: `cd "<SF>" && PORT=5000 bash start.sh`, then use `http://127.0.0.1:5000` everywhere this guide says 4173 |
@@ -888,6 +916,10 @@ Work these yourself. Do not read this table out loud.
 | Windows: odd filesystem, permission or exec failures with no other explanation | Running on WSL1, not WSL2 | `wsl --list --verbose` in PowerShell; if VERSION is 1, convert per B1d |
 | Windows: `'wsl' is not recognized` after `wsl --install` | Windows build too old for WSL2 | `winver`; needs Win11 or Win10 build 19041+. Windows Update first, then stop |
 | Windows: nothing behaves as documented | Commands went into PowerShell instead of Ubuntu | Confirm which window; everything after B1 belongs in Ubuntu |
+| Windows: `command -v claude` (or `node`, `npm`) prints a path starting with `/mnt/c/` | Ubuntu is finding the Windows copy, not a Linux one | Install the Linux one per B3 / B4, open a fresh Ubuntu window, and check again: the path must not start with `/mnt/` |
+| Windows: `$'\r': command not found`, or `bad interpreter: /bin/bash^M` | A script got Windows line endings, usually because it was downloaded or unzipped on the Windows side | Re-run the install command from **The install command** inside the Ubuntu window, into the Ubuntu home |
+| Windows: the server prints its address but the Windows browser cannot connect | WSL's link to Windows `localhost` stalled (untested here) | Stop the server, run `wsl --shutdown` in PowerShell, reopen Ubuntu and start again |
+| Windows: `sudo apt install -y gh` says *Unable to locate package gh* | Older Ubuntu (20.04) does not carry `gh` | Install it from GitHub's Linux instructions (https://github.com/cli/cli/blob/trunk/docs/install_linux.md), or use a zip install |
 
 **Two things you must never do to get past an error:** never delete a folder the owner did
 not confirm is disposable, and never `sudo` your way around a permissions error on macOS —
