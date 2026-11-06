@@ -6,7 +6,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import os from "node:os";
 import { JobStore } from "../src/store.mjs";
-import { SoloFactory, continuationAction } from "../src/factory.mjs";
+import { SoloFactory, continuationAction, withContinuation } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
 import { digest } from "../src/feature-recovery.mjs";
 import { watchConfig } from "../src/watchdog.mjs";
@@ -1118,6 +1118,18 @@ test("a spent gate failure recorded on another SoloFactory build is rerun by Res
   saved.error.details.build = "0.10.1+0000000";
   await store.writeState(saved);
   assert.equal(continuationAction(saved).action, "resume");
+  assert.ok(saved.recovery?.actions.some((text) => /Prepare repair plan/.test(text)), "the stored card offered a repair plan");
+  assert.deepEqual(withContinuation(saved).recovery.actions, [`Resume current run: ${continuationAction(saved).reason}`], "the card now says why Resume comes first");
+  // Same failure on this build: one gate run, no repair turn, no refilled budget, then the repair plan.
+  const repairs = count(await started(store, job.id), "repair-");
+  const again = await make().resume(job.id);
+  assert.equal(again.error.code, "quality_gate_failed");
+  assert.equal(again.attempt, failed.attempt, "the budget was not refilled");
+  assert.equal(count(await started(store, job.id), "repair-"), repairs, "no repair turn ran");
+  assert.equal(continuationAction(again).action, "prepare-plan");
+  const rerun = await store.read(job.id);
+  rerun.error.details.build = "0.10.1+0000000";
+  await store.writeState(rerun);
   failing = false;
   const result = await make().resume(job.id);
   assert.equal(result.state, "completed", result.error?.message);
@@ -1142,6 +1154,10 @@ test("an ordinary gate failure with repairs left continues with Resume", () => {
   assert.equal(continuationAction(job, { maxRepairs: 2 }).action, "resume");
   assert.equal(continuationAction({ ...job, attempt: 2 }, { maxRepairs: 2 }).action, "prepare-plan");
   assert.equal(continuationAction({ ...job, attempt: 1, repairBudgetLimit: 1 }, { maxRepairs: 2 }).action, "prepare-plan");
+  // Recorded on another build: integration and recovery-phase gates rerun first too, like feature gates.
+  const other = { ...job, planVersion: 2, attempt: 2, error: { ...job.error, details: { gate: "test", build: "0.10.1+0000000" } } };
+  assert.equal(continuationAction(other, { maxRepairs: 2 }).action, "resume", "integration gate");
+  assert.equal(continuationAction({ ...other, featureCursor: { id: "F" }, recoveryPhase: { status: "running" } }, { maxRepairs: 2 }).action, "resume", "recovery-phase gate");
 });
 
 test("a build that hits the safety cap while changing files continues once in its own session", async () => {

@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, writeFile, access } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { JobStore } from "../src/store.mjs";
-import { SoloFactory, continuationAction } from "../src/factory.mjs";
+import { BUILD_ID, SoloFactory, continuationAction } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
 
 test("waiving a stuck BUG test removes it, records the owner's decision and re-opens Resume", async () => {
@@ -15,7 +15,7 @@ test("waiving a stuck BUG test removes it, records the owner's decision and re-o
   await mkdir(path.join(store.appDir(job.id), "qa"), { recursive: true });
   await writeFile(path.join(store.appDir(job.id), "qa/port-80.test.mjs"), "// faulty\n");
   await store.commit("qa test");
-  Object.assign(job, { state: "failed", error: { code: "quality_gate_failed", message: "gate" }, attempt: 2, repairBudgetLimit: 2,
+  Object.assign(job, { state: "failed", error: { code: "quality_gate_failed", message: "gate", details: { build: BUILD_ID } }, attempt: 2, repairBudgetLimit: 2,
     bugProofs: [{ id: "BUG-1", proof: { command: ["node", "--test", "qa/port-80.test.mjs"] }, description: "port 80" }] });
   await store.writeState(job);
   const factory = new SoloFactory({ store, provider: createFixtureProvider(), maxRepairs: 2 });
