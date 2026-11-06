@@ -1,3 +1,7 @@
+## 0.10.6: bounded recovery (2026-11-05)
+
+From a member's WSL run that spent $38 rebuilding 25 features after one gate failure. A first gate failure in the ordinary build now gets a repair plan for the failed feature only; the rest of the approved plan is kept. Before any recovery approval the run screen shows what the run has spent (workers, tokens, cost when known, elapsed time, repair turns the approval grants). A run-wide ceiling, `SOLOFACTORY_MAX_RUN_WORKERS` (default 150, 0 disables), parks a run with `run_budget_reached`; Resume grants another allotment. Build workers no longer get pointed at instructions outside the project.
+
 ## 0.10.5: docs audit (2026-11-05)
 
 Docs only. The install runbook now checks `gh` and names the bash syntax error a signed-in but uninvited member sees; the Node range reads 22 to 24 everywhere; drive.md covers waive-proof and HOST; the manual's home path is corrected.
