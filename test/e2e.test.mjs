@@ -57,6 +57,19 @@ test("HTTP journey goes from Guide turn to a reachable generated app", async (t)
   assert.match(await prd.text(), /Pocket Pulse/);
 });
 
+test("a brief posted straight to /api/jobs gets the Guide's notices", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-direct-"));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true });
+  const base = await listen(app, t);
+  const config = await getJson(`${base}/api/config`);
+  const transcript = [{ role: "assistant", content: config.opening.message }, { role: "user", content: "A daily tracker." }];
+  const guide = await postJson(`${base}/api/interview/turn`, { provider: "fixture", messages: transcript });
+  const brief = { ...guide.brief, mustHaves: ["Pull new jobs from Gmail", ...guide.brief.mustHaves.slice(1)] };
+  const started = await postJson(`${base}/api/jobs`, { provider: "fixture", transcript, coverage: guide.coverage, brief });
+  assert.match(started.notices[0], /^MH-1 may not be provable/);
+  assert.deepEqual(started.job.notices, started.notices);
+});
+
 test("HTTP recovery explains legacy blockers and resumes the same run id", async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-http-resume-"));
   const app = await createSoloFactoryServer({ home, fixtureMode: true });

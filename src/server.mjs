@@ -9,6 +9,7 @@ import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, admitsPlanning, assertPlan
 import { watchConfig } from "./watchdog.mjs";
 import {
   INTERVIEW_RESPONSE_SCHEMA,
+  briefNotices,
   runGuideTurn,
   makeOpeningTurn,
   validateInterviewResult,
@@ -367,10 +368,13 @@ export async function createSoloFactoryServer(options = {}) {
           coverage: body.coverage,
           brief: body.brief,
         });
-        const job = await store.create({ brief: validated.brief, transcript: body.transcript, provider, sdlc });
+        // Same scan the Guide's review screen shows. A brief posted straight here (e.g. from chat) has
+        // no Guide turn to send it back to, so like the Guide's second pass it queues with notices, never a block.
+        const notices = briefNotices(validated.brief);
+        const job = await store.create({ brief: validated.brief, transcript: body.transcript, provider, sdlc, notices });
         await enqueue(active.id, job.id);
         const [annotated] = await annotateJobs(active.id, [await store.read(job.id)]);
-        return json(response, 202, { job: annotated });
+        return json(response, 202, { job: annotated, notices });
       }
 
       const jobMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)$/);
