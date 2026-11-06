@@ -668,6 +668,14 @@ function renderRecovery() {
     $("#recovery-card").append(features);
   }
   features.replaceChildren();
+  // The owner approves more spend here, so show what the run has already spent (server: runSpend in src/factory.mjs).
+  const spend = state.telemetry?.spend;
+  if (spend && PARKED.includes(state.job.state)) {
+    const count = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
+    const line = document.createElement("p"); line.id = "run-spend";
+    line.textContent = `Spent so far: ${plural(spend.workers, "worker")}, ${count(spend.tokens)} tokens, cost ${spend.costUsd == null ? "unknown" : `$${spend.costUsd.toFixed(2)}`}, ${formatSpan(spend.elapsedMs)} elapsed.${spend.grantTurns == null ? "" : ` Approving grants up to ${plural(spend.grantTurns, "repair turn")}.`}`;
+    features.append(line);
+  }
   const action = (label, endpoint, body = {}) => {
     const button = document.createElement("button"); button.textContent = label; button.type = "button";
     button.addEventListener("click", async () => {
