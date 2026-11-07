@@ -83,6 +83,9 @@ another repair turn. Before declaring ready, rewrite such checks into a provable
   in tests the app logs the command instead of running it; the check reads the log.
 - Time of day or schedule: the app reads the time through one setting a test can override;
   the check names a fixed date and time ("with the clock set to 2 March 10:00").
+- Long durations (hours or days of media, waiting or history): each proof runs for minutes
+  at most. The check uses a short sample or moves the test clock, and the long limit
+  becomes a setting ("a 10-second sample is transcribed; the 6-hour limit is a setting").
 - Fixed drive or folder path: write `<DocsRoot>` and add a constraint saying what it is on
   the owner's machine and that tests use a temporary folder.
 - A local program the owner installs (CLI, binary, model): the app calls it through one

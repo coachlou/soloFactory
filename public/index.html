@@ -81,6 +81,7 @@
                   <div class="composer-row">
                     <small>Do not paste passwords, tokens, or private customer data.</small>
                     <div class="composer-actions">
+                      <button id="discard-draft" class="button ghost hidden" type="button">Start over</button>
                       <label class="button ghost attach-button" for="attach-input">Attach files<input id="attach-input" type="file" multiple accept=".md,.markdown,.txt,.json,.yaml,.yml,.csv,.html,.xml,text/*,image/png,image/jpeg,image/gif,image/webp" class="sr-only"></label>
                       <button id="send-button" class="button primary" type="submit">Send answer <span>↗</span></button>
                     </div>
@@ -125,7 +126,7 @@
 
           <section id="run-view" class="view hidden">
             <div class="run-heading">
-              <div><p class="eyebrow" id="run-id">Factory run</p><h1 id="run-title">Building your app</h1><p id="run-subtitle">The controller is preparing the workspace.</p></div>
+              <div><p class="eyebrow" id="run-id">Factory run</p><h1 id="run-title">Building your app</h1><p id="run-subtitle">The controller is preparing the workspace.</p><ul id="run-notices" class="hidden muted"></ul></div>
               <div class="run-actions">
                 <button id="pause-button" class="button ghost hidden" title="Finish the current stage, commit the green tree, then stop">Pause</button>
                 <button id="cancel-button" class="button danger">Cancel run</button>

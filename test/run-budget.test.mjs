@@ -77,3 +77,27 @@ test("the spend counts recent approvals that verified no feature", () => {
   assert.equal(spend([phase(["A"]), phase([]), phase([], { status: "discarded" })], phase([])), 2, "a discarded phase and an unapproved plan are not approvals");
   assert.equal(spend([phase([]), phase(["A"])], { status: "ready", done: [] }), 0, "a verified feature resets the count");
 });
+
+test("the cost ceiling parks on reported spend, skips turns with no figure, and Resume grants another allotment", async (t) => {
+  process.env.SOLOFACTORY_MAX_RUN_COST_USD = "1.5";
+  t.after(() => delete process.env.SOLOFACTORY_MAX_RUN_COST_USD);
+  const store = new JobStore(await mkdtemp(path.join(os.tmpdir(), "sf-run-cost-")));
+  await store.init();
+  const job = await store.create({ brief, transcript, provider: "fixture", sdlc: "single" });
+  const fixture = createFixtureProvider();
+  const stages = [];
+  // A killed or Codex turn reports no cost; it must not make the total unknown and switch the ceiling off.
+  const provider = { id: "fixture", async run(options) { stages.push(options.context.stage); return { ...(await fixture.run(options)), usage: { ...usage, costUsd: stages.length === 1 ? null : 2 } }; } };
+  const factory = new SoloFactory({ store, provider, commandRunner: async () => ({ code: 0, output: "passed" }), deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9978" }) });
+  t.after(() => factory.shutdown());
+
+  const parked = await factory.start(job.id);
+  assert.equal(parked.error?.code, "run_budget_reached");
+  assert.equal(stages.length, 2, "the first turn reported no cost; $2 is over $1.50, so the third worker never started");
+  assert.match(parked.error.message, /spent about \$2\.00, the ceiling of \$1.5 \(SOLOFACTORY_MAX_RUN_COST_USD\).*Resume allows another \$1.5/);
+  assert.match(parked.error.details.diagnostics[0].title, /Run cost ceiling reached/);
+
+  await factory.resume(job.id);
+  assert.equal((await store.read(job.id)).costAllowance, 3.5, "spent $2 plus one more $1.50 allotment");
+  assert.ok(stages.length >= 3, "Resume let work continue past the first ceiling");
+});

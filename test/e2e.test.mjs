@@ -57,6 +57,25 @@ test("HTTP journey goes from Guide turn to a reachable generated app", async (t)
   assert.match(await prd.text(), /Pocket Pulse/);
 });
 
+test("the Guide conversation survives leaving the interview until Start or Start over", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-draft-"));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true });
+  const base = await listen(app, t);
+  const config = await getJson(`${base}/api/config`);
+  const transcript = [{ role: "assistant", content: config.opening.message }, { role: "user", content: "A daily tracker." }];
+  assert.equal((await getJson(`${base}/api/interview/draft`)).draft, null);
+  const guide = await postJson(`${base}/api/interview/turn`, { provider: "fixture", messages: transcript });
+  const { draft } = await getJson(`${base}/api/interview/draft`);
+  assert.deepEqual(draft.guide.brief, guide.brief);
+  assert.deepEqual(draft.messages.at(-1), { role: "assistant", content: guide.message });
+  assert.equal(draft.provider, "fixture");
+  await fetch(`${base}/api/interview/draft`, { method: "DELETE" });
+  assert.equal((await getJson(`${base}/api/interview/draft`)).draft, null, "Start over discards it");
+  await postJson(`${base}/api/interview/turn`, { provider: "fixture", messages: transcript });
+  await postJson(`${base}/api/jobs`, { provider: "fixture", transcript, coverage: guide.coverage, brief: guide.brief });
+  assert.equal((await getJson(`${base}/api/interview/draft`)).draft, null, "Start clears it");
+});
+
 test("a brief posted straight to /api/jobs gets the Guide's notices", async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-direct-"));
   const app = await createSoloFactoryServer({ home, fixtureMode: true });

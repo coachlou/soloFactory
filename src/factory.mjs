@@ -211,8 +211,11 @@ export class SoloFactory {
       const job = await this.store.read(jobId).catch(() => null);
       // Every owner continuation (Resume, retry plan, approve, restart) after the worker ceiling consents to another allotment;
       // granting only in Resume left a ceiling hit during repair planning with no way forward (the plan retry hit it again).
-      const grant = job?.error?.code === "run_budget_reached" && maxRunWorkers();
-      if (grant) job.workerAllowance = job.error.details.workers + grant;
+      const grant = job?.error?.code === "run_budget_reached";
+      if (grant) {
+        if (maxRunWorkers()) job.workerAllowance = job.error.details.workers + maxRunWorkers();
+        if (maxRunCostUsd()) job.costAllowance = (job.error.details.costUsd ?? 0) + maxRunCostUsd();
+      }
       if (grant || job?.watch?.incident || job?.watch?.observed) {
         delete job.watch?.incident; delete job.watch?.observed;
         await this.store.writeState(job);
@@ -1180,18 +1183,26 @@ export class SoloFactory {
     }
   }
 
-  // Backstop for a whole run: every worker spawns through invoke(), so the ceiling is checked here once.
-  // The count is the run's agent.started events; Resume after this stop raises job.workerAllowance by one ceiling.
+  // Backstop for a whole run: every worker spawns through invoke(), so the ceilings are checked here once.
+  // Workers are the run's agent.started events; cost is the CLI's own figure (knownCostUsd). Resume after
+  // either stop raises both allowances by one ceiling.
   async assertWorkerBudget(job) {
     const ceiling = maxRunWorkers();
-    if (!ceiling) return;
+    const costCeiling = maxRunCostUsd();
+    if (!ceiling && !costCeiling) return;
     const events = await this.store.events(job.id, Infinity);
     const workers = events.filter((event) => event.type === "agent.started").length;
-    if (workers < (job.workerAllowance ?? ceiling)) return;
+    const costUsd = knownCostUsd(events);
+    const overWorkers = ceiling && workers >= (job.workerAllowance ?? ceiling);
+    const overCost = costCeiling && costUsd >= (job.costAllowance ?? costCeiling);
+    if (!overWorkers && !overCost) return;
     const spend = runSpend(job, events, this.maxRepairs);
-    throw new FactoryError("run_budget_reached", `This run has started ${workers} workers, the ceiling of ${ceiling} (SOLOFACTORY_MAX_RUN_WORKERS). So far: ${spendLine(spend)}. Resume allows another ${ceiling} workers.`, {
-      workers, ceiling, spend,
-      diagnostics: [{ code: "run_budget_reached", title: `Run worker ceiling reached (${workers} workers)`, action: `Review the spend so far (${spendLine(spend)}). Resume grants another ${ceiling} workers; the preserved files and session are kept.` }],
+    const [what, grant, title] = overWorkers
+      ? [`started ${workers} workers, the ceiling of ${ceiling} (SOLOFACTORY_MAX_RUN_WORKERS)`, `another ${ceiling} workers`, `Run worker ceiling reached (${workers} workers)`]
+      : [`spent about $${costUsd.toFixed(2)}, the ceiling of $${costCeiling} (SOLOFACTORY_MAX_RUN_COST_USD)`, `another $${costCeiling}`, `Run cost ceiling reached ($${costUsd.toFixed(2)})`];
+    throw new FactoryError("run_budget_reached", `This run has ${what}. So far: ${spendLine(spend)}. Resume allows ${grant}.`, {
+      workers, ceiling, costUsd, costCeiling, spend,
+      diagnostics: [{ code: "run_budget_reached", title, action: `Review the spend so far (${spendLine(spend)}). Resume grants ${grant}; the preserved files and session are kept.` }],
     });
   }
 
@@ -2182,6 +2193,17 @@ export function usageTotals(events) {
     total = addUsage(total, event.usage);
   }
   return { total, byStage, turnsWithoutUsage };
+}
+
+// List-price dollars per run before it parks for the owner; 0 disables. Claude reports this figure even on a
+// subscription, so it tracks weekly-limit use; Codex reports none, so a Codex run is held by the worker ceiling.
+// Member run 2026-11-03 spent ~$64 across three usage windows before anyone was asked.
+export const maxRunCostUsd = () => /^\d+(\.\d+)?$/.test(process.env.SOLOFACTORY_MAX_RUN_COST_USD ?? "") ? Number(process.env.SOLOFACTORY_MAX_RUN_COST_USD) : 30;
+
+// Sum of the cost every turn reported. Unlike addUsage, a turn with no figure (killed, Codex) is skipped
+// rather than making the total unknown, so the ceiling keeps working after one killed worker: a lower bound.
+export function knownCostUsd(events) {
+  return events.reduce((sum, event) => sum + (USAGE_EVENTS.has(event.type) && typeof event.usage?.costUsd === "number" ? event.usage.costUsd : 0), 0);
 }
 
 // Workers per run; 0 disables the ceiling. Read per call so tests and an owner restart can change it.

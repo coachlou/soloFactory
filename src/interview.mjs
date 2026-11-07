@@ -200,6 +200,8 @@ const UNPROVABLE = [
   { re: /\.exe\b|scheduled task|task scheduler|windows registry|registry key|start menu|desktop shortcut|desktop notification|toast notification|\buninstall|\bcrontab\b|\blaunchd\b|\bsystemd\b/i, unless: /\b(log|logs|logged|record|records|recorded)\b/i, reason: "changes the operating system; have the app log the command and check the log" },
   { re: /\b(gmail|imap|smtp|pop3|outlook|oauth|webhook)\b|https?:\/\//i, unless: /\b(fixtures?|sample|saved|localhost)\b|127\.0\.0\.1/i, reason: "needs a live service or account; read a saved sample file in data/fixtures/ instead" },
   { re: /\b\d{1,2}:\d{2}\b|\bevery (morning|evening|night|hour)\b/i, unless: /\bclock\b/i, reason: "depends on the real time of day; set a test clock to a fixed date and time" },
+  // Member brief 2026-11-07: "recordings up to 6 hours" passed the scan; each proof gate is capped at 5 minutes.
+  { re: /\b\d+(\.\d+)?[\s-]*(hours?|hrs?|days?|weeks?|months?)\b/i, unless: /\b(clock|sample|fixture|setting)\b/i, reason: "needs hours or days of real time or media, longer than a test can run; prove it on a short sample or with a test clock, and make the long limit a setting" },
 ];
 
 export function briefChecks(brief) {

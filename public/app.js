@@ -37,6 +37,7 @@ async function boot() {
   const candidate = state.jobs.find((job) => job.id === savedId)
     ?? state.jobs.find((job) => PARKED.includes(job.state));
   if (candidate) await selectRun(candidate.id);
+  else await restoreDraft();
   // ponytail: /api/projects reads every run's state.json; fine for a handful of projects, paginate if it ever isn't
   setInterval(() => refreshProjects().catch(() => {}), 5000);
 }
@@ -269,7 +270,28 @@ function showInterview() {
   renderCoverage();
   renderRuns();
   renderBackgroundBanner();
+  restoreDraft().catch(showError);
 }
+
+// The server saves the Guide conversation per project after every turn, so leaving the interview
+// (board, a run, another project, a reload) no longer loses it. Start or Start over clears it.
+async function restoreDraft() {
+  const { draft } = await api("/api/interview/draft");
+  if (!draft || state.job || state.messages.length > 1) return;
+  state.guide = draft.guide;
+  state.messages = draft.messages;
+  if (state.config.providers.some((provider) => provider.id === draft.provider && provider.authenticated)) state.provider = draft.provider;
+  renderProviders();
+  renderMessages();
+  renderCoverage();
+  if (state.guide.status === "ready") showReview();
+}
+
+$("#discard-draft").addEventListener("click", async () => {
+  if (!confirm("Discard this conversation and its brief and start a new one?")) return;
+  await api("/api/interview/draft", { method: "DELETE" }).catch(showError);
+  showInterview();
+});
 
 function resetRunPanels() {
   for (const id of ["request-total", "error-total", "latency-average", "app-uptime"]) $(`#${id}`).textContent = "—";
@@ -298,6 +320,7 @@ function renderProviders() {
 }
 
 function renderMessages(thinking = false) {
+  $("#discard-draft").classList.toggle("hidden", state.messages.length < 2);
   const container = $("#messages");
   container.replaceChildren(...state.messages.map((message) => {
     const item = document.createElement("div");
@@ -539,6 +562,11 @@ function renderJob() {
     : job.queuePosition
       ? `Queued #${job.queuePosition}${job.queuedFor === "resume" ? " to resume" : ""}; starts when this project's current run finishes.`
       : job.error?.message || statusCopy(job.state);
+  // Notes the brief was queued with (size, unprovable checks): shown here too, since a brief posted
+  // by an agent never passed the review screen.
+  const notices = job.notices ?? [];
+  $("#run-notices").classList.toggle("hidden", !notices.length);
+  $("#run-notices").replaceChildren(...notices.map((text) => Object.assign(document.createElement("li"), { textContent: text })));
   const progressState = PARKED.includes(job.state) ? job.failedState : job.state;
   const rail = railMarks(progressState);
   document.querySelectorAll(".stages li").forEach((item) => {

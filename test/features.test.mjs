@@ -6,7 +6,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import os from "node:os";
 import { JobStore } from "../src/store.mjs";
-import { SoloFactory, continuationAction, withContinuation } from "../src/factory.mjs";
+import { BUILD_ID, SoloFactory, continuationAction, withContinuation } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
 import { digest } from "../src/feature-recovery.mjs";
 import { watchConfig } from "../src/watchdog.mjs";
@@ -1163,6 +1163,14 @@ test("an ordinary gate failure with repairs left continues with Resume", () => {
   assert.equal(continuationAction({ ...other, recoveryPhase: { status: "running", cursor: null } }, { maxRepairs: 2 }).action, "prepare-plan", "recovery batch");
   const bug = { id: "BUG-1", proof: { command: ["node", "--test", "qa/x.test.mjs"] }, description: "x" };
   assert.equal(continuationAction({ ...other, bugProofs: [bug] }, { maxRepairs: 2 }).alternatives?.[0]?.proof, "BUG-1", "the waiver stays offered beside the rerun");
+});
+
+// A stale-build rerun whose runner crashes after its tests pass parks as gate_infrastructure (consolidation.test.mjs
+// pins the verify side). The park must stay a Resume, even with the repair budget spent: no plan can fix the harness.
+test("a runner crash parked by a rerun is resumed, never planned around, whatever the repair budget", () => {
+  const job = { id: "j", state: "failed", planVersion: 2, error: { code: "gate_infrastructure", details: { gate: "test", build: BUILD_ID } } };
+  for (const attempt of [0, 2]) assert.equal(continuationAction({ ...job, attempt }, { maxRepairs: 2 }).action, "resume", `attempt ${attempt}`);
+  assert.equal(continuationAction({ ...job, attempt: 2, error: { ...job.error, details: { gate: "test", build: "0.10.1+0000000" } } }, { maxRepairs: 2 }).action, "resume", "recorded on another build");
 });
 
 test("a build that hits the safety cap while changing files continues once in its own session", async () => {

@@ -1,5 +1,5 @@
 import http from "node:http";
-import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JobStore } from "./store.mjs";
@@ -43,6 +43,9 @@ export async function createSoloFactoryServer(options = {}) {
     await mkdir(home, { recursive: true }).then(() => appendFile(errorLog, `${JSON.stringify(line)}\n`)).catch(() => {});
   }
   let active; // { id, dir } — the project the owner is viewing; job endpoints default to its store
+  // The interview in progress, per project: until Start it lived only in the tab, so a reload,
+  // the board or a project switch lost a ready brief (member report, 2026-11).
+  const draftFile = (dir) => path.join(dir, ".factory", "draft-brief.json");
   let store;
   const stores = new Map();
   const storeFor = (id) => stores.get(id) ?? stores.set(id, new JobStore(path.join(root, id))).get(id);
@@ -294,6 +297,7 @@ export async function createSoloFactoryServer(options = {}) {
         const body = await readJson(request);
         const provider = requireProvider(body.provider, fixtureMode);
         const messages = validateMessages(body.messages);
+        const dir = active.dir; // the project this turn belongs to, even if the owner switches mid-turn
         const latest = (await store.list())[0];
         const current = latest ? await withReviewDiagnostics(latest, active.dir) : null;
         const runContext = current ? {
@@ -315,7 +319,14 @@ export async function createSoloFactoryServer(options = {}) {
           logPath: path.join(active.dir, ".aai", "memory", "interviews", "guide.log"),
           context: { stage: "interview" },
         }), { skill, messages, runContext });
+        await mkdir(path.dirname(draftFile(dir)), { recursive: true });
+        await writeFile(draftFile(dir), JSON.stringify({ provider, messages: [...messages, { role: "assistant", content: result.message }], guide: result }, null, 2));
         return json(response, 200, result);
+      }
+      if (url.pathname === "/api/interview/draft" && ["GET", "DELETE"].includes(request.method)) {
+        if (request.method === "DELETE") { await rm(draftFile(active.dir), { force: true }); return json(response, 200, { draft: null }); }
+        const draft = await readFile(draftFile(active.dir), "utf8").then(JSON.parse).catch(() => null);
+        return json(response, 200, { draft });
       }
       if (request.method === "POST" && url.pathname === "/api/errors") {
         const body = await readJson(request);
@@ -373,6 +384,7 @@ export async function createSoloFactoryServer(options = {}) {
         const notices = briefNotices(validated.brief);
         const job = await store.create({ brief: validated.brief, transcript: body.transcript, provider, sdlc, notices });
         await enqueue(active.id, job.id);
+        await rm(draftFile(active.dir), { force: true });
         const [annotated] = await annotateJobs(active.id, [await store.read(job.id)]);
         return json(response, 202, { job: annotated, notices });
       }

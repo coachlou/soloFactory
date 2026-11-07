@@ -1,3 +1,14 @@
+## 0.10.11: cost ceiling, saved drafts, long-duration checks (2026-11-07)
+
+From one member's report: a brief was lost when the browser tab closed, and a 20-check run spent about $64 of reported cost over three usage windows before anyone was asked.
+
+- The Guide's draft brief is saved to `.factory/draft-brief.json` as the interview goes; reopening the page restores it, *Start over* clears it, and starting a run deletes it.
+- A run parks as *Run cost ceiling reached* (`run_budget_reached`) once the cost Claude reports for it reaches `SOLOFACTORY_MAX_RUN_COST_USD` (default 30, `0` off). Turns with no figure (killed, Codex) are skipped, so the sum is a lower bound; Resume grants another allotment of both ceilings.
+- The brief scan flags checks that need hours or days of real time or media ("recordings up to 6 hours", "delete after 30 days") and the Guide rewrites them to a short sample or a test clock, with the long limit as a setting.
+- The run dashboard lists `job.notices` under the subtitle.
+- Also shipped (from 8d9ad6f): killed workers' usage counts toward the run's totals, `Bash(node:*)` is allowed, and old projects' lead instructions are refreshed.
+- A unit test pins that a `gate_infrastructure` park always offers Resume. The end-to-end path (stale-build rerun whose runner crashes) is not run by the fixture harness, whose gates are not cased.
+
 ## 0.10.10: notices for chat-posted briefs (2026-11-06)
 
 A brief posted straight to `POST /api/jobs` (the chat path, no Guide turn) skipped the brief scan, so unprovable checks (live Gmail, scheduled tasks, fixed drive paths) and the over-12-checks warning never showed. The handler now runs the same brief notices as the Guide's review screen, returns them in the `202 {job, notices}` response and stores them as `job.notices`; it never blocks. `/retry` carries the notices onto the new job, and drive.md documents both.
