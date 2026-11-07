@@ -275,6 +275,10 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
       "Bash(node --test:*)", "Bash(node:*)", "Bash(ls:*)", "Bash(git ls-files:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", ...proofs);
   }
   if (schema) args.push("--json-schema", JSON.stringify(schema));
+  // Tool round trips per turn. 320 real turns (2026-09..11 logs) used p50 18, p99 77, max 141, so the default only
+  // stops a turn that is going round in circles; the 45-minute cap still bounds time. 0 turns it off.
+  const maxTurns = claudeMaxTurns();
+  if (maxTurns) args.push("--max-turns", String(maxTurns));
   let sessionId = resumeSessionId;
   // Usage per assistant message, kept so a killed turn still reports what it spent (see partialClaudeUsage).
   const spent = new Map();
@@ -300,6 +304,15 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
       if (event) onEvent?.(event);
     },
   });
+  // At the cap Claude ends with an error_max_turns result (exit code varies by CLI version). It is not a timeout:
+  // no automatic continuation, so a turn that went round in circles is not given another lap.
+  const capped = result.lines.map((line) => claudeStreamLine(line).record).findLast((record) => record?.type === "result" && record.subtype === "error_max_turns");
+  if (capped) {
+    const error = new Error(`Claude Code used its ${maxTurns}-step limit for one turn without finishing. Partial work is preserved. Resume starts a fresh turn; raise SOLOFACTORY_AGENT_MAX_TURNS if this work genuinely needs more steps.`);
+    error.code = "agent_turn_cap";
+    error.details = { provider: "Claude Code", logPath, sessionId: capped.session_id ?? sessionId, maxTurns, numTurns: capped.num_turns ?? null, usage: claudeUsage(capped), durationMs: result.durationMs, canResume: true };
+    throw error;
+  }
   if (result.code !== 0) {
     throw providerFailure({
       provider: "Claude Code",
@@ -502,6 +515,13 @@ function providerFailure({ provider, result, diagnostics, logPath, sessionId, us
     canResume: Boolean(sessionId),
   };
   return error;
+}
+
+export function claudeMaxTurns(env = process.env) {
+  const raw = env.SOLOFACTORY_AGENT_MAX_TURNS;
+  if (raw === undefined || raw === "") return 150;
+  if (!/^\d+$/.test(raw) || Number(raw) > 1000) throw new Error(`SOLOFACTORY_AGENT_MAX_TURNS must be a whole number from 0 to 1000 (got "${raw}").`);
+  return Number(raw);
 }
 
 function minutesFromEnv(name, fallback) {

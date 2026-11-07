@@ -178,8 +178,14 @@ file never leaves your machine; `GET /api/errors?limit=50` returns the latest en
 - The one automatic continuation per stage is recorded in the run before it is dispatched, so
   Resume or a restart never grants another. When the same check fails the same way
   `SOLOFACTORY_LOOP_THRESHOLD` times (default 3, 2–10) on unchanged code, the factory stops
-  repairing and says so instead of spending the rest of the repair budget. Repairs that do
-  change the code are still bounded by the normal budget.
+  repairing and says so instead of spending the rest of the repair budget. When repairs do
+  change the code but the same check keeps failing the same way `SOLOFACTORY_SYMPTOM_THRESHOLD`
+  times in a row (default 4, 0–20, 0 turns it off; line numbers are ignored), the factory stops
+  too. With the default budget of two repairs this never fires first; it guards a raised or
+  re-granted budget.
+- Each Claude turn is limited to `SOLOFACTORY_AGENT_MAX_TURNS` tool steps (default 150, 0–1000,
+  0 turns it off). Real turns have used at most 141, most under 45. A turn that reaches the limit
+  parks the run with `agent_turn_cap` and is not continued automatically; Resume starts a fresh turn.
 - A whole run is capped at `SOLOFACTORY_MAX_RUN_WORKERS` workers (default 150, `0` turns it
   off), at `SOLOFACTORY_MAX_RUN_COST_USD` dollars of reported cost (default 30, `0` turns
   it off; Claude reports this list-price figure even on a subscription, Codex reports none),

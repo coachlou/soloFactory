@@ -306,8 +306,16 @@ Only one job may be active because the target user does not benefit from resourc
 - Loops: every completed failed gate attempt is recorded in `job.watch.attempts` before any
   repair (scope, code, gate, checks, normalized output digest, source candidate). When the
   last `SOLOFACTORY_LOOP_THRESHOLD` attempts in a scope are identical on the same candidate,
-  repair stops with the original error code and `details.loop`. An unknown candidate never
-  counts. History is never cleared by Resume or restart.
+  repair stops with the original error code and `details.loop` (`kind: "unchanged"`). An unknown
+  candidate never counts. History is never cleared by Resume or restart.
+- Symptoms: each attempt also records a symptom digest, the output with line and column numbers
+  removed as well. When the last `SOLOFACTORY_SYMPTOM_THRESHOLD` attempts in a scope (default 4,
+  0–20, 0 off) share one symptom whatever the candidate, repair stops with `details.loop`
+  (`kind: "symptom"`): repairs keep changing files without changing the outcome. The default sits
+  above the default budget's three failures, so it stops only budgets that were raised or
+  re-granted. Attempts recorded before symptoms existed never count.
+- Claude turns pass `--max-turns` (`SOLOFACTORY_AGENT_MAX_TURNS`, default 150, 0–1000, 0 off). A
+  turn that reaches it fails with `agent_turn_cap` and gets no automatic continuation.
 - A parked run keeps `job.watch.observed` and a bounded, redacted `job.watch.incident`
   (trigger, cursor, observed, uncertain, tried, preserved, next action, fingerprint,
   attempts, logs) that the recovery packet includes.

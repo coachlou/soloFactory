@@ -1,3 +1,11 @@
+## Unreleased: token and loop guards (2026-11-07, branch feat/token-loop-guards off b395f1d)
+
+From a member's Windows (WSL2) Claude build that used a week of subscription usage. The run ceilings (workers, cost, tokens) and the `/dev/null` fix (0.10.2) already cover most of it; three gaps remained, now closed:
+- `claude -p` gets `--max-turns` (`SOLOFACTORY_AGENT_MAX_TURNS`, default 150, 0 off). 320 real turns in local logs: p50 18, p90 42, p99 77, max 141. An `error_max_turns` result (exit 0 or 1) fails as `agent_turn_cap`, never a hard-timeout continuation.
+- Symptom loop: attempts record a `symptom` digest (output with `:line:col` and `line N` removed too). `repeatedSymptom` stops repair when the last `SOLOFACTORY_SYMPTOM_THRESHOLD` (default 4, 0–20, 0 off) attempts in a scope share it whatever the candidate; `details.loop.kind` is `symptom` or `unchanged`. Default 4 never fires before the default budget (3 failures); it guards raised or re-granted budgets. Recovery card, incident and `nextAction` wording follow the kind.
+- drive.md: poll every 5 minutes, stop after 2 hours without change, one Resume/retry/recovery-plan per owner yes.
+- Tests: watchdog (symptom unit, controller stop at attempt 3 with budget 6, default budget unaffected), telemetry (argv, cap at exit 0 and 1, 0 off, invalid value). Not exercised: a real Claude CLI reaching `--max-turns`.
+
 ## 0.11.0-alpha.1: Brief page alpha for testers (2026-11-12)
 
 Alpha release candidate, sent to testers as a zip only. Not merged to `main`, not published to AIMM, so the update pill never offers it to other members. It holds the new Brief page and everything below that was unreleased after 0.10.17.

@@ -9,7 +9,7 @@ import { JobStore } from "../src/store.mjs";
 import { buildRecoveryPacket, continuationAction, SoloFactory } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
 import { createProvider } from "../src/providers.mjs";
-import { normalizeFailure, repeatedFailure, RunMonitor, supervisionStatus, watchConfig, workerAlive } from "../src/watchdog.mjs";
+import { normalizeFailure, normalizeSymptom, repeatedFailure, repeatedSymptom, RunMonitor, supervisionStatus, watchConfig, workerAlive } from "../src/watchdog.mjs";
 
 const brief = { workingName: "Pocket Pulse", acceptanceScenarios: ["A user records a score."] };
 const transcript = [{ role: "user", content: "A daily tracker." }];
@@ -22,10 +22,11 @@ async function newJob(prefix) {
 }
 
 test("settings are validated with documented defaults and ranges", () => {
-  assert.deepEqual(watchConfig({}), { progressMs: 20 * 60_000, loopThreshold: 3, gateMs: 5 * 60_000, tickMs: 15_000 });
+  assert.deepEqual(watchConfig({}), { progressMs: 20 * 60_000, loopThreshold: 3, symptomThreshold: 4, gateMs: 5 * 60_000, tickMs: 15_000 });
+  assert.equal(watchConfig({ SOLOFACTORY_SYMPTOM_THRESHOLD: "0" }).symptomThreshold, 0);
   assert.equal(watchConfig({ SOLOFACTORY_PROGRESS_MINUTES: "0" }).progressMs, 0);
   assert.equal(watchConfig({ SOLOFACTORY_GATE_MINUTES: "20" }).gateMs, 20 * 60_000);
-  for (const env of [{ SOLOFACTORY_PROGRESS_MINUTES: "241" }, { SOLOFACTORY_PROGRESS_MINUTES: "-1" }, { SOLOFACTORY_LOOP_THRESHOLD: "1" }, { SOLOFACTORY_LOOP_THRESHOLD: "abc" }, { SOLOFACTORY_GATE_MINUTES: "0" }, { SOLOFACTORY_GATE_MINUTES: "61" }]) {
+  for (const env of [{ SOLOFACTORY_PROGRESS_MINUTES: "241" }, { SOLOFACTORY_PROGRESS_MINUTES: "-1" }, { SOLOFACTORY_LOOP_THRESHOLD: "1" }, { SOLOFACTORY_LOOP_THRESHOLD: "abc" }, { SOLOFACTORY_GATE_MINUTES: "0" }, { SOLOFACTORY_GATE_MINUTES: "61" }, { SOLOFACTORY_SYMPTOM_THRESHOLD: "21" }]) {
     assert.throws(() => watchConfig(env), /must be a whole number/);
   }
 });
@@ -74,6 +75,20 @@ test("failure identity ignores volatile output; unknown or changed candidates ar
   assert.equal(repeatedFailure([{ ...a, candidate: null }, { ...a, candidate: null }, { ...a, candidate: null }], 3), null);
   assert.equal(repeatedFailure([a, { ...a, candidate: "c2" }, a], 3), null);
   assert.equal(repeatedFailure([a, { ...a, digest: "e" }, a], 3), null);
+});
+
+test("a symptom is the same failure whatever the code; moved lines still match, legacy attempts never count", () => {
+  assert.equal(normalizeSymptom("at src/app.js:12:5 expected 3 on line 40"), normalizeSymptom("at src/app.js:97:11 expected 3 on line 7"));
+  assert.notEqual(normalizeSymptom("expected 3"), normalizeSymptom("expected 4"));
+  const a = { scope: "S1:test", code: "quality_gate_failed", gate: "test", checks: ["c"], digest: "d", symptom: "s", candidate: "c1" };
+  const changing = [1, 2, 3, 4].map((n) => ({ ...a, candidate: `c${n}`, digest: `d${n}` }));
+  assert.equal(repeatedFailure(changing, 3), null, "changed code is never an unchanged loop");
+  assert.equal(repeatedSymptom(changing, 4).kind, "symptom");
+  assert.equal(repeatedSymptom(changing.slice(1), 4), null);
+  assert.equal(repeatedSymptom(changing, 0), null, "0 turns it off");
+  assert.equal(repeatedSymptom([...changing.slice(0, 3), { ...a, symptom: "other" }], 4), null);
+  assert.equal(repeatedSymptom(changing.map(({ symptom, ...rest }) => rest), 4), null);
+  assert.equal(repeatedFailure([a, a, a], 3).kind, "unchanged");
 });
 
 // Fails every test gate with output whose timestamps differ, so only normalization makes them equal.
@@ -139,11 +154,43 @@ test("controller: repairs that change code are not a loop and stay bounded by th
     if (/^repair-/.test(options.context.stage)) await writeFile(path.join(options.cwd, `attempt-${(n += 1)}.txt`), String(n));
     return fixture.run(options);
   } };
-  const factory = new SoloFactory({ store, provider, commandRunner: failingTests, maxRepairs: 4, watch: config, deployer: async () => { throw new Error("must not deploy"); } });
+  const factory = new SoloFactory({ store, provider, commandRunner: failingTests, maxRepairs: 4, watch: { ...config, symptomThreshold: 0 }, deployer: async () => { throw new Error("must not deploy"); } });
   const result = await factory.start(job.id);
   assert.equal(result.state, "failed");
   assert.equal(result.error.details.loop, undefined);
   assert.equal(result.attempt, 4, "the original repair budget still bounds changing attempts");
+});
+
+test("controller: repairs that change code but keep failing the same way stop at the symptom threshold", async () => {
+  const { store, job } = await newJob("solo-watch-symptom-");
+  const fixture = createFixtureProvider();
+  let n = 0;
+  const provider = { id: "fixture", async run(options) {
+    if (/^repair-/.test(options.context.stage)) await writeFile(path.join(options.cwd, `attempt-${(n += 1)}.txt`), String(n));
+    return fixture.run(options);
+  } };
+  const factory = new SoloFactory({ store, provider, commandRunner: failingTests, maxRepairs: 6, watch: { ...config, symptomThreshold: 4 }, deployer: async () => { throw new Error("must not deploy"); } });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "failed");
+  assert.equal(result.error.details.loop.kind, "symptom");
+  assert.equal(result.attempt, 3, "three changing repairs failed the same way; the fourth is never dispatched");
+  assert.match(result.error.message, /although repairs changed the code/);
+  assert.match(result.watch.incident.observed, /although repairs changed the code/);
+  assert.match(continuationAction(result, { maxRepairs: 6 }).reason, /SOLOFACTORY_SYMPTOM_THRESHOLD/);
+});
+
+test("controller: with the default budget the symptom stop never fires before the budget does", async () => {
+  const { store, job } = await newJob("solo-watch-symptom-default-");
+  const fixture = createFixtureProvider();
+  let n = 0;
+  const provider = { id: "fixture", async run(options) {
+    if (/^repair-/.test(options.context.stage)) await writeFile(path.join(options.cwd, `attempt-${(n += 1)}.txt`), String(n));
+    return fixture.run(options);
+  } };
+  const factory = new SoloFactory({ store, provider, commandRunner: failingTests, watch: { ...config, symptomThreshold: 4 }, deployer: async () => { throw new Error("must not deploy"); } });
+  const result = await factory.start(job.id);
+  assert.equal(result.error.details.loop, undefined);
+  assert.equal(result.attempt, 2);
 });
 
 test("controller: the progress window warns but never stops a run, and monitoring ends with it", async () => {

@@ -223,3 +223,36 @@ test("concurrent event appends land whole and in call order", async () => {
   const lines = (await readFile(path.join(store.jobDir("j"), "events.jsonl"), "utf8")).split("\n").filter(Boolean);
   assert.deepEqual(lines.map((line) => JSON.parse(line).n), Array.from({ length: 200 }, (_, n) => n));
 });
+
+test("Claude turns carry a step limit, and a turn that hits it parks as agent_turn_cap with no continuation", async () => {
+  const saved = process.env.SOLOFACTORY_AGENT_MAX_TURNS;
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "sf-claude-turn-cap-"));
+  const capture = path.join(cwd, "args.json");
+  const capped = { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 151, session_id: "s-cap",
+    usage: { input_tokens: 10, output_tokens: 5 } };
+  try {
+    delete process.env.SOLOFACTORY_AGENT_MAX_TURNS;
+    // Exit code 0 and 1 both seen across CLI versions; either way the cap is reported, not a generic failure.
+    for (const exit of [0, 1]) {
+      const error = await withFakeCli("claude", `require("node:fs").writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2)));
+process.stdin.resume(); process.stdin.on("end", () => { console.log(${JSON.stringify(JSON.stringify(capped))}); process.exit(${exit}); });`,
+        () => createProvider("claude").run({ cwd, prompt: "ok", logPath: path.join(cwd, "log.txt"), context: { stage: "build" } }).then(() => null, (e) => e));
+      assert.equal(error?.code, "agent_turn_cap", `exit ${exit}`);
+      assert.equal(error.details.maxTurns, 150);
+      assert.equal(error.details.sessionId, "s-cap");
+      assert.equal(error.details.usage.outputTokens, 5);
+      const args = JSON.parse(await readFile(capture, "utf8"));
+      assert.equal(args[args.indexOf("--max-turns") + 1], "150");
+    }
+    process.env.SOLOFACTORY_AGENT_MAX_TURNS = "0";
+    await withFakeCli("claude", `require("node:fs").writeFileSync(${JSON.stringify(capture)}, JSON.stringify(process.argv.slice(2)));
+process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({type:"result",result:"ok"})));`,
+      () => createProvider("claude").run({ cwd, prompt: "ok", logPath: path.join(cwd, "log.txt") }));
+    assert.equal(JSON.parse(await readFile(capture, "utf8")).includes("--max-turns"), false, "0 turns the limit off");
+    process.env.SOLOFACTORY_AGENT_MAX_TURNS = "lots";
+    const { claudeMaxTurns } = await import("../src/providers.mjs");
+    assert.throws(() => claudeMaxTurns(), /SOLOFACTORY_AGENT_MAX_TURNS must be a whole number/);
+  } finally {
+    if (saved === undefined) delete process.env.SOLOFACTORY_AGENT_MAX_TURNS; else process.env.SOLOFACTORY_AGENT_MAX_TURNS = saved;
+  }
+});

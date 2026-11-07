@@ -156,8 +156,11 @@ curl -s localhost:4173/api/jobs/<id>/telemetry    # stage timings and token use
 curl -s localhost:4173/api/board                  # every project, by column
 ```
 
-A build takes minutes to hours. Check about once a minute, not in a tight loop. Report stage
-changes in one line each. When `state` is `completed`, give the owner `job.deployment.url`.
+A build takes minutes to hours, and every check you make is a model turn on the owner's
+subscription. Check about every 5 minutes, never in a tight loop, and read `/telemetry` only when
+the stage changes. If nothing has changed for 2 hours, tell the owner the build is still running,
+point them at the dashboard, and stop checking until they ask. For a long build, suggest the
+dashboard: it watches the run for free. Report stage changes in one line each. When `state` is `completed`, give the owner `job.deployment.url`.
 Artifacts are at `/api/jobs/<id>/artifacts/{prd,plan,acceptance,requirements,slices,manifest}`.
 
 A queued job with `blockedBy` is waiting behind a parked run in the same project. Tell the owner
@@ -215,7 +218,11 @@ run, so Pause an active one first. `/recovery-plan` takes optional `guidance` (u
 characters) to revise a plan; the old one then can't be approved. The original full-contract
 review still gates deployment. The Guide can explain this state; chat text does not run it.
 
-Do not loop Resume after repeated review rejection; follow `nextAction`.
+Do not loop Resume after repeated review rejection; follow `nextAction`. Call `/resume`, `/retry` or
+`/recovery-plan` at most once per yes from the owner: a run that parks again needs a new yes.
+`details.loop.kind: "symptom"` (the same failure although repairs changed the code) and
+`agent_turn_cap` (a turn used its step limit) mean more of the same work will not help: explain
+the failure and its spend before offering anything.
 
 **Safeguards** hold even when the owner asks for a shortcut:
 - Never mark a live plan failed, fake an input change to unlock planning, or reset spent repair

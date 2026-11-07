@@ -19,6 +19,9 @@ export function watchConfig(env = process.env) {
     // 0 turns the progress warning off; idle and hard caps still bound every worker.
     progressMs: read("SOLOFACTORY_PROGRESS_MINUTES", 20, 0, 240) * 60_000,
     loopThreshold: read("SOLOFACTORY_LOOP_THRESHOLD", 3, 2, 10),
+    // Same failure although repairs changed the code. Default 4 sits above the default budget's 3 failures,
+    // so it only stops runs whose budget was raised or re-granted. 0 turns it off.
+    symptomThreshold: read("SOLOFACTORY_SYMPTOM_THRESHOLD", 4, 0, 20),
     // Hard limit for each test/proof gate (install keeps at least 10). Raised for slow aggregate proofs; still bounded.
     gateMs: read("SOLOFACTORY_GATE_MINUTES", 5, 1, 60) * 60_000,
     tickMs: 15_000,
@@ -39,6 +42,13 @@ export function normalizeFailure(text = "") {
     .slice(-8_000);
 }
 
+// The failure with code positions removed too, so a repair that only moved lines still reads as the same symptom.
+export function normalizeSymptom(text = "") {
+  return normalizeFailure(text)
+    .replace(/:\d+(?::\d+)?\b/g, ":<line>")
+    .replace(/\bline \d+\b/gi, "line <n>");
+}
+
 // A completed failed attempt: what failed, where, and on which source candidate.
 export function failureSignature(failure, { scope, candidate }) {
   const details = failure.details ?? {};
@@ -49,6 +59,7 @@ export function failureSignature(failure, { scope, candidate }) {
     gate: details.gate ?? null,
     checks: checks.length ? checks : [...(details.proofKeys ?? [])].sort(),
     digest: createHash("sha256").update(normalizeFailure(details.output ?? failure.message)).digest("hex").slice(0, 16),
+    symptom: createHash("sha256").update(normalizeSymptom(details.output ?? failure.message)).digest("hex").slice(0, 16),
     candidate,
   };
 }
@@ -59,7 +70,16 @@ export function repeatedFailure(attempts = [], threshold = 3) {
   const recent = attempts.slice(-threshold);
   if (recent.length < threshold || !recent[0].candidate) return null;
   const key = ({ scope, code, gate, checks, digest, candidate }) => JSON.stringify([scope, code, gate, checks, digest, candidate]);
-  return recent.every((item) => key(item) === key(recent[0])) ? { count: threshold, scope: recent[0].scope, gate: recent[0].gate, checks: recent[0].checks, candidate: recent[0].candidate, logs: recent.map((item) => item.log).filter(Boolean) } : null;
+  return recent.every((item) => key(item) === key(recent[0])) ? { kind: "unchanged", count: threshold, scope: recent[0].scope, gate: recent[0].gate, checks: recent[0].checks, candidate: recent[0].candidate, logs: recent.map((item) => item.log).filter(Boolean) } : null;
+}
+
+// The last `threshold` attempts in a scope are the same failure whatever the code: repairs keep changing
+// files without changing the outcome. Attempts recorded before symptoms existed never count.
+export function repeatedSymptom(attempts = [], threshold = 4) {
+  const recent = attempts.slice(-threshold);
+  if (!threshold || recent.length < threshold || !recent[0].symptom) return null;
+  const key = ({ scope, code, gate, checks, symptom }) => JSON.stringify([scope, code, gate, checks, symptom]);
+  return recent.every((item) => key(item) === key(recent[0])) ? { kind: "symptom", count: threshold, scope: recent[0].scope, gate: recent[0].gate, checks: recent[0].checks, candidate: null, logs: recent.map((item) => item.log).filter(Boolean) } : null;
 }
 
 // Pure status rule shared by the monitor, the API and the dashboard.
@@ -207,12 +227,12 @@ export function incidentRecord(job) {
     stage: job.failedState ?? null,
     cursor: job.recoveryPhase ? { recoveryPhase: job.recoveryPhase.id, status: job.recoveryPhase.status, feature: job.recoveryPhase.cursor?.id ?? null, substage: job.recoveryPhase.cursor?.substage ?? null }
       : job.featureCursor ? { feature: job.featureCursor.id, substage: job.featureCursor.substage } : null,
-    observed: clip(loop ? `${loop.gate ?? "A check"} failed the same way ${loop.count} times on unchanged code${loop.checks?.length ? ` (${loop.checks.join(", ")})` : ""}.`
+    observed: clip(loop ? `${loop.gate ?? "A check"} failed the same way ${loop.count} times ${loop.kind === "symptom" ? "although repairs changed the code" : "on unchanged code"}${loop.checks?.length ? ` (${loop.checks.join(", ")})` : ""}.`
       : details.timeoutReason === "idle" ? `${label} stopped producing output for ${minutes(details.idleForMs)}.`
       : details.timeoutReason === "hard" ? `${label} reached its ${minutes(details.durationMs)} safety cap.`
       : code === "worker_unconfirmed" ? `A worker from before the restart (pid ${details.pid}, ${details.label}) was still running.`
       : job.error?.message),
-    uncertain: loop ? "Whether another repair would help: the last repairs left the code unchanged."
+    uncertain: loop ? (loop.kind === "symptom" ? "Whether another repair would help: the last repairs changed the code but not the failure." : "Whether another repair would help: the last repairs left the code unchanged.")
       : details.timeoutReason === "idle" ? "Why the worker went quiet. Silence alone does not show a sign-in, quota or network problem."
       : code === "worker_unconfirmed" ? "Whether that worker is still writing to the workspace."
       : "Nothing beyond the recorded error.",

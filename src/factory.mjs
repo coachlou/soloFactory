@@ -14,7 +14,7 @@ import { contractDigest, originalChecks, preparePlanReview, prepareReview, runIn
 import { addUsage } from "./providers.mjs";
 import { CREDENTIAL_PATTERNS } from "./credentials.mjs";
 import { measureRun } from "./measure.mjs";
-import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, watchConfig, workerAlive } from "./watchdog.mjs";
+import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, repeatedSymptom, watchConfig, workerAlive } from "./watchdog.mjs";
 import { amendRepairPlan, archiveReview, assertBatch, consolidationBase, keepCorrecting, assertPlanningCurrent, digest, exhaustedPreparations, planFeatureRecovery, planKey, resumeAmendedReview, reviewedPlanKeys, runFeatureRecovery, sourceBaseline, validateRecoveryApproval, validateRecoveryPlan } from "./feature-recovery.mjs";
 
 // Which harness produced a run, so runs.jsonl can compare harness changes. Read once at load.
@@ -1576,10 +1576,12 @@ export class SoloFactory {
   // One repair turn against a recorded failure. Throws the failure itself once the budget is spent.
   async repair(job, failure, signal, slice = null, bugs = []) {
     await this.recordAttempt(job, failure, slice);
-    const loop = repeatedFailure(job.watch.attempts.filter((item) => item.scope === job.watch.attempts.at(-1).scope), this.watch.loopThreshold);
+    const scoped = job.watch.attempts.filter((item) => item.scope === job.watch.attempts.at(-1).scope);
+    const loop = repeatedFailure(scoped, this.watch.loopThreshold) ?? repeatedSymptom(scoped, this.watch.symptomThreshold ?? 4);
     if (loop) {
-      await this.emit(job.id, { type: "watchdog.decision", state: job.state, decision: "loop", message: `Stopped repeated work: ${failure.details?.gate ?? failure.code} failed the same way ${loop.count} times on unchanged code.` });
-      throw new FactoryError(failure.code ?? "quality_gate_failed", `${failure.message} The same failure repeated ${loop.count} times on unchanged code, so no further repair turn runs.`, { ...failure.details, loop });
+      const where = loop.kind === "symptom" ? "although repairs changed the code" : "on unchanged code";
+      await this.emit(job.id, { type: "watchdog.decision", state: job.state, decision: "loop", kind: loop.kind, message: `Stopped repeated work: ${failure.details?.gate ?? failure.code} failed the same way ${loop.count} times ${where}.` });
+      throw new FactoryError(failure.code ?? "quality_gate_failed", `${failure.message} The same failure repeated ${loop.count} times ${where}, so no further repair turn runs.`, { ...failure.details, loop });
     }
     if (job.attempt >= (job.repairBudgetLimit ?? this.maxRepairs)) throw failure;
     job.attempt += 1;
@@ -2104,6 +2106,9 @@ export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
   if (repairsExhausted(job, maxRepairs)) return { ...next("prepare-plan", "Prepare repair plan", "recovery-plan", "The repair budget is exhausted. Prepare a repair plan; once it passes independent review, repairs start on their own. Resume does not renew the budget or rerun the same review."), ...waivers };
   // Resume would hit the same review cap; only a repair plan can move this feature.
   if (job.error?.code === "review_unstable") return next("prepare-plan", "Prepare repair plan", "recovery-plan", "The feature did not reach a stable reviewed candidate within its review limit. Prepare a repair plan; once it passes independent review, repairs start on their own. Resume would stop at the same limit.");
+  if (job.error?.details?.loop?.kind === "symptom") return job.error.code === "review_rejected" || pendingProofFailure(job)
+    ? next("prepare-plan", "Prepare repair plan", "recovery-plan", "The same failure repeated although repairs changed the code, so more of the same repairs cannot help. Prepare a repair plan; once it passes independent review, repairs start on their own. Resume does not renew the budget.")
+    : next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", `The same failure repeated although repairs changed the code. Fix the cause or the inputs first: Resume reruns the checks, and no repair turn runs while the failure is unchanged. To allow more attempts, raise SOLOFACTORY_SYMPTOM_THRESHOLD (0 turns this stop off).`);
   if (job.error?.details?.loop) return job.error.code === "review_rejected" || pendingProofFailure(job)
     ? next("prepare-plan", "Prepare repair plan", "recovery-plan", "The same failure repeated on unchanged code, so repeating repairs cannot help. Prepare a repair plan; once it passes independent review, repairs start on their own. Resume does not renew the budget.")
     : next("resume", job.state === "paused" ? "Resume" : "Resume current run", "resume", "The same failure repeated on unchanged code. Change the code or inputs first: Resume reruns the checks, and no repair turn runs while the code is unchanged.");
@@ -2141,7 +2146,7 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
   const loop = job.error?.details?.loop;
   const unconfirmed = job.error?.code === "worker_unconfirmed";
   const planBlocked = planBlockedOut(job);
-  const title = unconfirmed ? "A worker from before the restart may still be running" : planBlocked ? "The repair plan needs a correction" : loop ? "Repeated failure on unchanged code" : stale ? "Specs or prototype inputs changed" : exhausted ? "Repair budget exhausted" : reviewBlocked ? "Required functionality or evidence is unfinished" : primary?.title
+  const title = unconfirmed ? "A worker from before the restart may still be running" : planBlocked ? "The repair plan needs a correction" : loop ? (loop.kind === "symptom" ? "Repeated failure despite code changes" : "Repeated failure on unchanged code") : stale ? "Specs or prototype inputs changed" : exhausted ? "Repair budget exhausted" : reviewBlocked ? "Required functionality or evidence is unfinished" : primary?.title
     ?? (timeoutReason === "idle" ? "The coding agent became inactive" : timeoutReason === "hard" ? "The run reached its safety cap" : "The run paused before completion");
   const actions = diagnostics.map((item) => item.action);
   if (!actions.length) {
