@@ -15,12 +15,13 @@ The budget went to **recovery from a factory bug, not to reviewer blockers**. No
 | **recovery plan + review + correction** | 4 | 31.8 | 14.9M | 149K | **16.06** |
 | **recovery rebuild (CORE … JOBROOM, 10 features)** | 10 | 53.7 | 17.1M | 269K | **21.63** |
 | total logged | 22 | 126 | 42.0M | 614K | 53.93 |
+| true total (her transcripts, killed workers included) | 25 | ~151 | 51.5M | 731K | ~64.27 |
 
 Plus 3 workers killed by usage limits (≈25 min, usage not recorded): build-slice-CORE 11-02 17:32, recovery SCORE 11-03 07:41, recovery MAILBOX 11-03 12:47.
 
 Recovery = 70% of logged spend and 68% of worker time. Largest single workers: recovery-plan $6.22 (5.7M input, 15 min), feature-plan $5.94 (18.7 min), JOBROOM rebuild $5.67 (12.8 min), recovery-correction $5.51 (10 min).
 
-The fix for the crash (commit 17cba54, "Stop cased gates crashing on Linux after every test passed") landed 2026-11-03 03:25Z and shipped in v0.10.2 at 03:37Z. The gate failed 11-02 21:46 to 21:56Z; recovery planning started 11-03 06:50Z. The logs do not record the factory version or when the AIMM install channel published 0.10.2, so whether she could have updated in that window is not determinable from these files. Everything after 21:56Z on 11-02 ($38 of $54) was spent recovering from a defect that v0.10.2 both fixes and, had it recurred, would have classified as `gate_infrastructure` with no repair turn.
+The fix for the crash (commit 17cba54, "Stop cased gates crashing on Linux after every test passed") landed 2026-11-03 03:25Z and shipped in v0.10.2 at 03:37Z. The gate failed 11-02 21:46 to 21:56Z; recovery planning started 11-03 06:50Z. `runs.jsonl` records the harness per segment: 0.10.1 (d8a84f8) for the first two segments, 0.10.3 (fd65c77) for the last two. She installed 0.10.3 at 06:45Z, five minutes before recovery planning started, so she *did* update in time. The recovery still ran because the 0.10.1 gate blocker was carried into the recovery request unchanged; no gate re-ran on 0.10.3, so `runnerCrash()` never saw it. The recovery plan even added a CORE-FSYNC obligation and an app-side workaround (`scripts/test-runner.js`) for a factory bug that was already fixed. Everything after 21:56Z on 11-02 ($38 of $54) was spent recovering from a defect that v0.10.2 both fixes and, had it recurred, would have classified as `gate_infrastructure` with no repair turn.
 
 ## Ranked causes, with evidence
 
@@ -53,17 +54,26 @@ The fix for the crash (commit 17cba54, "Stop cased gates crashing on Linux after
 | F9: oversized prompt park | **refuted** | see F3 above. |
 | "Not determinable": interview rewrote §9? | **resolved** | yes: 22 MH + 26 SC (from 23 + 29), Antigravity removed, Gemini API key added. |
 | "Not determinable": OS, features, approvals, overrides | **resolved** | WSL Ubuntu (`/home/eliza`, `/mnt/d`), Node 22.22.1; 25 features; 1 recovery approval; no sign of `SOLOFACTORY_MAX_REPAIRS` override (maxRepairs 2 observed); 3 usage-limit parks. |
-| Permission denials, hook/plugin/MCP noise | **none** | zero matches for permission/denied/hook/plugin/mcp in 1022 events. |
+| Permission denials, hook/plugin/MCP noise | **80 denials, no hooks/plugins/MCP** | events.jsonl carries none; the transcripts show 80 of 104 failed tool calls were denials: 56 Bash not on the allowlist (`node scripts/build.js`, `node -e`, compound commands), 14 Read/Write outside the project, 10 Bash paths outside cwd. Repair agents were denied reading `.ailib/` factory files, so they could not find the `/dev/null` cause. |
 | "Why Antigravity succeeded: same PRD" | **refuted** | different PRD, different factory build, Gemini provider; 33 workers, 5h28m, 2 repairs, 3 review bugs, completed. |
 
 ## Single highest-leverage fix
 
-**Get the member onto v0.10.2 or later before she resumes anything.** v0.10.2 fixes the `/dev/null` destination (runs in the job folder) and adds `runnerCrash()`, which turns "all cases passed, Node crashed afterwards" into `gate_infrastructure` with no repair turn and no recovery. On that version this run would have stopped at 21:46Z on 11-02 with a one-line owner message instead of spending $38 and three usage windows.
+**Resume after a gate failure must re-run the failed gate before it builds a recovery request, at least when the harness version differs from the one that recorded the failure.** The member updated to 0.10.3 at 06:45Z, five minutes before recovery planning. The fix was on disk; Resume never used it, because the recovery request was built from the stored 0.10.1 gate output (her report, Items 8 and 10: the recovery request carries the fsync blocker, and no gate ran after the upgrade). `feature-recovery.mjs` rejects a stale plan when the contract, sources or review changed (lines ~468-472) but never re-validates a stored gate failure. The $38 recovery, including a CORE-FSYNC obligation and an app-side test runner written around a bug the factory had already fixed, ran entirely on the fixed harness. Updating was necessary and not sufficient.
 
-Fixed (replanForGate now scopes a first-time gate failure to the feature in `featureCursor`; the sentence below describes the old behaviour): **a gate failure in the ordinary build gets an unscoped recovery.** `request.scope` (plan one feature, keep the rest) is only set when `executed` is true, i.e. after a prior recovery phase ran (`src/feature-recovery.mjs`, `replanForGate`). A first-time gate failure re-plans every feature and, at ≥10 slices, rebuilds them in batch mode with no gates between features. Scoping the first recovery to the failed feature would have made it one worker, not four plus a 10-feature rebuild.
+Shipped since the run, for the record: `runnerCrash()` classifies the crash as `gate_infrastructure` with no repair turn (v0.10.2), and `replanForGate` now scopes a first-time gate failure to the failed feature (v0.10.6). Neither reaches a recovery request already built from a stale failure.
 
 A PRD rewrite would not have changed this run's outcome. The scope cuts in the PRD audit (Finding 3) remain good advice for cost per turn, not for the failure.
 
 ## Antigravity run, for comparison
 
 Member-modified soloFactory (third provider `agy.exe` via WSL UNC paths, gemini-3.8-flash-high, stream-json), 12-MH PRD. 33 workers over 5h28m; 10.5M input / 143.4M cached / 1.62M output tokens; 1 plan blocker, 1 declared-writes gate failure, 1 review block with 3 bugs, 2 repairs; `job.completed Working app: http://127.0.0.1:46821`. Its proof gates ran under the member's patched factory, so whether it hit the same fsync path is not visible in its events.
+
+## Corrections from the member's own diagnostic report (2026-11-06)
+
+Her report reads the per-turn transcripts, which this analysis did not. What it adds:
+
+- **Logged cost is low.** `runs.jsonl` takes usage from `agent.completed` events; a worker killed by a usage-limit park never emits one, so the three killed workers' 9,497,245 input / 116,982 output tokens are missing. True spend is about $64, not $54. Counters in `state.json` disagree with events (agentTurns 11, repairs 0, slicesCompleted 0, repairBudgetLimit 4). Still true in HEAD (`usageTotals` reads only `agent.completed`).
+- **Instruction routing was broken, each miss a paid turn.** Project CLAUDE.md told agents to read `~/.aai/rules/coding.md` (absent on her machine, 0/7 reads) else `.ailib/dev-rules/rules/coding.md` (denied, outside the project); the parent `~/solofactory/.aai/instructions.md` was unreadable (0/4). Fixed in 270127e for new projects; her existing project still carries the old files.
+- **No `job.resumed` event for segments 3 and 4, no install log, haiku-4-5 shows in modelUsage (10-27 output tokens, purpose unknown), 0 compactions, peak context 177,510, 0 subagents.**
+- **The third gate attempt re-ran the same candidate as the second** (4330fdb2); the loop detector needs three identical attempts, so two did not trip it.
