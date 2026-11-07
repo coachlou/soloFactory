@@ -137,6 +137,7 @@ async function codexRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = 
       diagnostics,
       logPath,
       sessionId,
+      usage,
       autoResumes,
       idleTimeoutMs,
       hardTimeoutMs,
@@ -253,15 +254,18 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
   args.push("--permission-mode", mode === "read" ? "plan" : "acceptEdits");
   // Headless acceptEdits silently denies unlisted shell commands, so repair agents shipped fixes they could not run
   // (~20 denials per repair on 2026-09-27; 46 across smoke 11's builds). Allow the commands the controller's own
-  // gates run, including the plan's proof commands, plus read-only orientation.
+  // gates run, including the plan's proof commands, plus read-only orientation. Plain node too: a member run
+  // (2026-11-03) lost 56 calls to `node scripts/build.js` and `node -e`, and npm scripts already run any node.
   if (mode !== "read") {
     const proofs = [...new Set((context.proofCommands ?? []).map((command) => `Bash(${command.join(" ")}:*)`))];
     args.push("--disallowedTools", "Agent");
     args.push("--allowedTools", "Bash(npm install:*)", "Bash(npm test:*)", "Bash(npm run build:*)", "Bash(node .factory/check-plan.mjs:*)",
-      "Bash(node --test:*)", "Bash(ls:*)", "Bash(git ls-files:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", ...proofs);
+      "Bash(node --test:*)", "Bash(node:*)", "Bash(ls:*)", "Bash(git ls-files:*)", "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", ...proofs);
   }
   if (schema) args.push("--json-schema", JSON.stringify(schema));
   let sessionId = resumeSessionId;
+  // Usage per assistant message, kept so a killed turn still reports what it spent (see partialClaudeUsage).
+  const spent = new Map();
   const result = await runProcess({
     executable: "claude",
     args,
@@ -278,8 +282,9 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
     onSpawn: (child) => context.onSpawn?.(child, { hardTimeoutMs: minutesFromEnv("SOLOFACTORY_AGENT_HARD_MINUTES", 45) }),
     onActivity: context.onActivity,
     onLine(line) {
-      const { sessionId: seen, event } = claudeStreamLine(line);
+      const { record, sessionId: seen, event } = claudeStreamLine(line);
       sessionId = seen ?? sessionId;
+      if (record?.type === "assistant" && record.message?.usage) spent.set(record.message.id ?? spent.size, record.message.usage);
       if (event) onEvent?.(event);
     },
   });
@@ -290,6 +295,7 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
       diagnostics: detectProviderDiagnostics(result.lines.join("\n")),
       logPath,
       sessionId,
+      usage: partialClaudeUsage(spent),
       autoResumes: 0,
       idleTimeoutMs: minutesFromEnv("SOLOFACTORY_AGENT_IDLE_MINUTES", 6),
       hardTimeoutMs: minutesFromEnv("SOLOFACTORY_AGENT_HARD_MINUTES", 45),
@@ -334,6 +340,15 @@ export function claudeUsage(envelope) {
     costUsd: typeof envelope.total_cost_usd === "number" ? envelope.total_cost_usd : null,
     models: Object.keys(envelope.modelUsage ?? {}),
   };
+}
+
+// What a turn that never reached its result envelope still spent: one record per message id, since
+// stream-json repeats a message per content block. Member run 2026-11-03: workers killed by the usage
+// limit left 9.5M input tokens out of the run's totals. No envelope means no CLI cost figure (null).
+function partialClaudeUsage(messages) {
+  let usage = null;
+  for (const u of messages.values()) usage = addUsage(usage, claudeUsage({ usage: u }));
+  return usage;
 }
 
 export function codexUsage(u, model) {
@@ -452,7 +467,7 @@ function executionFailureText(output) {
   return { transport: relevant.join("\n"), commands: commands.join("\n") };
 }
 
-function providerFailure({ provider, result, diagnostics, logPath, sessionId, autoResumes, idleTimeoutMs, hardTimeoutMs }) {
+function providerFailure({ provider, result, diagnostics, logPath, sessionId, usage = null, autoResumes, idleTimeoutMs, hardTimeoutMs }) {
   const primary = diagnostics[0];
   const timeoutLabel = result.timeoutReason === "idle"
     ? `${provider} stopped after ${formatMinutes(idleTimeoutMs)} without output`
@@ -465,6 +480,7 @@ function providerFailure({ provider, result, diagnostics, logPath, sessionId, au
     provider,
     logPath,
     sessionId,
+    usage,
     diagnostics,
     timedOut: result.timedOut,
     timeoutReason: result.timeoutReason,

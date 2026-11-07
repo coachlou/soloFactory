@@ -27,6 +27,8 @@ async function answers(url) {
 
 // A JobStore is rooted in one project: a git repo the factory builds into.
 // The app lives at the repo root; run evidence lives in .solofactory/runs/<id>/ (gitignored).
+const OLD_LEAD = "This is one project inside a SoloFactory workspace. The parent folder's\n`.aai/instructions.md` (two levels up) governs the factory as a whole; if it\nexists, load it first, then this file.\n";
+
 export class JobStore {
   constructor(project) {
     this.project = path.resolve(project);
@@ -64,7 +66,13 @@ export class JobStore {
     }
     // Appended by heading rather than templated, so projects scaffolded before 0.9.5 get it too.
     const instructions = path.join(this.project, ".aai", "instructions.md");
-    const rules = await readFile(instructions, "utf8");
+    let rules = await readFile(instructions, "utf8");
+    // Projects scaffolded before this fix sent workers to the parent folder's instructions, which they cannot
+    // read (member run, 2026-11-03). Only the untouched template paragraph is replaced; an owner's edit stays.
+    if (rules.includes(OLD_LEAD)) {
+      rules = rules.replace(OLD_LEAD, (await readFile(path.join(templatesRoot, "instructions.md"), "utf8")).split("\n\n")[1] + "\n");
+      await writeFile(instructions, rules);
+    }
     if (!rules.includes("## The app is live")) {
       await writeFile(instructions, `${rules}${rules.endsWith("\n") ? "" : "\n"}${await readFile(path.join(templatesRoot, "live-app.md"), "utf8")}`);
     }

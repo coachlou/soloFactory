@@ -75,7 +75,7 @@ export function measureRun(events) {
       const kind = activity(label);
       agent = { label, kind, start: at(event), bucket: place(event, kind) };
       bucket(agent.bucket).agent.turns += 1;
-    } else if (event.type === "agent.completed" && agent) closeAgent(event);
+    } else if ((event.type === "agent.completed" || event.type === "agent.failed") && agent) closeAgent(event);
     else if (event.type === "gate.started") {
       if (gate) closeGate(null);
       const argv = argvOf(event);

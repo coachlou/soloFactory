@@ -85,10 +85,25 @@ let input = ""; process.stdin.on("data", (chunk) => input += chunk); process.std
     assert.equal(write[write.indexOf("--disallowedTools") + 1], "Agent");
     assert.equal(write.filter((arg) => arg === "Bash(node scripts/process-check.mjs:*)").length, 1);
     assert.ok(write.includes("Bash(node --test:*)"));
+    assert.ok(write.includes("Bash(node:*)"), "plain node scripts run too (member run 2026-11-03 lost 56 calls to them)");
     const read = await args("read", { stage: "review" });
     assert.ok(read.includes("--strict-mcp-config"));
     assert.ok(!read.includes("--allowedTools"));
     assert.match(await readFile(`${capture}.stdin`, "utf8"), /^ok\n\nShell: .*one per Bash/s, "every turn learns that compound commands are denied");
+  });
+});
+
+test("a Claude turn that dies before its result envelope still reports what it spent", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "sf-claude-killed-"));
+  const message = (id, input) => JSON.stringify({ type: "assistant", message: { id, usage: { input_tokens: input, cache_creation_input_tokens: 0, cache_read_input_tokens: 100, output_tokens: 5 } } });
+  await withFakeCli("claude", `process.stdin.resume(); process.stdin.on("end", () => {
+  console.log(${JSON.stringify(message("msg_1", 1000))});
+  console.log(${JSON.stringify(message("msg_1", 1000))});
+  console.log(${JSON.stringify(message("msg_2", 2000))});
+  process.exit(1);
+});`, async () => {
+    const error = await createProvider("claude").run({ cwd, prompt: "ok", logPath: path.join(cwd, "log.txt") }).catch((e) => e);
+    assert.deepEqual(error.details.usage, { inputTokens: 3200, cachedInputTokens: 200, cacheWriteTokens: 0, outputTokens: 10, costUsd: null, models: [] }, "one count per message id, no CLI cost figure");
   });
 });
 
@@ -161,6 +176,18 @@ test("a run mixing Claude and Codex turns keeps its cost unknown", () => {
   assert.equal(totals.total.costUsd, null, "a partial Claude-only cost would understate the run");
   assert.equal(totals.byStage.slice.inputTokens, 5000, "slices fold into one stage");
   assert.equal(totals.byStage.specification.costUsd, 0.5);
+});
+
+test("usage a failed worker spent before it died counts toward the run", () => {
+  const usage = (inputTokens) => ({ inputTokens, cachedInputTokens: 0, cacheWriteTokens: 0, outputTokens: 1, costUsd: null, models: [] });
+  const totals = usageTotals([
+    { type: "agent.started", stage: "build-slice-1" },
+    { type: "agent.failed", stage: "build-slice-1", usage: usage(5000) },
+    { type: "agent.started", stage: "build-slice-1" },
+    { type: "agent.failed", stage: "build-slice-1", usage: null },
+  ]);
+  assert.equal(totals.total.inputTokens, 5000);
+  assert.equal(totals.turnsWithoutUsage, 1, "only the turn that reported nothing is missing");
 });
 
 test("stage usage buckets each turn into the stage it finished in and reports the current step alone", () => {

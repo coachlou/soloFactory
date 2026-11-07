@@ -1232,6 +1232,8 @@ export class SoloFactory {
         (job.agentSessions ||= {})[label] = error.details.sessionId;
         await this.store.writeState(job);
       }
+      // What the failed turn spent, so a worker killed by a usage limit still counts in the run's totals.
+      await this.emit(job.id, { type: "agent.failed", state: job.state, stage: label, feature: featureOf(job), usage: error.details?.usage ?? null, message: `${label} worker failed: ${error.message}` });
       throw error;
     } finally {
       await this.releaseWorker(job, spawned);
@@ -2136,7 +2138,7 @@ export function validateMetrics(value) {
   return value;
 }
 
-// Token totals for a run from its agent.completed events: overall, and per stage label with
+// Token totals for a run from its agent.completed and agent.failed events: overall, and per stage label with
 // repeats folded (see stageKind) so runs of any shape line up.
 // Agent labels from invoke(): build-slice-<id>, slice-resume-<id>, repair-<n>, repair-resume, <stage>-resume.
 const pendingNote = (ids) => ids.length ? `; ${ids.join(", ")} pending integration proof` : "";
@@ -2164,14 +2166,16 @@ function stageKind(label = "unknown") {
   return label.replace(/-resume$/, "");
 }
 
+const USAGE_EVENTS = new Set(["agent.completed", "agent.failed"]);
+
 export function usageTotals(events) {
   const byStage = {};
   let total = null;
-  // Started minus reported: a turn whose provider threw never emits agent.completed.
+  // Started minus reported: a turn that died before any usage was seen reports none.
   let turnsWithoutUsage = 0;
   for (const event of events) {
     if (event.type === "agent.started") turnsWithoutUsage += 1;
-    if (event.type !== "agent.completed" || !event.usage) continue;
+    if (!USAGE_EVENTS.has(event.type) || !event.usage) continue;
     turnsWithoutUsage -= 1;
     const stage = stageKind(event.stage);
     byStage[stage] = addUsage(byStage[stage], event.usage);
@@ -2217,7 +2221,7 @@ export function stageUsage(history, events, now = Date.now()) {
   const entries = history.map((stage) => ({ state: stage.state, label: stage.label, start: Date.parse(stage.startedAt),
     durationMs: (stage.endedAt ? Date.parse(stage.endedAt) : now) - Date.parse(stage.startedAt), tokens: null }));
   for (const event of events) {
-    if (event.type !== "agent.completed" || !event.usage) continue;
+    if (!USAGE_EVENTS.has(event.type) || !event.usage) continue;
     const at = Date.parse(event.at);
     const entry = entries.findLast((item) => item.start <= at);
     if (entry) entry.tokens = addUsage(entry.tokens, event.usage);

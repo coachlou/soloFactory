@@ -564,6 +564,22 @@ test("init adds the live-app rules once, including to projects scaffolded before
   assert.match(text, /hey solofactory/);
 });
 
+test("init replaces the old lead that sent workers to the parent folder, and only that", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solofactory-lead-"));
+  const instructions = path.join(root, ".aai", "instructions.md");
+  await mkdir(path.dirname(instructions), { recursive: true });
+  const oldLead = "This is one project inside a SoloFactory workspace. The parent folder's\n`.aai/instructions.md` (two levels up) governs the factory as a whole; if it\nexists, load it first, then this file.\n";
+  await writeFile(instructions, `# old project\n\n${oldLead}\n- owner's own rule\n`);
+  const store = new JobStore(root);
+  await store.init();
+  const text = await readFile(instructions, "utf8");
+  assert.ok(!text.includes("two levels up"), "old lead gone");
+  assert.match(text, /Read nothing outside this folder\.\n\n- owner's own rule\n/, "template lead in its place, owner's rule kept");
+  await writeFile(instructions, "# edited\n\nThe parent folder's rules apply here too.\n");
+  await store.init();
+  assert.match(await readFile(instructions, "utf8"), /^# edited\n\nThe parent folder's rules apply here too\.\n/, "an owner's own wording is left alone");
+});
+
 test("a project with a shipped manifest specs and slices the brief as a follow-on release", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-followon-"));
   const store = new JobStore(root);
