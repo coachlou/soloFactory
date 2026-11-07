@@ -7,6 +7,7 @@ From one member's report: a brief was lost when the browser tab closed, and a 20
 - The brief scan flags checks that need hours or days of real time or media ("recordings up to 6 hours", "delete after 30 days") and the Guide rewrites them to a short sample or a test clock, with the long limit as a setting.
 - The run dashboard lists `job.notices` under the subtitle.
 - Also shipped (from 8d9ad6f): killed workers' usage counts toward the run's totals, `Bash(node:*)` is allowed, and old projects' lead instructions are refreshed.
+- rc2, from the real Claude smoke (habit tracker, 6 slices, ceiling $3: parked at $3.09 and $6.10, resumed both times, finished live at $6.69): the brief scan no longer flags seeded history ("30 days of seeded history"), and a second park names the raised limit instead of the per-grant ceiling.
 - A unit test pins that a `gate_infrastructure` park always offers Resume. The end-to-end path (stale-build rerun whose runner crashes) is not run by the fixture harness, whose gates are not cased.
 
 ## 0.10.10: notices for chat-posted briefs (2026-11-06)

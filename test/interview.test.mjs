@@ -123,7 +123,7 @@ test("the brief scan flags checks no offline proof can pass and passes their rew
   const long = scanBrief(readyBrief({ mustHaves: ["Transcribe recordings up to 6 hours long", "Delete drafts after 30 days", "Saves within 2 seconds"] }));
   assert.deepEqual(long.map((f) => f.id), ["MH-1", "MH-2"]);
   assert.match(long[0].reason, /longer than a test can run/);
-  assert.deepEqual(scanBrief(readyBrief({ mustHaves: ["Transcribe a 10-second sample; the 6-hour limit is a setting", "With the clock moved 30 days on, drafts are deleted"] })), []);
+  assert.deepEqual(scanBrief(readyBrief({ mustHaves: ["Transcribe a 10-second sample; the 6-hour limit is a setting", "With the clock moved 30 days on, drafts are deleted", "With 30 days of seeded history the month summary shows 20 of 30 days"] })), []);
 });
 
 test("brief notices warn about size and list what the Guide left unprovable", () => {

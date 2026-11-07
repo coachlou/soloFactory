@@ -94,10 +94,14 @@ test("the cost ceiling parks on reported spend, skips turns with no figure, and 
   const parked = await factory.start(job.id);
   assert.equal(parked.error?.code, "run_budget_reached");
   assert.equal(stages.length, 2, "the first turn reported no cost; $2 is over $1.50, so the third worker never started");
-  assert.match(parked.error.message, /spent about \$2\.00, the ceiling of \$1.5 \(SOLOFACTORY_MAX_RUN_COST_USD\).*Resume allows another \$1.5/);
+  assert.match(parked.error.message, /spent about \$2\.00, its limit of \$1\.50 \(SOLOFACTORY_MAX_RUN_COST_USD=1\.5, raised by each resume\).*Resume allows another \$1.5/);
   assert.match(parked.error.details.diagnostics[0].title, /Run cost ceiling reached/);
 
   await factory.resume(job.id);
-  assert.equal((await store.read(job.id)).costAllowance, 3.5, "spent $2 plus one more $1.50 allotment");
+  const resumed = await store.read(job.id);
+  assert.equal(resumed.costAllowance, 3.5, "spent $2 plus one more $1.50 allotment");
   assert.ok(stages.length >= 3, "Resume let work continue past the first ceiling");
+
+  // Smoke 2026-11-07 parked a second time saying "the ceiling of $3" at $6.10; the message names the raised limit.
+  await assert.rejects(factory.assertWorkerBudget({ ...resumed, costAllowance: 3 }), /spent about \$4\.00, its limit of \$3\.00 \(SOLOFACTORY_MAX_RUN_COST_USD=1\.5/);
 });

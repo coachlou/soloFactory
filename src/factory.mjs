@@ -1198,8 +1198,8 @@ export class SoloFactory {
     if (!overWorkers && !overCost) return;
     const spend = runSpend(job, events, this.maxRepairs);
     const [what, grant, title] = overWorkers
-      ? [`started ${workers} workers, the ceiling of ${ceiling} (SOLOFACTORY_MAX_RUN_WORKERS)`, `another ${ceiling} workers`, `Run worker ceiling reached (${workers} workers)`]
-      : [`spent about $${costUsd.toFixed(2)}, the ceiling of $${costCeiling} (SOLOFACTORY_MAX_RUN_COST_USD)`, `another $${costCeiling}`, `Run cost ceiling reached ($${costUsd.toFixed(2)})`];
+      ? [`started ${workers} workers, its limit of ${job.workerAllowance ?? ceiling} (SOLOFACTORY_MAX_RUN_WORKERS=${ceiling}, raised by each resume)`, `another ${ceiling} workers`, `Run worker ceiling reached (${workers} workers)`]
+      : [`spent about $${costUsd.toFixed(2)}, its limit of $${(job.costAllowance ?? costCeiling).toFixed(2)} (SOLOFACTORY_MAX_RUN_COST_USD=${costCeiling}, raised by each resume)`, `another $${costCeiling}`, `Run cost ceiling reached ($${costUsd.toFixed(2)})`];
     throw new FactoryError("run_budget_reached", `This run has ${what}. So far: ${spendLine(spend)}. Resume allows ${grant}.`, {
       workers, ceiling, costUsd, costCeiling, spend,
       diagnostics: [{ code: "run_budget_reached", title, action: `Review the spend so far (${spendLine(spend)}). Resume grants ${grant}; the preserved files and session are kept.` }],
