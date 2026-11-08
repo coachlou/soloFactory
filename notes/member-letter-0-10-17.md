@@ -1,4 +1,4 @@
-<!-- Draft for aimm-members. Not sent. Screenshots live in the linked GitHub guide (docs/update-notice.md). -->
+<!-- Sent to aimm-members 2026-11-08 via Resend broadcast 36ee2378-f2a7-48a5-b713-a3c562634db9. Screenshots live in the linked GitHub guide (docs/update-notice.md). -->
 
 Subject: SoloFactory 0.10.17: it now tells you when there's an update
 
