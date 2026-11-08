@@ -870,6 +870,13 @@ could change or remove them:
 - To keep Opus for building, start the factory with `SOLOFACTORY_CLAUDE_MODEL=opus`. A paused run uses the new default for its remaining workers after the restart.
 - Nothing to migrate by hand.
 
+**If they were below 0.10.15 before the update**, say in one breath that the factory now tells them itself when a newer version is out, so they don't need to wait for an email. What you need to know yourself:
+
+- The top bar has a *Check for updates* button next to *Manual*. When a newer version exists it turns into a green *Update available* pill; clicking it shows both versions and the paste-in update prompt with a **Copy prompt** button. Nothing covers their work and nothing updates on its own.
+- It checks only at startup, on page load and on a click (3-second timeout, no background polling) by reading `version` from the public soloFactory `package.json`. Offline, a manual check says *Couldn't check*. `SOLOFACTORY_UPDATE_CHECK=0` turns it off.
+- Screenshots for the owner: https://github.com/coachlou/soloFactory/blob/main/docs/update-notice.md
+- Nothing to migrate by hand.
+
 **If they were below 0.10.12 before the update**, say in one breath that a stopped run's card now says whether it is safe to press Resume. What you need to know yourself:
 
 - When Resume is the offered step, the card adds *Safe to resume?*. *Yes. No processing errors* means the run stopped on a limit (usage window, spending limit, provider outage, or a pause), with the features verified and new checks passed since the last Resume. *Not yet* means a full allotment since the last Resume verified nothing: choose **Report this run** instead of resuming. *Check first* means it stopped on an error; compare progress with the last stop.

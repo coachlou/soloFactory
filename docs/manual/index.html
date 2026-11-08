@@ -56,6 +56,8 @@
   <pre><code>bash start.sh</code></pre>
   <p>(From a source checkout, <code>npm start</code> does the same.)</p>
   <p>Open <a href="http://127.0.0.1:4173">http://127.0.0.1:4173</a>. The status pill top right reads <em>Factory ready</em> when a provider is signed in. No API key is ever asked for or stored; the agents run under your subscription. If another app already uses port 4173, the factory says so and stops; start it on a free port with <code>PORT=5000 npm start</code> and open <a href="http://127.0.0.1:5000">http://127.0.0.1:5000</a> instead.</p>
+  <h3>Updates</h3>
+  <p>The factory tells you when a newer SoloFactory is out. The <strong>Check for updates</strong> button in the header, next to <strong>Manual</strong>, turns into a green <em>Update available</em> pill; click it to see both versions and the prompt to paste into Claude Code or Codex, with a <strong>Copy prompt</strong> button. Nothing covers your work and nothing updates on its own, so update when it suits you. It checks at startup, when you open or refresh the page, and when you click the button; never in the background. Offline, a manual check says <em>Couldn't check</em>. Screenshots: <a href="https://github.com/coachlou/soloFactory/blob/main/docs/update-notice.md">the update notice</a>.</p>
 
   <h2 id="projects">2. Projects</h2>
   <p>A project is the folder the factory builds into. The first selector in the header switches between them; <em>New project…</em> asks for a name in a small dialog. Each project is its own git repository with the app at the root, a <code>.aai/</code> folder of project context you can edit, and a run history.</p>
@@ -164,6 +166,7 @@
     <tr><td><code>SOLOFACTORY_MAX_ACTIVE_RUNS</code></td><td>How many projects may build at once. Default 1.</td></tr>
     <tr><td><code>SOLOFACTORY_MAX_RUN_WORKERS</code></td><td>Workers one run may start before it parks for your go-ahead (Resume grants another allotment). Default 150; 0 turns the ceiling off.</td></tr>
     <tr><td><code>SOLOFACTORY_MAX_RUN_COST_USD</code></td><td>Dollars of Claude-reported cost one run may spend before it parks for your go-ahead (Resume grants another allotment). Default 30; 0 turns the ceiling off. Codex reports no cost, so a Codex run is held by the worker ceiling.</td></tr>
+    <tr><td><code>SOLOFACTORY_UPDATE_CHECK</code></td><td>Set to 0 to turn off the check for a newer SoloFactory release. Default on.</td></tr>
     <tr><td><code>SOLOFACTORY_AGENT_IDLE_MINUTES</code></td><td>Agent idle deadline, reset by any output. Default 6.</td></tr>
     <tr><td><code>SOLOFACTORY_AGENT_HARD_MINUTES</code></td><td>Agent total safety cap. Default 45.</td></tr>
     <tr><td><code>SOLOFACTORY_AGENT_BACKOFF_SECONDS</code></td><td>Wait before the one automatic Codex resume. Default 15.</td></tr>
