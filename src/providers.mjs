@@ -239,7 +239,9 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
   const reasoningTask = /^(specification(?:-|$)|feature-plan(?:-|$)|plan-review$|plan-correction-|recovery-plan-)|(?:^|-)review(?:-|$)/.test(context.stage ?? "");
   const model = reasoningTask
     ? process.env.SOLOFACTORY_CLAUDE_REASONING_MODEL || "opus"
-    : process.env.SOLOFACTORY_CLAUDE_MODEL || "opus";
+    // Builders and repairs on Sonnet: same review pass rate as Opus on the 2026-11-08 smokes at about a third
+    // less per feature, and Opus filled a member's 5h subscription window in one run. Judgment stays on Opus.
+    : process.env.SOLOFACTORY_CLAUDE_MODEL || "sonnet";
   const effort = reasoningTask
     ? process.env.SOLOFACTORY_CLAUDE_REASONING_EFFORT || "low"
     : process.env.SOLOFACTORY_CLAUDE_EFFORT || "medium";

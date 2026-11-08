@@ -1,3 +1,8 @@
+## Unreleased
+
+- Claude builders and repairs default to Sonnet (`SOLOFACTORY_CLAUDE_MODEL`, was Opus); the Guide interview follows. Planning, plan review, correction and reviews stay on Opus at low effort. Reason: one member's run filled a 5h subscription window on Opus builders. Smokes: Habit Ledger 0 repairs, $4.08 for 6 features; a recorder-like Voice Notes brief (WAV upload, background transcription queue, retry, resume after restart) 6 features, 1 repair, 0 review blocks, $5.23, 19 min.
+- The specification stage's PLAN.md gets the same `node --test` test-script rule as the feature planner.
+
 ## 0.10.12: safe-to-resume answer, test-command fixes (2026-11-08)
 
 From the builder-model smokes for one member's 5h-window report (notes: `builder-model-ab-smoke.md` in the side-session folder).

@@ -313,8 +313,9 @@ Only one job may be active because the target user does not benefit from resourc
 - Claude agent turns ignore the owner's personal Claude Code settings, hooks and MCP servers
   (`--setting-sources project,local --strict-mcp-config`), cannot spawn subagents, and may run only
   the controller's own gate and proof commands plus read-only orientation; the prompt tells them
-  compound shell commands are denied. They default to Opus (`SOLOFACTORY_CLAUDE_MODEL`,
-  `SOLOFACTORY_CLAUDE_REASONING_MODEL`).
+  compound shell commands are denied. Builders and repairs default to Sonnet
+  (`SOLOFACTORY_CLAUDE_MODEL`); planning, plan review, correction and reviews default to Opus at low
+  effort (`SOLOFACTORY_CLAUDE_REASONING_MODEL`).
 - Generated code executes with the owner's local OS permissions. v0.1 does not claim hostile
   code isolation; users should run it only in a trusted local account/workspace.
 

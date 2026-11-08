@@ -86,7 +86,7 @@ first increment of this release, verified against the already-running app.`
 (factory.json version 1 — commands.install/test/build/start as argument arrays,
 healthPath "/health", metricsPath "/_factory/metrics"), a production build, GET /health and
 privacy-preserving GET /_factory/metrics — so every later slice is verified against a
-running, health-checked app from the first gate.`}
+running, health-checked app from the first gate. ${TEST_SCRIPT_RULE}`}
 
 Each slice object needs:
   - id: SCREAMING-SNAKE, unique (e.g. "SLICE-RECORD")
