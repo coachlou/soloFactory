@@ -1,3 +1,8 @@
+## 0.10.17: docs gate in pre-release QA (2026-11-08)
+
+- `npm test` (via `build-distro.sh --check`) fails when `src/` reads a `SOLOFACTORY_*` setting missing from the manual's Settings table (test-only ones in `scripts/internal-env.txt`), or when this version's PROGRESS entry has no `- Docs:` bullet. The ambient-library release runbook gains a docs-review step before tagging.
+- Docs: manual Settings table gains the six Claude/Codex model and effort rows. No INSTALL note: nothing for owners to do.
+
 ## 0.10.16: update notice documented (2026-11-08)
 
 - `docs/update-notice.md` (with screenshots) explains the update pill for owners. The manual gains an *Updates* section under *Start the factory* and a `SOLOFACTORY_UPDATE_CHECK` settings row. The INSTALL runbook gets a *below 0.10.15* note so the updating agent tells owners about the pill.

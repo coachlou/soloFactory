@@ -1,6 +1,6 @@
 {
   "name": "solo-factory",
-  "version": "0.10.16",
+  "version": "0.10.17",
   "private": true,
   "description": "A local-first software factory for micro, mini, and personal SaaS apps.",
   "type": "module",
