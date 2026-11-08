@@ -14,9 +14,17 @@ Nothing pops up over your work, a run in progress keeps going, and it never upda
 
 **See how it looks:** [The update notice, with screenshots](https://github.com/coachlou/soloFactory/blob/main/docs/update-notice.md)
 
-## Also new since 0.10.13
+## Also since the last update email (0.10.10)
 
-- **Every model setting is in the manual.** *Settings* now lists the Claude and Codex model and effort variables with their defaults, so you can see what `SOLOFACTORY_CLAUDE_MODEL` and the others do before you change them.
+I didn't email every release in between, so here is everything else that's new since 0.10.10:
+
+- **A run can't run up a big bill unnoticed.** Once a run has spent about $30 of reported Claude cost, it pauses and asks you before it goes on. Click Resume to give it another $30. Change the limit with `SOLOFACTORY_MAX_RUN_COST_USD` (0 turns it off).
+- **Your draft brief survives a closed tab.** The Guide saves the brief as you talk. Reopen the page and it's still there; *Start over* clears it.
+- **No more checks that take hours to prove.** If your brief asks for things like "recordings up to 6 hours" or "delete after 30 days", the Guide rewrites the check to a short sample or a test clock and keeps the real limit as a setting.
+- **Building and repairs run on Sonnet.** Opus still plans and checks the work. In my test builds the apps came out the same, and each feature used about a third less of your plan, so a 5-hour window lasts much longer. To keep Opus for everything, start with `SOLOFACTORY_CLAUDE_MODEL=opus bash start.sh`.
+- **"Safe to resume?" on the stopped-run card.** When a run stops, the card says whether it stopped on a usage limit or an error, and whether it made progress since your last Resume. If it did, resume. If it stopped again on the same feature with the same checks passing, choose **Report this run** and send it to me.
+- **Every model setting is in the manual.** *Settings* now lists the Claude and Codex model and effort variables with their defaults.
+- **Fewer false failures from tests.** Runs set up the test command correctly from the first feature, and each feature's tests check only that feature's own files, so runs no longer pay for repairs on tests that were wired up wrong.
 
 ## How to update
 
