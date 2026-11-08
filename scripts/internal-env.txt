@@ -1,0 +1,5 @@
+# SOLOFACTORY_* variables src/ reads that are for tests and smokes only, not owners.
+# build-distro.sh --check fails on any other variable missing from the manual settings table.
+SOLOFACTORY_CASE_EVENTS
+SOLOFACTORY_VARIANT
+SOLOFACTORY_MAX_REPAIRS

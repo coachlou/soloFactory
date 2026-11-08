@@ -1,6 +1,7 @@
 ## 0.10.16: update notice documented (2026-11-08)
 
 - `docs/update-notice.md` (with screenshots) explains the update pill for owners. The manual gains an *Updates* section under *Start the factory* and a `SOLOFACTORY_UPDATE_CHECK` settings row. The INSTALL runbook gets a *below 0.10.15* note so the updating agent tells owners about the pill.
+- Docs: INSTALL *below 0.10.15* note, manual *Updates* section and settings row, new `docs/update-notice.md`.
 
 ## 0.10.15: internal doc out of the distro (2026-11-08)
 

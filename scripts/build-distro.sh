@@ -28,5 +28,18 @@ for d in $(grep -ohE '(projectRoot|"\.\."), "[A-Za-z0-9_.-]+"' src/*.mjs | sed -
   grep -qx "$d" distro/APP_FILES || miss "src/ reads '$d' from the app root but APP_FILES does not ship it"
 done
 
+# Docs gate (pre-release QA): the docs move with the code, checked before anything ships.
+# 1. Every SOLOFACTORY_* setting src/ reads is in the manual's settings table, or listed in
+#    scripts/internal-env.txt as test-only. ponytail: a grep for env reads and quoted names.
+for v in $(grep -ohE '(process\.env\.|["'"'"'`])SOLOFACTORY_[A-Z0-9_]+' src/*.mjs | sed -E 's/^(process\.env\.|.)//' | sort -u); do
+  grep -q "<code>$v" docs/manual/index.html || grep -qx "$v" scripts/internal-env.txt \
+    || miss "src/ reads $v but the manual settings table (docs/manual/index.html) does not list it"
+done
+# 2. The PROGRESS entry for package.json's version has a "- Docs:" bullet saying which owner docs
+#    changed (INSTALL "below <ver>" note, manual, README, docs/ guides) or "none" and why.
+ver=$(node -p 'require("./package.json").version')
+awk -v v="$ver" '$0 ~ "^## "v"[: ]" {on=1; next} /^## / {on=0} on && /^- Docs:/ {ok=1} END {exit !ok}' PROGRESS.md \
+  || miss "PROGRESS.md has no '- Docs:' bullet under '## $ver' — review the owner docs, then say what changed"
+
 [ $fail = 0 ] && echo "distro: ok ($(wc -l < distro/APP_FILES | tr -d ' ') app paths, INSTALL.md in sync)"
 exit $fail
