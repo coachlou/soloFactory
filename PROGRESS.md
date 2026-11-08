@@ -8,7 +8,9 @@ From one member's report: a brief was lost when the browser tab closed, and a 20
 - The run dashboard lists `job.notices` under the subtitle.
 - Also shipped (from 8d9ad6f): killed workers' usage counts toward the run's totals, `Bash(node:*)` is allowed, and old projects' lead instructions are refreshed.
 - rc2, from the real Claude smoke (habit tracker, 6 slices, ceiling $3: parked at $3.09 and $6.10, resumed both times, finished live at $6.69): the brief scan no longer flags seeded history ("30 days of seeded history"), and a second park names the raised limit instead of the per-grant ceiling.
-- A unit test pins that a `gate_infrastructure` park always offers Resume. The end-to-end path (stale-build rerun whose runner crashes) is not run by the fixture harness, whose gates are not cased.
+- Tests: a gate failure stamped with another build reruns on Resume with no repair turn, and a repeat failure parks on this build without renewing the budget, then offers the repair plan; a `gate_infrastructure` park on a spent budget still offers Resume. The crash-on-rerun classification itself is covered by the cased-gate test in `consolidation.test.mjs` (the feature harness's gates are not cased).
+- Not changed: the repeated-failure detector (`repeatedFailure`, three identical attempts). With two repairs per feature the budget runs out at the same attempt a changed-code loop rule would fire, so a looser rule would only act after an owner Resume, which the owner chose.
+- Install runbook: the 0.10.11 notes are their own *below 0.10.11* step, so a member updating from 0.10.8–0.10.10 gets them; drive.md names the cost ceiling under `run_budget_reached`; the manual covers saved drafts and long-duration checks.
 
 ## 0.10.10: notices for chat-posted briefs (2026-11-06)
 

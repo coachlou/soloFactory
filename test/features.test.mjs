@@ -622,6 +622,28 @@ test("a gate that hits its time limit parks without a repair turn, and resume re
   assert.equal(count(await started(run.store, run.job.id), "repair-"), 0);
 });
 
+test("a gate failure recorded on another build reruns on Resume first; the same failure parks without renewing the budget", async () => {
+  // Member run 2026-11-03: a failure from an older build went straight to a repair plan. Resume reruns it once, free.
+  const commandRunner = async ({ logPath }) => path.basename(logPath).startsWith("install-") ? { code: 0, output: "installed" } : { code: 1, output: "not ok 1 - score is saved" };
+  const run = await plannedRun({ commandRunner });
+  const parked = await run.make().start(run.job.id);
+  assert.equal(parked.error.code, "quality_gate_failed");
+  assert.equal(continuationAction(parked).action, "prepare-plan", "exhausted on this build");
+  const repairs = count(await started(run.store, run.job.id), "repair-");
+  await run.store.writeState({ ...parked, error: { ...parked.error, details: { ...parked.error.details, build: "0.10.1+0000000" } } });
+  assert.equal(continuationAction(await run.store.read(run.job.id)).action, "resume", "another build's failure is rerun first");
+
+  const rerun = await run.make().resume(run.job.id);
+  assert.equal(rerun.state, "failed");
+  assert.equal(rerun.error.code, "quality_gate_failed");
+  assert.equal(rerun.error.details.build, BUILD_ID);
+  assert.equal(rerun.attempt, parked.attempt, "the rerun spends no repair budget");
+  assert.equal(count(await started(run.store, run.job.id), "repair-"), repairs, "no repair turn after the rerun");
+  assert.equal(continuationAction(rerun).action, "prepare-plan");
+  // Had the rerun's runner crashed after every test passed (consolidation.test covers that classification), Resume stays offered on an exhausted budget.
+  assert.equal(continuationAction({ ...rerun, error: { code: "gate_infrastructure", message: "Update SoloFactory or Node.js, then Resume.", details: { build: BUILD_ID } } }).action, "resume");
+});
+
 test("a pause after checks resumes at review: no rebuild, no duplicate completion", async () => {
   let factory;
   let jobId;
