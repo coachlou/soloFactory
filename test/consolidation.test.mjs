@@ -7,7 +7,7 @@ import path from 'node:path';
 import { JobStore } from '../src/store.mjs';
 import { SoloFactory, nodeOptionPath, runnerCrash } from '../src/factory.mjs';
 import { assertConsolidation, caseResults, validateFeaturePlan } from '../src/wbs.mjs';
-import { REVIEW_BAR, featureBuildPrompt, featureReviewPrompt, repairPrompt } from '../src/prompts.mjs';
+import { REVIEW_BAR, TEST_SCRIPT_RULE, OWN_FILES_RULE, featurePlanPrompt, featureBuildPrompt, featureReviewPrompt, repairPrompt } from '../src/prompts.mjs';
 
 // Consolidating overlapping obligations into one requirement with explicit cases, shared by new-run and
 // repair planning. The cases keep every distinct field, action, boundary, failure condition and surface,
@@ -201,6 +201,7 @@ test('the feature builder is told how cases are proved', () => {
   const prompt = featureBuildPrompt(plan([requirement()]).slices[0], { owned: [], planDigest: 'digest' });
   assert.match(prompt, /one node:test per case\nwhose name contains \[CASE-ID\]/);
   assert.match(prompt, /without a --test-reporter flag of its own/);
+  assert.match(prompt, /test script is plain "node --test" with no directory argument/);
   assert.match(prompt, /a script that prints its own\nok\/fail lines records nothing/);
   assert.match(prompt, /do not read \.factory\/slices\.json or other features' plans/);
 });
@@ -336,4 +337,11 @@ test('a cased gate whose runner crashed after its tests passed parks without a r
     return { code: 1, output: FSYNC_CRASH };
   });
   assert.equal((await real.verify()).code, 'quality_gate_failed');
+});
+
+test('the planner and the first feature builder get the same npm test script rule', () => {
+  assert.ok(featurePlanPrompt().includes(TEST_SCRIPT_RULE));
+  assert.ok(featurePlanPrompt().includes(OWN_FILES_RULE) && featurePlanPrompt({ followOn: true }).includes(OWN_FILES_RULE));
+  assert.ok(!featurePlanPrompt({ followOn: true }).includes(TEST_SCRIPT_RULE));
+  assert.ok(featureBuildPrompt(plan([requirement()]).slices[0], { owned: [], planDigest: 'digest' }).includes(TEST_SCRIPT_RULE));
 });

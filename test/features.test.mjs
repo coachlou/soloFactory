@@ -169,9 +169,9 @@ test("a feature's checks run its own proofs without the whole suite; after a rep
   const result = await factory.start(job.id);
   assert.equal(result.state, "completed", result.error?.message);
   const failed = order.indexOf("proof-SKELETON-1");
-  assert.deepEqual(order.slice(0, failed + 1), ["install", "build", "proof-SKELETON-1"]);
+  assert.deepEqual(order.slice(0, failed + 1), ["install", "test", "build", "proof-SKELETON-1"], "the first feature also runs the tiny suite");
   // The repair left dependencies alone, so install does not rerun.
-  assert.deepEqual(order.slice(failed + 1, failed + 3), ["proof-SKELETON-1", "build"]);
+  assert.deepEqual(order.slice(failed + 1, failed + 4), ["proof-SKELETON-1", "test", "build"]);
   assert.ok(order.includes("test"), "the whole suite still runs at final integration");
   assert.equal(order.filter((gate) => gate === "install").length, 1, "later features and integration reuse the first install");
 });
@@ -223,7 +223,7 @@ test("planning agents can run the controller's own plan validation before they f
   assert.match(runs[1].out, /INVALID: Feature plan does not match this run/);
 });
 
-// Neither feature's proof is the whole suite, so only final integration runs npm test.
+// Neither feature's proof is the whole suite, so only the first feature and final integration run npm test.
 const scopedProofs = async (stage, cwd) => {
   if (stage === "feature-plan") await patch(path.join(cwd, ".factory/slices.json"), (plan) => {
     plan.slices[0].acceptance[0].proof.command = ["node", "e2e/skeleton.mjs"];
@@ -248,7 +248,9 @@ test("a later feature that breaks an earlier feature's test is caught and repair
   assert.equal(result.state, "completed", result.error?.message);
   const events = await store.events(job.id, Infinity);
   const lastFeature = events.findLastIndex((event) => event.type === "slice.completed");
-  assert.ok(!events.slice(0, lastFeature).some((event) => event.type === "gate.started" && event.gate === "test"), "feature checks never ran the whole suite");
+  const firstFeature = events.findIndex((event) => event.type === "slice.completed");
+  assert.ok(events.slice(0, firstFeature).some((event) => event.type === "gate.passed" && event.gate === "test"), "the first feature runs the tiny suite, so a broken test script fails early");
+  assert.ok(!events.slice(firstFeature, lastFeature).some((event) => event.type === "gate.started" && event.gate === "test"), "later feature checks never ran the whole suite");
   const final = events.slice(lastFeature);
   assert.ok(final.some((event) => event.type === "gate.failed" && event.gate === "test"), "integration caught the regression");
   assert.equal(count(await started(store, job.id), "repair-"), 1, "one integration repair, no feature repairs");
@@ -337,7 +339,7 @@ test("a repair that changes dependencies reinstalls before the next check", asyn
   const result = await factory.start(job.id);
   assert.equal(result.state, "completed", result.error?.message);
   const failed = order.indexOf("proof-SKELETON-1");
-  assert.deepEqual(order.slice(failed + 1, failed + 4), ["install", "proof-SKELETON-1", "build"]);
+  assert.deepEqual(order.slice(failed + 1, failed + 5), ["install", "proof-SKELETON-1", "test", "build"], "the first feature also runs the suite");
 });
 
 // Lou, 2026-10-16: each feature's proofs ran until green when it was built; final integration runs the whole
