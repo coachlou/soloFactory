@@ -12,6 +12,8 @@ aggregate fields are fine; different names for these are a deployment failure.`;
 
 // Optional lint gate (readManifest/verify). Static checks catch a mistake class before tests or review spend turns on it.
 // Plans named `node --test test/`, which Node 26 loads as a module and fails (2026-11-08 smokes).
+// Smoke 2026-11-08-e6e16013: a FOUNDATION case banned process spawning in every file under test/, and a later feature's e2e test broke it.
+export const OWN_FILES_RULE = `A test reads and asserts only on files its own feature writes: never scan or constrain other features' files (e.g. "no file under test/ spawns a process"). State a project-wide convention in the plan text, not as a test.`;
 export const TEST_SCRIPT_RULE = `commands.test is ["npm", "test"] and package.json's test script is plain "node --test" with no directory argument (newer Node loads "node --test test/" as a module and fails).`;
 
 export const LINT_RULE = `Optionally add commands.lint (an argument array starting with npm, node or npx) when the
@@ -479,6 +481,7 @@ Rules the controller enforces:
 - An earlier feature's test must not pin behavior a later feature changes (run df6500ce: F1's test required 404 on a
   route F2 turned into a 303, and F2 could not edit it). Write each test to assert only its own feature's contract; when
   a later feature must change an earlier test's expectation, list that test file in the later feature's writes.
+  ${OWN_FILES_RULE}
   List every file its obligations need changed, the UI files included. Features with no dependsOn path
   between them must write different files, so two features that need the same file get a dependsOn. package.json and factory.json belong to a foundation feature (one
   with no dependsOn), so put every dependency there. .factory/, package-lock.json, README.md and
