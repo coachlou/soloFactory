@@ -328,6 +328,15 @@ message: "SoloFactory is already running at <url>" when `/api/health` there answ
 SIGTERM it cancels active runs, drops idle connections and force-closes remaining ones after a
 1-second grace, so one stalled request cannot keep it alive; it exits after 10 seconds regardless.
 
+Update notice (`src/update-check.mjs`): at start, and when the page loads or the owner presses
+*Check for updates*, the server reads `version` from the public dev repo's
+`https://raw.githubusercontent.com/coachlou/soloFactory/main/package.json` (version moves only in
+release commits), with a 3-second timeout, never awaited by start-up or a run. No timer polls it.
+A success is cached for 10 minutes in the process; an error is not cached. Only `x.y.z` versions
+compare, numerically; a prerelease is never newer. `SOLOFACTORY_UPDATE_CHECK=0` turns it off, and
+it is always off under `node --test`. It never updates anything: the notice shows the paste-in
+prompt that points the owner's agent at the install runbook.
+
 - `GET /manual` — the self-contained HTML user manual (`docs/manual/index.html`), linked from the header.
 - `GET /api/health` — factory health, active project, busy run, `activeRuns`, `maxActiveRuns`, and
   `workers` (each active run's supervision snapshot: server alive is not worker progressing).
@@ -340,6 +349,8 @@ SIGTERM it cancels active runs, drops idle connections and force-closes remainin
 - `POST /api/projects/select` — switch the active project (initialising it: `git init`, `.aai/`
   scaffold, anchors). Never interrupts a run.
 - `GET /api/config` — intake questions and available subscription providers.
+- `GET /api/update[?force=1]` — `{ current, latest, newer, prompt, checkedAt }`, `{ current, error: true }`
+  when the check failed, or `{ current, disabled: true }`; `force` skips the 10-minute cache.
 - `POST /api/interview/turn` — run one Factory Guide turn inside the active project and return
   structured coverage; the transcript is appended to that project's `.aai/memory/interviews/guide.log`.
 - `POST /api/jobs` — validate intake, freeze input, queue a run; `202` with `queuePosition`.

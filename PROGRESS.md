@@ -1,3 +1,7 @@
+## Unreleased
+
+- Update notice: at start, on page load and from a *Check for updates* button, the factory reads `version` from the public `coachlou/soloFactory` main `package.json` and, when it is newer, shows a dismissible notice with both versions and the paste-in update prompt (the INSTALL runbook via `gh api`). No polling, 3s timeout, a 10-minute in-process cache, silent on failure except a manual check ("couldn't check"). Off with `SOLOFACTORY_UPDATE_CHECK=0`, always off under `node --test`. `GET /api/update`. Test: `test/update-check.test.mjs`.
+
 ## 0.10.13: Sonnet builders (2026-11-08)
 
 - Claude builders and repairs default to Sonnet (`SOLOFACTORY_CLAUDE_MODEL`, was Opus); the Guide interview follows. Planning, plan review, correction and reviews stay on Opus at low effort. Reason: one member's run filled a 5h subscription window on Opus builders. Smokes: Habit Ledger 0 repairs, $4.08 for 6 features; a recorder-like Voice Notes brief (WAV upload, background transcription queue, retry, resume after restart) 6 features, 1 repair, 0 review blocks, $5.23, 19 min.

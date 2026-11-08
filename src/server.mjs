@@ -17,6 +17,7 @@ import {
 } from "./interview.mjs";
 import { createProvider, detectProviderDiagnostics, discoverProviders } from "./providers.mjs";
 import { createFixtureProvider } from "./fixture-provider.mjs";
+import { createUpdateChecker } from "./update-check.mjs";
 import { REPORTABLE_STATES, buildDiagnostics, issuesConfig, renderReport, scrub, validateFeedback } from "./feedback.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -236,6 +237,13 @@ export async function createSoloFactoryServer(options = {}) {
     if (id !== active.id) await openProject(id);
     return json(response, 200, { active: active.id, projects: await listProjects(), ...schedulerStatus() });
   }
+  // Update notice: checked at start and when the page loads or asks; never on a timer. Off with
+  // SOLOFACTORY_UPDATE_CHECK=0, and always off under node --test so tests never reach the network.
+  const updateCheckOn = options.updateCheck ?? (process.env.SOLOFACTORY_UPDATE_CHECK !== "0" && !process.env.NODE_TEST_CONTEXT);
+  const checkForUpdate = updateCheckOn ? createUpdateChecker({ current: version, fetch: options.fetch }) : null;
+  checkForUpdate?.().then((result) => {
+    if (result.newer) console.log(`SoloFactory ${result.latest} is available (you have ${version}). Open the app for how to update.`);
+  });
   const issuesUrl = options.issuesUrl ?? process.env.SOLOFACTORY_ISSUES_URL;
   const issues = issuesConfig(issuesUrl);
   if (issuesUrl && !issues) console.warn("SOLOFACTORY_ISSUES_URL must look like https://github.com/<owner>/<repo>/issues with no query or fragment; GitHub links are disabled.");
@@ -246,6 +254,10 @@ export async function createSoloFactoryServer(options = {}) {
       if (request.method === "GET" && url.pathname === "/api/health") {
         // Server alive is this response; worker progress is each active run's supervision status.
         return json(response, 200, { ok: true, project: active.id, ...schedulerStatus(), workers: [...runs].map(([projectId, run]) => ({ projectId, jobId: run.jobId, supervision: run.factory.supervision(run.jobId) })) });
+      }
+      if (request.method === "GET" && url.pathname === "/api/update") {
+        if (!checkForUpdate) return json(response, 200, { current: version, disabled: true });
+        return json(response, 200, await checkForUpdate({ force: url.searchParams.get("force") === "1" }));
       }
       if (request.method === "GET" && url.pathname === "/api/board") {
         return json(response, 200, await board());

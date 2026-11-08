@@ -133,6 +133,19 @@ From Claude Code or Codex, *Report a problem with the factory* is always the las
 option: the agent drafts the same report and gives you the email route (or the issue link when
 `SOLOFACTORY_ISSUES_URL` is set). It never sends anything itself.
 
+### Update notice
+
+On start, and whenever you load the page or press **Check for updates**, SoloFactory compares
+its version with the latest release (`package.json` on the public `coachlou/soloFactory` main
+branch; one small unauthenticated request, 3-second timeout, no background polling). If a newer
+one exists, a dismissible notice names both versions and shows the prompt to paste into Claude
+Code or Codex to update. It never updates by itself. Offline or failed checks stay silent except
+when you press the button. Turn it off with:
+
+```bash
+SOLOFACTORY_UPDATE_CHECK=0 npm start
+```
+
 ### Error log
 
 Every operational error is appended to `errors.jsonl` in the factory home

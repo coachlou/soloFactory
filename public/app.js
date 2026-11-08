@@ -32,6 +32,7 @@ async function boot() {
   if (!first) showError(new Error(NO_PROVIDER));
   renderMessages();
   renderCoverage();
+  checkUpdate().catch(() => {}); // never holds up the page
   await refreshProjects();
   const savedId = localStorage.getItem("solofactory.currentJob");
   const candidate = state.jobs.find((job) => job.id === savedId)
@@ -1235,6 +1236,30 @@ $("#start-over-button").addEventListener("click", async () => {
 const feedback = { trigger: null, markdown: null, fingerprint: null, jobId: null };
 const feedbackDialog = $("#feedback-dialog");
 
+// Update notice. A page load reuses the server's recent answer; the button asks again.
+// Dismissal is per version, so a later release shows again.
+async function checkUpdate({ manual = false } = {}) {
+  const result = await api(`/api/update${manual ? "?force=1" : ""}`).catch(() => ({ error: true }));
+  const dismissed = (() => { try { return localStorage.getItem("solofactory.updateDismissed"); } catch { return null; } })();
+  let text = null;
+  if (result.newer && (manual || dismissed !== result.latest)) text = `SoloFactory ${result.latest} is available. You have ${result.current}.`;
+  else if (manual && result.disabled) text = "Update checks are off (SOLOFACTORY_UPDATE_CHECK=0).";
+  else if (manual && result.error) text = "Couldn't check for updates. Check your connection and try again.";
+  else if (manual) text = `You're on the latest version (${result.current}).`;
+  if (!text) return;
+  $("#update-text").textContent = text;
+  $("#update-prompt").textContent = result.prompt ?? "";
+  $("#update-how").classList.toggle("hidden", !result.newer);
+  $("#update-banner").dataset.latest = result.newer ? result.latest : "";
+  $("#update-banner").classList.remove("hidden");
+}
+$("#update-button").addEventListener("click", () => checkUpdate({ manual: true }));
+$("#update-dismiss").addEventListener("click", () => {
+  const latest = $("#update-banner").dataset.latest;
+  if (latest) try { localStorage.setItem("solofactory.updateDismissed", latest); } catch {}
+  $("#update-banner").classList.add("hidden");
+});
+$("#update-copy").addEventListener("click", () => navigator.clipboard?.writeText($("#update-prompt").textContent).then(() => { $("#update-copy").textContent = "Copied"; }).catch(() => {}));
 $("#feedback-button").addEventListener("click", (event) => openFeedback(event.currentTarget, { mode: "improvement" }));
 $("#report-run-button").addEventListener("click", (event) => openFeedback(event.currentTarget, { mode: "problem", jobId: state.job?.id }));
 $("#feedback-close-button").addEventListener("click", () => feedbackDialog.close());
