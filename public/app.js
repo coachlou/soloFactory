@@ -1042,7 +1042,9 @@ function renderAnswers(stops, live, features) {
     : job.recoveryPhase?.status === "ready" ? ["warn", "Yes: review and approve the repair plan above."]
       : parked ? ["bad", "Yes: the run stopped; see the recovery checkpoint above."]
         : ["ok", "No."];
-  patchChildren($("#qa"), [["Moving?", moving], ["Healthy?", healthy], ["How far?", far], ["Needs you?", needs]].flatMap(([question, [tone, answer]]) => [
+  // Shown only where Resume is the offered step, so the owner knows whether pressing it buys progress.
+  const advice = parked && (next?.action === "resume" || job.state === "paused") ? state.telemetry?.spend?.resume : null;
+  patchChildren($("#qa"), [["Moving?", moving], ["Healthy?", healthy], ["How far?", far], ["Needs you?", needs], ...(advice ? [["Safe to resume?", [advice.tone, advice.text]]] : [])].flatMap(([question, [tone, answer]]) => [
     Object.assign(document.createElement("dt"), { textContent: question }),
     Object.assign(document.createElement("dd"), { textContent: answer, className: tone }),
   ]));

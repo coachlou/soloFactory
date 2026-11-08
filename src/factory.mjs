@@ -2227,7 +2227,36 @@ export function runSpend(job, events, maxRepairs = 2, now = Date.now()) {
     elapsedMs: Math.max(0, now - Date.parse(job.startedAt ?? job.createdAt)),
     grantTurns: features == null ? null : maxRepairs * (features + 1),
     idleApprovals,
+    resume: resumeAdvice(job, events),
   };
+}
+
+// Stops that are not a processing error: nothing in the build failed, so Resume picks up where it left off.
+const CLEAN_STOPS = {
+  usage_limit: "your Claude usage window ran out. Wait for it to reset, then Resume",
+  run_budget_reached: "it reached its spending limit",
+  provider_unavailable: "the provider was briefly unavailable",
+  paused: "you paused it",
+};
+
+// The card's "Safe to resume?" answer: why it stopped, and what the run achieved since the last Resume.
+export function resumeAdvice(job, events) {
+  if (!["failed", "interrupted", "paused"].includes(job.state)) return null;
+  const last = events.findLastIndex((event) => event.type === "job.resumed");
+  const since = events.slice(last + 1);
+  const features = since.filter((event) => event.type === "slice.completed" || event.type === "recovery.slice.completed").length;
+  // Each repair re-runs the gates, so a stuck feature re-passes its early ones: count only checks newly passed.
+  const passed = (list) => list.filter((event) => event.type === "gate.passed").map((event) => `${event.feature ?? event.slice ?? ""}:${event.gate}`);
+  const before = new Set(passed(events.slice(0, last + 1)));
+  const checks = new Set(passed(since).filter((key) => !before.has(key))).size;
+  const code = job.state === "paused" ? "paused" : [job.error?.details?.diagnostics?.[0]?.code, job.error?.code].find((item) => CLEAN_STOPS[item]);
+  const progress = `Since ${last >= 0 ? "your last Resume" : "the start"}: ${features} feature${features === 1 ? "" : "s"} verified, ${checks} new check${checks === 1 ? "" : "s"} passed.`;
+  // A usage window or an outage can recur before any work; that is waiting, not a loop.
+  if (last >= 0 && !features && !checks && (!code || code === "run_budget_reached")) {
+    return { tone: "bad", features, checks, text: `Not yet. ${progress} Resuming again is likely to stop the same way; choose Report this run instead.` };
+  }
+  if (code) return { tone: "ok", features, checks, text: `Yes. No processing errors: ${CLEAN_STOPS[code]}. ${progress} Resume continues where it stopped.` };
+  return { tone: "warn", features, checks, text: `Check first. It stopped on an error, not a limit. ${progress} If that is more than at the last stop, Resume; if nothing moved, choose Report this run.` };
 }
 
 export function spendLine({ workers, tokens, costUsd, elapsedMs }) {

@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { JobStore } from "../src/store.mjs";
-import { SoloFactory, runSpend, spendLine, continuationAction } from "../src/factory.mjs";
+import { SoloFactory, runSpend, spendLine, continuationAction, resumeAdvice } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
 
 const brief = { workingName: "Pocket Pulse", acceptanceScenarios: ["A user records a score."] };
@@ -51,7 +51,7 @@ test("telemetry carries the spend shown before a recovery approval", async (t) =
   const { job, factory } = await setup(t);
   await factory.start(job.id);
   const { spend } = await factory.telemetry(job.id, { probeApp: false });
-  assert.ok(spend.workers > 0 && spend.tokens === spend.workers * 1100 && spend.costUsd === null && spend.grantTurns === null);
+  assert.ok(spend.workers > 0 && spend.tokens === spend.workers * 1100 && spend.costUsd === null && spend.grantTurns === null && spend.resume === null, "a finished run offers no resume advice");
   const stored = await factory.store.read(job.id);
   const planned = runSpend({ ...stored, recoveryPhase: { plan: { slices: [{}, {}, {}] } } }, [], 2);
   assert.equal(planned.grantTurns, 8, "maxRepairs * (features + 1), the refill in runFeatureRecovery");
@@ -104,4 +104,23 @@ test("the cost ceiling parks on reported spend, skips turns with no figure, and 
 
   // Smoke 2026-11-07 parked a second time saying "the ceiling of $3" at $6.10; the message names the raised limit.
   await assert.rejects(factory.assertWorkerBudget({ ...resumed, costAllowance: 3 }), /spent about \$4\.00, its limit of \$3\.00 \(SOLOFACTORY_MAX_RUN_COST_USD=1\.5/);
+});
+
+test("the resume advice separates clean stops, progress since the last Resume, and a stuck run", () => {
+  const limit = (code) => ({ state: "failed", error: { code: "provider_error", details: { diagnostics: [{ code }] } } });
+  const ev = (...types) => types.map((type) => ({ type }));
+  assert.equal(resumeAdvice({ state: "running" }, []), null);
+  const first = resumeAdvice(limit("run_budget_reached"), ev("gate.passed", "slice.completed"));
+  assert.equal(first.tone, "ok");
+  assert.match(first.text, /No processing errors: it reached its spending limit\. Since the start: 1 feature verified, 1 new check passed\./);
+  const lint = (feature) => ({ type: "gate.passed", gate: "lint", feature });
+  const moved = resumeAdvice(limit("run_budget_reached"), [...ev("slice.completed", "job.resumed"), lint("A"), lint("A"), lint("B")]);
+  assert.match(moved.text, /Since your last Resume: 0 features verified, 2 new checks passed/, "a repair re-passing the same check counts once");
+  assert.equal(resumeAdvice(limit("provider_unavailable"), ev("job.resumed")).tone, "ok", "an outage right after Resume is waiting");
+  const stuck = resumeAdvice(limit("run_budget_reached"), [lint("A"), ...ev("job.resumed"), lint("A"), ...ev("gate.failed")]);
+  assert.equal(stuck.tone, "bad", "re-passing a check already passed before the Resume is not progress");
+  assert.match(stuck.text, /Report this run/);
+  assert.equal(resumeAdvice(limit("usage_limit"), ev("job.resumed")).tone, "ok", "an exhausted window is waiting, not a loop");
+  assert.equal(resumeAdvice({ state: "paused" }, ev("job.resumed")).tone, "ok");
+  assert.equal(resumeAdvice({ state: "failed", error: { code: "agent_timeout" } }, ev("gate.passed")).tone, "warn");
 });
