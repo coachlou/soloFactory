@@ -1,3 +1,15 @@
+## Unreleased (on main after 0.10.11, 2026-11-08)
+
+From the builder-model smokes for one member's 5h-window report (notes: `builder-model-ab-smoke.md` in the side-session folder).
+
+- Stopped runs: when Resume is the offered step, the card says whether the run stopped on a limit or an error and counts progress since the last Resume (5a2367a).
+- Test command: the planner and the first feature's build prompt require `commands.test` `["npm", "test"]` with a plain `node --test` script (`TEST_SCRIPT_RULE`). Every earlier smoke arm wrote `node --test test/`, which Node 26 loads as a module, and paid a repair at integration.
+- The first feature runs the whole-suite test gate even when it has proofs, so a broken test command fails on FOUNDATION instead of at integration.
+- Planner: a test reads and asserts only on files its own feature writes (`OWN_FILES_RULE`). A FOUNDATION case that banned spawning in every `test/` file broke on a later feature's e2e test.
+- Smoke on merged main 3c5ad7a (Sonnet builders, Habit Ledger): 6 features, 18 workers, 0 repairs, 3.05M tokens, $4.08, 14 min. The shipped `npm test` passes 39/39. Before the fixes, the same brief cost 1–3 repairs per run.
+- Known leftover: the specification stage's PLAN.md can still name `node --test test/`; the feature planner overrides it.
+- Tests: 400/400.
+
 ## 0.10.11: cost ceiling, saved drafts, long-duration checks (2026-11-07)
 
 From one member's report: a brief was lost when the browser tab closed, and a 20-check run spent about $64 of reported cost over three usage windows before anyone was asked.

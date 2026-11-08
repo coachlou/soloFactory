@@ -419,7 +419,11 @@ carry a strategy forward.
    features (a feature with dependencies may not write them). `writes` is optional in the
    validator so plans and saved runs from before it still build, but a feature without it
    gets none of the writes-based safeguards below. Planning turns may not change app source or
-   the frozen contract (`plan_mutation`).
+   the frozen contract (`plan_mutation`). The planner prompt also fixes the test command
+   (`commands.test` is `["npm", "test"]` and the `test` script is plain `node --test`: Node 26
+   loads `node --test test/` as a module and fails) and keeps each test to its own feature:
+   it may not pin behavior a later feature changes, nor scan or constrain other features'
+   files (a project-wide convention goes in the plan text, not in a test).
 3. **Approve.** A fresh reviewer writes `.factory/plan-review-result.json` copying the
    request's token, contract digest and plan digest. Only an `approve` verdict bound to the
    exact plan approves it; a malformed, stale or mismatched verdict, or a reviewer that edits
@@ -428,7 +432,8 @@ carry a strategy forward.
    committed. No implementation turn runs before it.
 4. **Build each feature** through a persisted cursor (`job.featureCursor.substage`):
    implementing → checking (install/lint/test/build, lint only when declared, plus every distinct obligation proof as gate
-   `proof-<id>`) → reviewing (a scoped review of only that feature's owned checks and
+   `proof-<id>`; a feature with proofs skips the whole-suite test gate, except the first
+   feature, which runs it while the suite is tiny so a broken test command fails early) → reviewing (a scoped review of only that feature's owned checks and
    obligations, bound to a hash of the candidate source; a reviewer that edits source voids
    its verdict and forces fresh checks; capped at 4 reviews, `review_unstable`) → committing
    (a durable checkpoint commit; failure is `checkpoint_failed` and nothing advances) →
