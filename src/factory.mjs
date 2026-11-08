@@ -1342,7 +1342,10 @@ export class SoloFactory {
     let first = null;
     for (;;) {
       current = await this.stage(current, "verifying", "Running deterministic quality gates");
-      const failure = (slice?.writes && await this.writesFailure(current, slice)) || await this.verify(current, manifest, signal, { includeInstall, proofs, first, skipTest: Boolean(slice && proofs.length) });
+      // The first feature also runs the suite while it is tiny: a broken test script (e.g. `node --test test/`
+      // on Node 26) otherwise surfaced only at integration and cost a repair in every 2026-11-08 smoke arm.
+      const firstFeature = !current.sliceDone?.length;
+      const failure = (slice?.writes && await this.writesFailure(current, slice)) || await this.verify(current, manifest, signal, { includeInstall, proofs, first, skipTest: Boolean(slice && proofs.length && !firstFeature) });
       if (!failure) {
         if (!slice) {
           const candidate = await sourceBaseline(this.store, { head: false });

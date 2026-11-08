@@ -623,7 +623,8 @@ ${REVIEW_BAR}
 Build one case at a time: write its proof test, then the minimum real behavior that passes it, and run that
 proof until it passes before starting the next case, so an interrupted turn leaves passing cases, not half-wired
 code. Run only this feature's proof commands, plus targeted tests of earlier code you changed; do not run the
-whole test suite, which the controller runs at final integration and which can exhaust your 45-minute turn. Source-
+whole test suite, which the controller runs at final integration and which can exhaust your 45-minute turn. The
+npm test script is plain \`node --test\` with no directory argument (newer Node loads \`node --test test/\` as a module and fails). Source-
 string assertions do not prove user behavior. An obligation with cases needs one node:test per case
 whose name contains [CASE-ID], run by its proof command without a --test-reporter flag of its own; the
 controller passes it only when every case's own test passed. Cases are read only from node:test events, so even
