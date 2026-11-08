@@ -864,6 +864,12 @@ could change or remove them:
 - The Guide also rewrites checks that would need hours or days of real time or media (*recordings up to 6 hours*, *delete after 30 days*) into a short sample or a test clock, keeping the long limit as a setting. Seeded sample history (*30 days of seeded history*) is left alone.
 - Nothing to migrate by hand: run records load as before. The first time the factory opens a project scaffolded before 0.10.11, it replaces the untouched lead paragraph of that project's `.aai/instructions.md` (it pointed workers at a parent folder they cannot read); an owner's own edits stay.
 
+**If they were below 0.10.13 before the update**, say in one breath that runs on Claude now use a lighter model for building, so a run uses much less of their usage window. What you need to know yourself:
+
+- Claude builders, repairs and the Guide interview now default to Sonnet at medium effort. Planning, plan review, plan correction and every review stay on Opus at low effort. In testing, Sonnet builders passed review on the first try and cost about a third less per feature.
+- To keep Opus for building, start the factory with `SOLOFACTORY_CLAUDE_MODEL=opus`. A paused run uses the new default for its remaining workers after the restart.
+- Nothing to migrate by hand.
+
 **If they were below 0.10.12 before the update**, say in one breath that a stopped run's card now says whether it is safe to press Resume. What you need to know yourself:
 
 - When Resume is the offered step, the card adds *Safe to resume?*. *Yes. No processing errors* means the run stopped on a limit (usage window, spending limit, provider outage, or a pause), with the features verified and new checks passed since the last Resume. *Not yet* means a full allotment since the last Resume verified nothing: choose **Report this run** instead of resuming. *Check first* means it stopped on an error; compare progress with the last stop.
