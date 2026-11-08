@@ -11,6 +11,9 @@ requests.total (number), requests.errors (number), latencyMs.average (number), a
 aggregate fields are fine; different names for these are a deployment failure.`;
 
 // Optional lint gate (readManifest/verify). Static checks catch a mistake class before tests or review spend turns on it.
+// Plans named `node --test test/`, which Node 26 loads as a module and fails (2026-11-08 smokes).
+export const TEST_SCRIPT_RULE = `commands.test is ["npm", "test"] and package.json's test script is plain "node --test" with no directory argument (newer Node loads "node --test test/" as a module and fails).`;
+
 export const LINT_RULE = `Optionally add commands.lint (an argument array starting with npm, node or npx) when the
 stack has a standard linter or type checker; it then runs as a gate before the tests at every check.`;
 
@@ -499,7 +502,7 @@ ${followOn
   Plan increments against the shipped app; no walking skeleton. Preserve existing acceptance.`
     : `- The first feature carries factory.json (version 1, install/test/build/start argument arrays,
   healthPath "/health", metricsPath "/_factory/metrics"), a production build, GET /health and
-  privacy-preserving GET /_factory/metrics.`}
+  privacy-preserving GET /_factory/metrics. ${TEST_SCRIPT_RULE}`}
 ${CONTROLLER_FACTS}
 
 A fresh reviewer audits the exact plan before any build against this checklist. Check the whole
@@ -612,7 +615,7 @@ ${last ? "This is the last feature: also write or update README.md with concise 
 later features. ${followOn ? "Earlier releases built this app; extend it." : (slice.dependsOn.length ? "" : `If factory.json does not exist yet, create it (version 1, commands.install/test/build/start as
 argument arrays starting with npm, node or npx; start honors PORT; healthPath "/health";
 metricsPath "/_factory/metrics"), a production build, GET /health and privacy-preserving
-GET /_factory/metrics. ${METRICS_SCHEMA} ${LINT_RULE}`)}
+GET /_factory/metrics. ${TEST_SCRIPT_RULE} ${METRICS_SCHEMA} ${LINT_RULE}`)}
 
 ${featureBlock("Feature (each proof.command names an entry in Proof commands)", `${JSON.stringify(feature, null, 2)}\nProof commands:\n${JSON.stringify(commands)}`, featureFile)}
 Original requirements this feature closes (prove the full wording):
@@ -623,8 +626,7 @@ ${REVIEW_BAR}
 Build one case at a time: write its proof test, then the minimum real behavior that passes it, and run that
 proof until it passes before starting the next case, so an interrupted turn leaves passing cases, not half-wired
 code. Run only this feature's proof commands, plus targeted tests of earlier code you changed; do not run the
-whole test suite, which the controller runs at final integration and which can exhaust your 45-minute turn. The
-npm test script is plain \`node --test\` with no directory argument (newer Node loads \`node --test test/\` as a module and fails). Source-
+whole test suite, which the controller runs at final integration and which can exhaust your 45-minute turn. Source-
 string assertions do not prove user behavior. An obligation with cases needs one node:test per case
 whose name contains [CASE-ID], run by its proof command without a --test-reporter flag of its own; the
 controller passes it only when every case's own test passed. Cases are read only from node:test events, so even
