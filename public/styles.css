@@ -233,9 +233,6 @@ h2 { font: 500 27px/1.08 var(--serif); margin: 0 0 14px; }
 .top-right { display: flex; align-items: center; gap: 16px; }
 .project-select { padding: 8px 32px 8px 10px; max-width: 280px; text-overflow: ellipsis; }
 .background-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); font-size: 13px; }
-.update-banner { align-items: flex-start; }
-.update-body { display: grid; gap: 8px; min-width: 0; }
-.update-body pre { white-space: pre-wrap; margin: 6px 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
 .background-banner.attention { border-color: rgba(255,179,107,.5); color: var(--orange); }
 .button.small { padding: 7px 11px; font-size: 11px; }
 .feedback-dialog { width: min(680px, calc(100vw - 24px)); max-height: calc(100vh - 24px); padding: 0; border: 1px solid var(--line); border-radius: 20px; color: var(--ink); background: var(--panel); box-shadow: 0 30px 90px rgba(0,0,0,.5); }
@@ -267,3 +264,10 @@ h2 { font: 500 27px/1.08 var(--serif); margin: 0 0 14px; }
 .recovery-restart p { margin: 0 0 8px; }
 .recovery-restart p strong { display: block; }
 .recovery-restart-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Update available: a pill in the header, details in a popover. Never covers the work. */
+.button.update-available { border-color: var(--green); color: var(--green); }
+.button.update-available::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 99px; background: var(--green); vertical-align: 1px; }
+.update-pop { inset: 64px 16px auto auto; margin: 0; width: min(440px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); color: inherit; font-size: 13px; }
+.update-pop p { margin: 8px 0; color: var(--muted); }
+.update-pop pre { white-space: pre-wrap; margin: 0 0 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }

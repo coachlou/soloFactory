@@ -334,8 +334,9 @@ Update notice (`src/update-check.mjs`): at start, and when the page loads or the
 release commits), with a 3-second timeout, never awaited by start-up or a run. No timer polls it.
 A success is cached for 10 minutes in the process; an error is not cached. Only `x.y.z` versions
 compare, numerically; a prerelease is never newer. `SOLOFACTORY_UPDATE_CHECK=0` turns it off, and
-it is always off under `node --test`. It never updates anything: the notice shows the paste-in
-prompt that points the owner's agent at the install runbook.
+it is always off under `node --test`. It never updates anything: when newer, the header's *Check for updates*
+button becomes an *Update available* pill (no banner over the work) whose popover shows both
+versions and the paste-in prompt that points the owner's agent at the install runbook.
 
 - `GET /manual` — the self-contained HTML user manual (`docs/manual/index.html`), linked from the header.
 - `GET /api/health` — factory health, active project, busy run, `activeRuns`, `maxActiveRuns`, and

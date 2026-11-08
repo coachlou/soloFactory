@@ -9,6 +9,12 @@
   </head>
   <body>
     <div class="shell">
+      <div id="update-pop" class="update-pop" popover>
+        <strong id="update-text"></strong>
+        <p>Update when it suits you; nothing changes until you do. Open Claude Code (or Codex) on this computer (on Windows, in the Ubuntu window) and paste:</p>
+        <pre id="update-prompt"></pre>
+        <button id="update-copy" class="button small" type="button">Copy prompt</button>
+      </div>
       <header class="topbar">
         <a class="brand" href="/" aria-label="SoloFactory home">
           <span class="brand-mark" aria-hidden="true">SF</span>
@@ -49,18 +55,6 @@
           <div id="attention-banner" class="background-banner attention hidden" role="alert">
             <span id="attention-text"></span>
             <button id="attention-view-button" class="button small" type="button">Open</button>
-          </div>
-          <div id="update-banner" class="background-banner update-banner hidden" role="status">
-            <div class="update-body">
-              <span id="update-text"></span>
-              <details id="update-how" class="hidden">
-                <summary>How to update</summary>
-                <p>Open Claude Code (or Codex) on this computer (on Windows, in the Ubuntu window) and paste:</p>
-                <pre id="update-prompt"></pre>
-                <button id="update-copy" class="button ghost small" type="button">Copy</button>
-              </details>
-            </div>
-            <button id="update-dismiss" class="button ghost small" type="button" aria-label="Dismiss update notice">Dismiss</button>
           </div>
           <div id="background-banner" class="background-banner hidden" role="status">
             <span id="background-text"></span>

@@ -138,9 +138,10 @@ option: the agent drafts the same report and gives you the email route (or the i
 On start, and whenever you load the page or press **Check for updates**, SoloFactory compares
 its version with the latest release (`package.json` on the public `coachlou/soloFactory` main
 branch; one small unauthenticated request, 3-second timeout, no background polling). If a newer
-one exists, a dismissible notice names both versions and shows the prompt to paste into Claude
-Code or Codex to update. It never updates by itself. Offline or failed checks stay silent except
-when you press the button. Turn it off with:
+one exists, the button turns into a green **Update available** pill that stays put without
+covering your work; click it for both versions and the prompt to paste into Claude Code or
+Codex when you are ready to update. It never updates by itself. Offline or failed checks stay
+silent except when you press the button. Turn it off with:
 
 ```bash
 SOLOFACTORY_UPDATE_CHECK=0 npm start
