@@ -15,3 +15,6 @@ my-folder/
 
 # run-dashboard demo runtime state (holds nested project git repos)
 run-dashboard/.demo-home/
+
+# internal analysis, local only (docs/ ships)
+docs/wip-vs-scrappy-successor.md
