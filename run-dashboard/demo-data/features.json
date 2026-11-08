@@ -1,0 +1,1 @@
+[{"order": 1, "id": "SLICE-SKELETON", "title": "Walking skeleton", "dependsOn": "", "status": "verified", "reviews": 1, "repairs": 0, "activeMinutes": 0.67, "verifiedAt": ""}, {"order": 2, "id": "SLICE-UI", "title": "Recording UI and docs", "dependsOn": "SLICE-SKELETON", "status": "verified", "reviews": 1, "repairs": 0, "activeMinutes": 0.67, "verifiedAt": ""}]

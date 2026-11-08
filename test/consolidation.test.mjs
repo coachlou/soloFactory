@@ -344,5 +344,7 @@ test('the specification, the planner and the first feature builder get the same 
   assert.ok(featurePlanPrompt().includes(OWN_FILES_RULE) && featurePlanPrompt({ followOn: true }).includes(OWN_FILES_RULE));
   assert.ok(!featurePlanPrompt({ followOn: true }).includes(TEST_SCRIPT_RULE));
   assert.ok(specificationPrompt(true).includes(TEST_SCRIPT_RULE) && !specificationPrompt(true, { followOn: true }).includes(TEST_SCRIPT_RULE));
+  // Planned runs (planVersion 2) call specificationPrompt(false); PLAN.md must still get the rule.
+  assert.ok(specificationPrompt(false).includes(TEST_SCRIPT_RULE) && !specificationPrompt(false, { followOn: true }).includes(TEST_SCRIPT_RULE));
   assert.ok(featureBuildPrompt(plan([requirement()]).slices[0], { owned: [], planDigest: 'digest' }).includes(TEST_SCRIPT_RULE));
 });

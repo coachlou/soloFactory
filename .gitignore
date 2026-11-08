@@ -12,3 +12,6 @@ my-folder/
 
 # project-scoped ambient context (local)
 .aai/
+
+# run-dashboard demo runtime state (holds nested project git repos)
+run-dashboard/.demo-home/

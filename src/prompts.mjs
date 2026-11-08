@@ -12,6 +12,7 @@ aggregate fields are fine; different names for these are a deployment failure.`;
 
 // Optional lint gate (readManifest/verify). Static checks catch a mistake class before tests or review spend turns on it.
 // Plans named `node --test test/`, which Node 26 loads as a module and fails (2026-11-08 smokes).
+// It sits in the shared spec text: planned runs (planVersion 2) skip the slice contract.
 // Smoke 2026-11-08-e6e16013: a FOUNDATION case banned process spawning in every file under test/, and a later feature's e2e test broke it.
 export const OWN_FILES_RULE = `A test reads and asserts only on files its own feature writes: never scan or constrain other features' files (e.g. "no file under test/ spawns a process"). State a project-wide convention in the plan text, not as a test.`;
 export const TEST_SCRIPT_RULE = `commands.test is ["npm", "test"] and package.json's test script is plain "node --test" with no directory argument (newer Node loads "node --test test/" as a module and fails).`;
@@ -86,7 +87,7 @@ first increment of this release, verified against the already-running app.`
 (factory.json version 1 — commands.install/test/build/start as argument arrays,
 healthPath "/health", metricsPath "/_factory/metrics"), a production build, GET /health and
 privacy-preserving GET /_factory/metrics — so every later slice is verified against a
-running, health-checked app from the first gate. ${TEST_SCRIPT_RULE}`}
+running, health-checked app from the first gate.`}
 
 Each slice object needs:
   - id: SCREAMING-SNAKE, unique (e.g. "SLICE-RECORD")
@@ -146,7 +147,7 @@ factory commits the tree itself.
 ${HOST_RULE}${sliceContract}
 The future app must expose GET /health and privacy-preserving GET /_factory/metrics. Metrics
 include uptime, request/error/active counts, aggregate latency, and normalized route counts;
-never request bodies, headers, IPs, identifiers, or query strings. ${METRICS_SCHEMA}
+never request bodies, headers, IPs, identifiers, or query strings. ${METRICS_SCHEMA}${followOn ? "" : `\nWherever PLAN.md names the test command: ${TEST_SCRIPT_RULE}`}
 
 Do not create or modify package.json, factory.json, source files, tests, or configuration
 outside .factory. End with a short summary of what you wrote.`;

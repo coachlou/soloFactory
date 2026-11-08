@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run Flight Recorder (live)</title>
+<!-- ponytail: local stand-in for the hosted dashboard runtime, just enough of `dash` for index.html.
+     Polls ./<data>/*.json every second; extract.py in a loop keeps those files current. -->
+<style>
+  :root {
+    --font-anthropic-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-anthropic-serif: ui-serif, Georgia, "Times New Roman", serif;
+    --color-fg: #1f1e1d; --color-fg-muted: #6b6a68; --color-bg: #faf9f5; --color-panel: #ffffff;
+    --color-border-line: #e6e3da; --color-ok: #2f7d4f; --color-warn: #b7791f; --color-bad: #c2412d;
+    --cds-radius: 10px; --cds-pad-xs: 4px; --cds-pad-sm: 8px; --cds-pad-md: 12px; --cds-pad-lg: 16px;
+    --cds-gap-xs: 4px; --cds-gap-sm: 8px; --cds-gap-md: 12px; --cds-gap-lg: 20px;
+    --cds-font-size-caption: 12px; --cds-font-size-body: 15px; --cds-font-size-heading: 17px; --cds-font-size-title: 28px;
+    --cds-font-weight-medium: 600; --cds-chart-grid: #ece9e1; --cds-chart-axis: #c9c5ba; --cds-chart-reference: #8a8780;
+    --cds-chart-muted: #b9b5ab; --cds-surface-popover: #ffffff; --cds-border: #e6e3da;
+    --cds-shadow-popover: 0 6px 24px rgba(0,0,0,.12); --cds-dur-slow: .4s; --cds-ease-out: cubic-bezier(.2,.8,.2,1);
+    --cds-text-secondary: #6b6a68;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --color-fg: #f0eee6; --color-fg-muted: #a8a59c; --color-bg: #1c1b19; --color-panel: #262523;
+      --color-border-line: #3a3936; --cds-chart-grid: #33322f; --cds-chart-axis: #55534e; --cds-chart-muted: #6b6965;
+      --cds-surface-popover: #2e2d2a; --cds-border: #3a3936; --cds-text-secondary: #a8a59c;
+    }
+  }
+  body { margin: 0; background: var(--color-bg); color: var(--color-fg); }
+  #dash-root { padding: 20px 16px 40px; }
+  .dash-skeleton { background: var(--color-border-line); opacity: .4; border-radius: var(--cds-radius); }
+  .live-badge { position: fixed; top: 10px; right: 12px; z-index: 10; font: 12px var(--font-anthropic-sans); background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: 999px; padding: 4px 10px; color: var(--color-fg-muted); }
+  .live-badge::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--color-ok); margin-right: 6px; }
+  .live-badge[data-fresh=false]::before { background: var(--color-warn); }
+  @keyframes beat { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.6); opacity: .5; } }
+  @media (prefers-reduced-motion: no-preference) { .live-badge[data-fresh=true]::before { animation: beat 1.2s ease-in-out infinite; } }
+</style>
+</head>
+<body>
+<div class="live-badge" id="live-badge">Live · waiting for data</div>
+<div id="dash-root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script>
+(() => {
+  const DIR = new URLSearchParams(location.search).get('data') || 'data';
+  const q = new URLSearchParams(location.search);
+  const IDS = (q.get('ids') || 'run,stages,features,incidents,plans').split(',');
+  const PAGE = q.get('page') || 'index.html';
+  const raw = {}, calcs = {}, subs = [];
+  let lastText = '';
+  const data = (id) => {
+    if (calcs[id]) {
+      const ins = calcs[id].inputs.map(data);
+      if (ins.some((d) => d.status !== 'ok')) return { status: 'loading', data: [], meta: [] };
+      try { return { status: 'ok', data: calcs[id].fn(...ins.map((d) => d.data)), meta: [] }; }
+      catch (e) { console.error(id, e); return { status: 'error', data: [], message: String(e), meta: [] }; }
+    }
+    const rows = raw[id];
+    return rows ? { status: 'ok', data: rows, columns: Object.keys(rows[0] || {}), meta: [] } : { status: 'loading', data: [], meta: [] };
+  };
+  const fire = () => subs.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } });
+  window.dash = {
+    data, calc: (id, spec) => { calcs[id] = spec; },
+    onData: (fn) => { subs.push(fn); fn(); },
+    colors: ['#c96442', '#4a7fb5', '#7a5bb5', '#d08a2e', '#3f9a8a', '#b5527a', '#6f8f3a', '#8a7a6a'],
+    setLink() {}, refresh() {}, params: () => ({}), setParams() {}, resetParams() {},
+  };
+  async function poll() {
+    try {
+      const texts = await Promise.all(IDS.map((id) => fetch(`${DIR}/${id}.json`, { cache: 'no-store' }).then((r) => (r.ok ? r.text() : Promise.reject(r.status)))));
+      const joined = texts.join('\n');
+      if (joined !== lastText) {
+        lastText = joined;
+        IDS.forEach((id, i) => { raw[id] = JSON.parse(texts[i]); });
+        fire();
+      }
+      const run = raw.run && raw.run[0];
+      const age = run && run.lastEventAt ? Math.round((Date.now() - Date.parse(run.lastEventAt)) / 1000) : null;
+      const ago = age == null ? '' : age < 90 ? ` · last event ${age}s ago` : ` · last event ${Math.round(age / 60)} min ago`;
+      const badge = document.getElementById('live-badge');
+      badge.textContent = run ? `Live · ${run.state}${ago} · checked ${new Date().toLocaleTimeString()}` : 'Live · waiting for data';
+      badge.dataset.fresh = age != null && age < 120;
+    } catch (e) { /* a half-written snapshot; the next poll picks up the whole one */ }
+    setTimeout(poll, 1000);
+  }
+  let w = 0;
+  addEventListener('resize', () => { if (innerWidth !== w) { w = innerWidth; fire(); } });
+  fetch(PAGE, { cache: 'no-store' }).then((r) => r.text()).then((html) => {
+    const root = document.getElementById('dash-root');
+    root.innerHTML = html;
+    root.querySelectorAll('script').forEach((old) => {
+      const s = document.createElement('script');
+      s.textContent = old.textContent;
+      old.replaceWith(s);
+    });
+    poll();
+  });
+})();
+</script>
+</body>
+</html>
