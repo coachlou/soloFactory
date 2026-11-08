@@ -1,0 +1,524 @@
+<style>
+  .fr { position: relative; max-width: 1240px; margin-inline: auto; font-family: var(--font-anthropic-sans); color: var(--color-fg); }
+  .fr * { box-sizing: border-box; }
+  .fr-kicker { margin: 0; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); letter-spacing: .04em; text-transform: uppercase; }
+  .fr h1 { margin: var(--cds-gap-xs) 0 var(--cds-gap-sm); font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); line-height: 1.15; }
+  .fr-take { margin: 0; font-size: var(--cds-font-size-body); line-height: 1.5; max-width: 62ch; }
+  .fr-take .fr-cap { text-transform: capitalize; }
+  .fr-take b, .fr-tile b { font-weight: var(--cds-font-weight-medium); }
+  .fr-asof { margin: var(--cds-gap-xs) 0 0; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+
+  .fr-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: var(--cds-gap-md); margin: var(--cds-gap-lg) 0; }
+  .fr-tile { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-md) var(--cds-pad-lg); }
+  .fr-tile h3 { margin: 0; font-size: var(--cds-font-size-caption); font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); }
+  .fr-big { margin: var(--cds-gap-xs) 0; font-family: var(--font-anthropic-serif); font-weight: 400; font-size: calc(var(--cds-font-size-title) * 1.35); line-height: 1.05; font-variant-numeric: tabular-nums; }
+  .fr-big .fr-unit { font-size: .55em; color: var(--color-fg-muted); margin-left: .1em; }
+  .fr-tile p { margin: 0; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); line-height: 1.45; font-variant-numeric: tabular-nums; }
+  .fr-meter { height: 6px; margin-top: var(--cds-gap-sm); border-radius: 3px; background: var(--color-border-line); overflow: hidden; }
+  .fr-meter > div { height: 100%; width: 0; border-radius: 3px; background: var(--color-ok); transition: width var(--cds-dur-slow) var(--cds-ease-out); }
+
+  .fr-card { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-lg); margin-bottom: var(--cds-gap-md); min-width: 0; }
+  .fr-card h2 { margin: 0; font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); }
+  .fr-note { margin: var(--cds-gap-xs) 0 var(--cds-gap-md); color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); line-height: 1.45; max-width: 75ch; }
+  .fr-head { display: flex; flex-wrap: wrap; gap: var(--cds-gap-sm); align-items: flex-start; justify-content: space-between; }
+  .fr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: var(--cds-gap-md); margin-bottom: var(--cds-gap-md); }
+  .fr-grid .fr-card { margin-bottom: 0; }
+
+  .fr-seg { display: inline-flex; border: 1px solid var(--color-border-line); border-radius: 999px; padding: 2px; gap: 2px; }
+  .fr-seg button, .fr-chips button { font: inherit; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); background: none; border: 0; border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+  .fr-seg button[aria-pressed=true] { background: var(--color-fg); color: var(--color-bg); }
+
+  #line-chart { min-height: 200px; }
+  #river-chart { min-height: 112px; }
+  #pace-chart { min-height: 220px; }
+  .fr svg text { fill: var(--color-fg-muted); font-size: 11px; font-family: var(--font-anthropic-sans); }
+  .fr svg .fr-id { fill: var(--color-fg); font-weight: 500; }
+  .fr svg .tick line { stroke: var(--cds-chart-grid); }
+  .fr svg .domain { stroke: var(--cds-chart-axis); }
+  .fr-hit { cursor: default; }
+
+  .fr-legend { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs) var(--cds-gap-md); margin-top: var(--cds-gap-sm); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }
+  .fr-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .fr-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+  .fr-legend b { color: var(--color-fg); font-weight: var(--cds-font-weight-medium); }
+
+  .fr-drafts { display: flex; flex-wrap: wrap; gap: var(--cds-gap-sm); min-height: 60px; }
+  .fr-draft { width: 64px; padding: 8px 6px 6px; border-radius: var(--cds-radius); border: 1px solid var(--color-border-line); text-align: center; font-size: var(--cds-font-size-caption); line-height: 1.3; }
+  .fr-draft b { display: block; font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-heading); }
+  .fr-draft.is-failed { border-color: var(--color-bad); color: var(--color-bad); }
+  .fr-draft.is-approved { border-color: var(--color-ok); color: var(--color-ok); }
+  .fr-draft.is-now { border-width: 2px; }
+  .fr-draft span { color: var(--color-fg-muted); }
+
+  .fr-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--cds-gap-sm); }
+  .fr-chips button { border: 1px solid var(--color-border-line); }
+  .fr-chips button[aria-pressed=true] { border-color: var(--color-fg); color: var(--color-fg); }
+  .fr-scroll { max-height: 360px; overflow: auto; border-top: 1px solid var(--color-border-line); }
+  .fr-table { width: 100%; border-collapse: collapse; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+  .fr-table th { position: sticky; top: 0; background: var(--color-panel); text-align: left; font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); padding: 8px 8px 6px 0; border-bottom: 1px solid var(--color-border-line); }
+  .fr-table td { padding: 7px 8px 7px 0; border-bottom: 1px solid var(--color-border-line); vertical-align: top; line-height: 1.4; }
+  .fr-table td:first-child { white-space: nowrap; color: var(--color-fg-muted); }
+  .fr-kind { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .fr-kind i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  @media (max-width: 560px) { .fr-col-state { display: none; } }
+
+  .fr-tip { position: absolute; z-index: 5; pointer-events: none; opacity: 0; max-width: 280px; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); line-height: 1.45; }
+  .fr-tip .k { color: var(--cds-text-secondary); }
+  .fr-fail { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: inherit; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+  .fr-fail::before { content: ""; width: .375rem; height: .375rem; border-radius: 50%; background: var(--color-bad); }
+  [data-dash-source-state=empty] { color: transparent; }
+  [data-dash-source-state=refreshing] { opacity: .5; transition: opacity var(--cds-dur-slow); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .fr-pulse { transform-box: fill-box; transform-origin: center; animation: fr-pulse 1.8s var(--cds-ease-out) infinite; }
+    @keyframes fr-pulse { from { transform: scale(1); opacity: .7; } to { transform: scale(2.6); opacity: 0; } }
+  }
+</style>
+
+<div class="fr">
+  <header id="top">
+    <p class="fr-kicker">SoloFactory run · <span class="fr-v" data-source="run" data-field="id" data-row="0">—</span></p>
+    <h1><span class="fr-v" data-source="run" data-field="name" data-row="0">—</span>, flight recorder</h1>
+    <p class="fr-take" id="takeaway">
+      <b class="fr-v" data-source="run" data-field="stage" data-row="0">—</b><span id="take-at"> on step
+      <b class="fr-v" data-source="run" data-field="currentOrder" data-row="0">—</b> of
+      <span class="fr-v" data-source="run" data-field="featuresTotal" data-row="0">—</span>,
+      “<span class="fr-v" data-source="run" data-field="currentTitle" data-row="0">—</span>”</span>.
+      <span class="fr-v fr-cap" data-source="run" data-field="provider" data-row="0">—</span> holds the run<span id="take-next">; the next step is
+      <b class="fr-v" data-source="run" data-field="nextAction" data-row="0">—</b></span>.
+    </p>
+    <p class="fr-asof">Last factory activity <span class="fr-v" data-fmt="time" data-source="run" data-field="updatedAt" data-row="0">—</span></p>
+  </header>
+
+  <section class="fr-tiles" id="figures">
+    <div class="fr-tile" id="tile-verified">
+      <h3>Stops cleared</h3>
+      <div class="fr-big"><span class="fr-v" data-source="run" data-field="featuresVerified" data-row="0">—</span><span class="fr-unit">/ <span class="fr-v" data-source="run" data-field="featuresTotal" data-row="0">—</span></span></div>
+      <p>Features (or pipeline steps) built, gated and passed.</p>
+      <div class="fr-meter" data-source="run"><div id="verified-bar"></div></div>
+    </div>
+    <div class="fr-tile" id="tile-busy">
+      <h3>Clock spent working</h3>
+      <div class="fr-big"><span class="fr-v" data-source="busy" data-field="pct" data-row="0">—</span><span class="fr-unit">%</span></div>
+      <p><span class="fr-v" data-source="busy" data-field="work" data-row="0">—</span> of agent work in <span class="fr-v" data-source="busy" data-field="wall" data-row="0">—</span> since the run began.</p>
+    </div>
+    <div class="fr-tile" id="tile-left">
+      <h3>Agent work left, at today’s pace</h3>
+      <div class="fr-big">≈<span class="fr-v" data-source="pace" data-field="left" data-row="0">—</span></div>
+      <p><span class="fr-v" data-source="pace" data-field="stopsLeft" data-row="0">—</span> × <span class="fr-v" data-source="pace" data-field="median" data-row="0">—</span>, the median so far. Waiting time not included.</p>
+    </div>
+    <div class="fr-tile" id="tile-gates">
+      <h3>Quality gates passed</h3>
+      <div class="fr-big"><span class="fr-v" data-source="run" data-field="gatesPassed" data-row="0">—</span></div>
+      <p><span class="fr-v" data-source="run" data-field="gatesFailed" data-row="0">—</span> failed and sent back<span id="cases"> · <span class="fr-v" data-source="run" data-field="casesPassed" data-row="0">—</span> of <span class="fr-v" data-source="run" data-field="casesTotal" data-row="0">—</span> acceptance cases green</span></p>
+    </div>
+    <div class="fr-tile" id="tile-drafts">
+      <h3>Plans drafted</h3>
+      <div class="fr-big"><span class="fr-v" data-source="drafts" data-field="drafted" data-row="0">—</span></div>
+      <p><span class="fr-v" data-source="drafts" data-field="approved" data-row="0">—</span> approved · <span class="fr-v" data-source="drafts" data-field="failed" data-row="0">—</span> turned back by plan review<span id="replaced"> · <span class="fr-v" data-source="drafts" data-field="replaced" data-row="0">—</span> passed review but were replaced by a newer draft before approval</span></p>
+    </div>
+  </section>
+
+  <section class="fr-card" id="line">
+    <h2>The line to a live app</h2>
+    <p class="fr-note">Each stop is one feature of the approved plan, in build order; a single-pass run’s stops are its pipeline steps. Green stops are verified, the pulsing one is where the factory stands, hollow ones are still ahead.</p>
+    <div id="line-chart" class="dash-skeleton" data-source="features"></div>
+  </section>
+
+  <section class="fr-card" id="river">
+    <div class="fr-head">
+      <div>
+        <h2>The whole run on one clock</h2>
+        <p class="fr-note">Colored blocks are the factory working; bare track is waiting on usage limits, pauses or the owner. Dots above mark every stop, block and pause.</p>
+      </div>
+      <div class="fr-seg" role="group" aria-label="Time span">
+        <button type="button" data-span="all" aria-pressed="true">Whole run</button>
+        <button type="button" data-span="day" aria-pressed="false">Last 24 hours</button>
+      </div>
+    </div>
+    <div id="river-chart" class="dash-skeleton" data-source="stages incidents"></div>
+    <div class="fr-legend" id="river-legend" data-source="clock"></div>
+  </section>
+
+  <div class="fr-grid">
+    <section class="fr-card" id="pace">
+      <h2>Minutes of work per stop</h2>
+      <p class="fr-note">Active stage time for each stop on the line. Dashed outlines project the stops ahead at the median so far.</p>
+      <div id="pace-chart" class="dash-skeleton" data-source="features pace"></div>
+    </section>
+    <section class="fr-card" id="drafts">
+      <h2>Drafts it took to get a plan</h2>
+      <p class="fr-note">Every plan the factory drafted, oldest first. Red ones were turned back by the plan review; green ones were approved and built against.</p>
+      <div class="fr-drafts dash-skeleton" id="drafts-strip" data-source="plans"></div>
+    </section>
+  </div>
+
+  <section class="fr-card" id="log">
+    <h2>Incident log</h2>
+    <p class="fr-note">Every time the run was stopped, blocked, paused or resumed, newest first.</p>
+    <div class="fr-chips" id="log-chips" data-source="incidents"></div>
+    <div class="fr-scroll">
+      <table class="fr-table" data-source="incidents" data-row-key="n">
+        <thead><tr><th data-field="at">When</th><th data-field="kind">What</th><th class="fr-col-state" data-field="state">Stage</th><th data-field="message">Detail</th></tr></thead>
+        <tbody id="log-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="fr-tip" id="fr-tip" role="tooltip"></div>
+</div>
+
+<script>
+(() => {
+  const root = document.querySelector('.fr');
+  const $ = (s) => root.querySelector(s);
+  const C = dash.colors;
+  const STATES = [
+    ['building', 'Building', C[0]],
+    ['verifying', 'Gates & checks', C[1]],
+    ['reviewing', 'Independent review', C[2]],
+    ['repairing', 'Repairing', C[3]],
+    ['specifying', 'Planning', C[4]],
+    ['paused', 'Paused', 'var(--cds-chart-muted)'],
+  ];
+  const STATE = Object.fromEntries(STATES.map(([k, name, c]) => [k, { name, c }]));
+  const KINDS = {
+    'Run stopped': { lane: 0, c: 'var(--color-bad)' },
+    'Usage limit': { lane: 0, c: 'var(--color-bad)' },
+    'Agent error': { lane: 0, c: 'var(--color-bad)' },
+    'Review blocked': { lane: 1, c: 'var(--color-warn)' },
+    'Gate failed': { lane: 1, c: 'var(--color-warn)' },
+    'Plan blocked': { lane: 1, c: 'var(--color-warn)' },
+    'Paused': { lane: 2, c: 'var(--color-fg-muted)' },
+    'Resumed': { lane: 2, c: 'var(--color-ok)' },
+  };
+  const kindOf = (k) => KINDS[k] || { lane: 2, c: 'var(--color-fg-muted)' };
+  const fmtInt = d3.format(',');
+  const fmt1 = d3.format(',.1f');
+  const fmtWhen = d3.timeFormat('%a %b %-d, %-I:%M %p');
+  const fmtDur = (min) => min < 1 ? `${Math.round(min * 60)} s` : min < 59.95 ? `${fmt1(min)} min` : `${Math.floor(Math.round(min) / 60)} h ${Math.round(min) % 60} min`;
+
+  // Elapsed minutes, not the rounded wallHours, so a run under six minutes old still measures. It runs to
+  // whichever is later, the last update or the open stage's end (the snapshot time).
+  const elapsed = (run, stages) =>
+    (d3.max([run[0].updatedAt, ...stages.map((s) => s.end)], (d) => new Date(d)) - new Date(run[0].startedAt)) / 60000;
+  dash.calc('clock', {
+    inputs: ['run', 'stages'],
+    title: 'Time by activity',
+    description: 'Minutes the run spent in each kind of stage, plus elapsed minutes with no stage running (idle).',
+    fn: (run, stages) => {
+      const byState = d3.rollup(stages, (v) => d3.sum(v, (s) => Number(s.minutes)), (s) => s.state);
+      const rows = Array.from(byState, ([state, minutes]) => ({ state, minutes: Math.round(minutes * 100) / 100 }));
+      rows.push({ state: 'idle', minutes: Math.round(Math.max(0, elapsed(run, stages) - d3.sum(byState.values())) * 100) / 100 });
+      return rows;
+    },
+  });
+  dash.calc('busy', {
+    inputs: ['run', 'stages'],
+    title: 'Share of the clock spent working',
+    description: 'Time in building, gates, review, repair and planning as a share of all elapsed time.',
+    fn: (run, stages) => {
+      const work = d3.sum(stages.filter((s) => s.state !== 'paused'), (s) => Number(s.minutes));
+      const wall = Math.max(elapsed(run, stages), work);
+      return [{ work: fmtDur(work), wall: fmtDur(wall), pct: wall ? Math.round((100 * work) / wall) : 100 }];
+    },
+  });
+  dash.calc('pace', {
+    inputs: ['features'],
+    title: 'Agent work left at current pace',
+    description: 'Median active minutes of the verified features, times the features not yet verified.',
+    fn: (features) => {
+      const median = d3.median(features.filter((f) => f.status === 'verified'), (f) => Number(f.activeMinutes)) || 0;
+      const left = features.filter((f) => f.status !== 'verified').length;
+      return [{ medianMinutes: median, median: fmtDur(median), stopsLeft: `${left} ${left === 1 ? 'stop' : 'stops'}`, left: fmtDur(median * left) }];
+    },
+  });
+  dash.calc('drafts', {
+    inputs: ['plans'],
+    title: 'Repair plan drafts',
+    description: 'Plans drafted: how many were approved, turned back by the plan review, or replaced by a newer draft before approval.',
+    fn: (plans) => [{
+      drafted: plans.length,
+      approved: plans.filter((p) => p.approvedAt).length,
+      failed: plans.filter((p) => p.status === 'plan_failed').length,
+      // the newest unapproved draft may still be waiting for approval, so it is not "replaced" yet
+      replaced: plans.filter((p, i) => !p.approvedAt && p.status !== 'plan_failed' && i < plans.length - 1).length,
+    }],
+  });
+
+  // Shared tooltip, kept inside the page.
+  const tip = $('#fr-tip');
+  const showTip = (event, lines) => {
+    tip.replaceChildren(...lines.map(([cls, text]) => Object.assign(document.createElement('div'), { className: cls, textContent: text })));
+    tip.style.opacity = 1;
+    const box = root.getBoundingClientRect();
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    let x = event.clientX - box.left + 14, y = event.clientY - box.top - h - 10;
+    if (x + w > box.width) x = event.clientX - box.left - w - 14;
+    if (y < 0) y = event.clientY - box.top + 18;
+    tip.style.left = `${Math.max(0, x)}px`;
+    tip.style.top = `${y}px`;
+  };
+  const hideTip = () => { tip.style.opacity = 0; };
+  const hover = (sel, lines) => sel.on('mousemove', (e, d) => showTip(e, lines(d))).on('mouseleave', hideTip);
+
+  const isBad = (d) => ['error', 'connect', 'declined', 'missing'].includes(d.status);
+  const ready = (box, ...ds) => {
+    if (ds.some(isBad)) {
+      box.classList.remove('dash-skeleton');
+      box.replaceChildren(Object.assign(document.createElement('div'), { className: 'fr-fail', textContent: 'Failed to load' }));
+      return false;
+    }
+    if (ds.some((d) => d.status !== 'ok')) {
+      box.classList.add('dash-skeleton');
+      box.replaceChildren();
+      return false;
+    }
+    box.classList.remove('dash-skeleton');
+    box.replaceChildren();
+    return true;
+  };
+  const svgIn = (box, W, H) => d3.select(box).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('height', H);
+
+  function fillMarks() {
+    root.querySelectorAll('.fr-v[data-source][data-field]').forEach((el) => {
+      const d = dash.data(el.dataset.source);
+      const row = d.status === 'ok' ? d.data[Number(el.dataset.row || 0)] : null;
+      const v = row ? row[el.dataset.field] : null;
+      if (v == null || v === '') { el.textContent = '—'; return; }
+      if (el.dataset.fmt === 'time') el.textContent = fmtWhen(new Date(v));
+      else if (typeof v === 'number') el.textContent = Number.isInteger(v) ? fmtInt(v) : fmt1(v);
+      else el.textContent = v;
+    });
+    const run = dash.data('run');
+    const r = run.status === 'ok' ? run.data[0] : null;
+    $('#verified-bar').style.width = r ? `${(100 * r.featuresVerified) / r.featuresTotal}%` : '0';
+    // Clauses that only make sense mid-run, and plan views a single-pass run doesn't have.
+    $('#take-at').hidden = !!r && !r.currentOrder;
+    $('#take-next').hidden = !!r && !r.nextAction;
+    $('#cases').hidden = !!r && !r.casesTotal;
+    const dr = dash.data('drafts');
+    $('#replaced').hidden = dr.status === 'ok' && !dr.data[0]?.replaced;
+    $('#drafts').hidden = $('#tile-drafts').hidden = !!r && !r.plansDrafted;
+  }
+
+  function drawLine() {
+    const box = $('#line-chart');
+    const fd = dash.data('features');
+    if (!ready(box, fd)) return;
+    const rows = fd.data;
+    const W = box.clientWidth || 600;
+    const cols = Math.max(3, Math.min(9, Math.floor(W / 104)));
+    const cw = W / cols, rh = 96, top = 22;
+    const H = Math.ceil(rows.length / cols) * rh;
+    const pos = (i) => {
+      const r = Math.floor(i / cols), c = i % cols;
+      return [cw * ((r % 2 ? cols - 1 - c : c) + 0.5), top + r * rh];
+    };
+    const svg = svgIn(box, W, H);
+    rows.forEach((f, i) => {
+      if (i === rows.length - 1) return;
+      const [x1, y1] = pos(i), [x2, y2] = pos(i + 1);
+      const next = rows[i + 1].status;
+      const bulge = (Math.floor(i / cols) % 2 ? -1 : 1) * cw * 0.42;
+      svg.append('path')
+        .attr('d', y1 === y2 ? `M${x1},${y1}L${x2},${y2}` : `M${x1},${y1}C${x1 + bulge},${y1} ${x2 + bulge},${y2} ${x2},${y2}`)
+        .style('fill', 'none')
+        .style('stroke', next === 'verified' ? 'var(--color-ok)' : next === 'current' ? C[0] : 'var(--cds-chart-muted)')
+        .style('stroke-width', next === 'queued' ? 2 : 4)
+        .style('stroke-linecap', 'round')
+        .style('stroke-dasharray', next === 'queued' ? '2 6' : null);
+    });
+    const g = svg.selectAll('g.stop').data(rows).join('g').attr('class', 'stop fr-hit').attr('transform', (d, i) => `translate(${pos(i)})`);
+    g.filter((d) => d.status === 'current').append('circle').attr('class', 'fr-pulse').attr('r', 8).style('fill', C[0]);
+    g.append('circle').attr('r', 8)
+      .style('fill', (d) => d.status === 'verified' ? 'var(--color-ok)' : d.status === 'current' ? C[0] : 'var(--color-panel)')
+      .style('stroke', (d) => d.status === 'queued' ? 'var(--cds-chart-muted)' : 'var(--color-panel)')
+      .style('stroke-width', 2.5);
+    const label = g.append('text').attr('text-anchor', 'middle').attr('y', 26).attr('class', 'fr-id');
+    label.each(function (d) {
+      const parts = d.id.split('-');
+      const halves = parts.length > 1 ? [parts.slice(0, Math.ceil(parts.length / 2)).join('-'), parts.slice(Math.ceil(parts.length / 2)).join('-')] : [d.id];
+      halves.forEach((t, j) => d3.select(this).append('tspan').attr('x', 0).attr('dy', j ? 13 : 0).text(t));
+    });
+    g.append('text').attr('text-anchor', 'middle').attr('y', (d) => (d.id.includes('-') ? 54 : 41))
+      .style('fill', (d) => (d.status === 'current' ? C[0] : null))
+      .text((d) => d.status === 'verified' ? `${d.reviews} rev · ${d.repairs} fix` : d.status === 'current' ? 'in progress' : '');
+    g.append('circle').attr('r', 22).attr('cy', 16).style('fill', 'transparent');
+    hover(g, (d) => [
+      ['k', `Feature ${d.order} · ${d.status}`],
+      ['', d.title],
+      ['k', d.status === 'queued' ? (d.dependsOn ? `Needs ${d.dependsOn.split(';').join(', ')}` : 'No prerequisites') : `${fmtDur(Number(d.activeMinutes))} active · ${d.reviews} reviews · ${d.repairs} repairs`],
+      ...(d.verifiedAt ? [['k', `Verified ${fmtWhen(new Date(d.verifiedAt))}`]] : []),
+    ]);
+  }
+
+  let span = 'all';
+  root.querySelectorAll('.fr-seg button').forEach((b) => b.addEventListener('click', () => {
+    span = b.dataset.span;
+    root.querySelectorAll('.fr-seg button').forEach((o) => o.setAttribute('aria-pressed', String(o === b)));
+    drawRiver();
+  }));
+
+  function drawRiver() {
+    const box = $('#river-chart');
+    const sd = dash.data('stages'), id = dash.data('incidents');
+    if (!ready(box, sd, id)) return;
+    const stages = sd.data.map((s) => ({ ...s, s: new Date(s.start), e: new Date(s.end) }));
+    const incidents = id.data.map((i) => ({ ...i, t: new Date(i.at) }));
+    const end = d3.max(stages, (s) => s.e);
+    const start = span === 'all' ? d3.min(stages, (s) => s.s) : new Date(+end - 864e5);
+    const W = box.clientWidth || 600, H = 112, bandY = 52, bandH = 30;
+    const svg = svgIn(box, W, H);
+    const lanes = ['Stops', 'Blocks', 'Pauses', 'Work'];
+    const probe = svg.append('g');
+    const labelW = d3.max(lanes, (t) => probe.append('text').text(t).node().getComputedTextLength());
+    probe.remove();
+    const left = Math.ceil(labelW) + 10, right = 6;
+    const x = d3.scaleTime([start, end], [left, W - right]);
+    const clip = `fr-clip-${Math.random().toString(36).slice(2, 8)}`;
+    svg.append('clipPath').attr('id', clip).append('rect').attr('x', left).attr('y', 0).attr('width', W - left - right).attr('height', H);
+    lanes.forEach((t, i) => svg.append('text').attr('x', 0).attr('y', i < 3 ? 12 + i * 12 : bandY + bandH / 2 + 4).text(t));
+    [0, 1, 2].forEach((i) => svg.append('line').attr('x1', left).attr('x2', W - right).attr('y1', 8 + i * 12).attr('y2', 8 + i * 12).style('stroke', 'var(--cds-chart-grid)'));
+    const plot = svg.append('g').attr('clip-path', `url(#${clip})`);
+    plot.append('rect').attr('x', left).attr('y', bandY).attr('width', W - left - right).attr('height', bandH).attr('rx', 4).style('fill', 'var(--color-border-line)').style('opacity', 0.45);
+    const seen = stages.filter((s) => s.e > start);
+    hover(plot.selectAll('rect.st').data(seen).join('rect').attr('class', 'st fr-hit')
+      .attr('x', (d) => x(d.s)).attr('y', bandY).attr('height', bandH)
+      .attr('width', (d) => Math.max(1, x(d.e) - x(d.s)))
+      .style('fill', (d) => (STATE[d.state] || STATE.paused).c),
+    (d) => [['k', `${fmtWhen(d.s)} · ${fmtDur(Number(d.minutes))}`], ['', d.label], ...(d.feature ? [['k', d.feature]] : [])]);
+    hover(plot.selectAll('circle.inc').data(incidents.filter((i) => i.t >= start)).join('circle').attr('class', 'inc fr-hit')
+      .attr('cx', (d) => x(d.t)).attr('cy', (d) => 8 + kindOf(d.kind).lane * 12).attr('r', 3.5)
+      .style('fill', (d) => kindOf(d.kind).c).style('opacity', 0.85),
+    (d) => [['k', `${fmtWhen(d.t)} · ${d.kind}`], ['', d.message]]);
+    const axis = d3.axisBottom(x).tickSizeOuter(0).tickSize(4)
+      .ticks(end - start < 2 * 864e5 ? (W < 520 ? 4 : 6) : span === 'all' ? d3.timeDay.every(W < 520 ? 2 : 1) : d3.timeHour.every(W < 520 ? 6 : 3))
+      .tickFormat(end - start < 2 * 864e5 ? null : span === 'all' ? d3.timeFormat('%a %-d') : d3.timeFormat('%-I %p'));
+    svg.append('g').attr('transform', `translate(0,${bandY + bandH + 6})`).call(axis).attr('font-size', null).attr('font-family', null);
+
+    const legend = $('#river-legend');
+    const cd = dash.data('clock');
+    legend.replaceChildren();
+    if (cd.status !== 'ok') return;
+    const mins = new Map(cd.data.map((r) => [r.state, r.minutes]));
+    [...STATES, ['idle', 'Waiting', 'var(--color-border-line)']].filter(([k]) => mins.has(k)).forEach(([k, name, c]) => {
+      const item = document.createElement('span');
+      const sw = document.createElement('i');
+      sw.style.background = c;
+      const val = document.createElement('b');
+      val.textContent = fmtDur(mins.get(k));
+      item.append(sw, `${name} `, val);
+      legend.append(item);
+    });
+  }
+
+  function drawPace() {
+    const box = $('#pace-chart');
+    const fd = dash.data('features'), pd = dash.data('pace');
+    if (!ready(box, fd, pd)) return;
+    const rows = fd.data, median = pd.data[0].medianMinutes;
+    const W = box.clientWidth || 400, H = 220;
+    const svg = svgIn(box, W, H);
+    const yMax = d3.max([...rows.map((r) => Number(r.activeMinutes)), median]) * 1.15 || 1;
+    const y = d3.scaleLinear([0, yMax], [H - 22, 10]).nice();
+    const yFmt = (v) => `${v}m`;
+    const probe = svg.append('g').call(d3.axisLeft(y).ticks(4).tickFormat(yFmt));
+    const left = Math.ceil(d3.max(probe.selectAll('text').nodes(), (n) => n.getComputedTextLength()) || 20) + 8;
+    probe.remove();
+    const x = d3.scaleBand(rows.map((r) => r.order), [left, W - 4]).padding(0.25);
+    svg.append('g').attr('transform', `translate(${left},0)`)
+      .call(d3.axisLeft(y).ticks(4).tickSize(-(W - left - 4)).tickFormat(yFmt))
+      .call((g) => g.select('.domain').remove())
+      .attr('font-size', null).attr('font-family', null);
+    svg.append('g').attr('transform', `translate(0,${H - 22})`)
+      .call(d3.axisBottom(x).tickSize(0).tickPadding(6).tickValues(x.domain().filter((o, i) => x.bandwidth() > 12 || i % 2 === 0)))
+      .attr('font-size', null).attr('font-family', null);
+    const bw = Math.min(32, x.bandwidth());
+    const bx = (d) => x(d.order) + (x.bandwidth() - bw) / 2;
+    hover(svg.selectAll('rect.bar').data(rows).join('rect').attr('class', 'bar fr-hit')
+      .attr('x', bx).attr('width', bw).attr('rx', 4)
+      .attr('y', (d) => y(d.status === 'queued' ? median : Number(d.activeMinutes)))
+      .attr('height', (d) => Math.max(1, y(0) - y(d.status === 'queued' ? median : Number(d.activeMinutes))))
+      .style('fill', (d) => (d.status === 'queued' ? 'none' : C[0]))
+      .style('opacity', (d) => (d.status === 'current' ? 0.45 : 1))
+      .style('stroke', (d) => (d.status === 'queued' ? 'var(--cds-chart-muted)' : 'none'))
+      .style('stroke-dasharray', (d) => (d.status === 'queued' ? '3 3' : null)),
+    (d) => [['k', `Feature ${d.order} · ${d.id}`], ['', d.title], ['k', d.status === 'queued' ? `Projected ${fmtDur(median)}` : `${fmtDur(Number(d.activeMinutes))} active${d.status === 'current' ? ' so far' : ''}`]]);
+    svg.append('line').attr('x1', left).attr('x2', W - 4).attr('y1', y(median)).attr('y2', y(median))
+      .style('stroke', 'var(--cds-chart-reference)').style('stroke-dasharray', '4 4');
+    svg.append('text').attr('x', W - 4).attr('y', y(median) - 5).attr('text-anchor', 'end').text(`median ${fmtDur(median)}`);
+  }
+
+  function drawDrafts() {
+    const box = $('#drafts-strip');
+    const pd = dash.data('plans');
+    if (!ready(box, pd)) return;
+    // The newest plan is the one being built, until the run itself is done.
+    const last = (dash.data('run').data[0] || {}).state === 'completed' ? -1 : pd.data.length - 1;
+    pd.data.forEach((p, i) => {
+      const el = document.createElement('div');
+      el.className = `fr-draft fr-hit ${p.status === 'plan_failed' ? 'is-failed' : p.approvedAt ? 'is-approved' : ''} ${i === last ? 'is-now' : ''}`;
+      const n = document.createElement('b');
+      n.textContent = `#${p.attempt}`;
+      const s = document.createElement('span');
+      s.textContent = i === last ? 'running' : p.status === 'plan_failed' ? 'rejected' : p.approvedAt ? 'approved' : 'replaced';
+      el.append(n, s);
+      el.addEventListener('mousemove', (e) => showTip(e, [
+        ['k', `Draft ${p.attempt} · ${p.id}`],
+        ['', `${p.features} features · ${p.reviews} reviews · ${p.corrections} corrections`],
+        ...(p.approvedAt ? [['k', `Approved ${fmtWhen(new Date(p.approvedAt))}`]] : []),
+      ]));
+      el.addEventListener('mouseleave', hideTip);
+      box.append(el);
+    });
+  }
+
+  let logKind = null;
+  function drawLog() {
+    const body = $('#log-body'), chips = $('#log-chips');
+    const d = dash.data('incidents');
+    body.replaceChildren();
+    chips.replaceChildren();
+    if (d.status !== 'ok') return;
+    const counts = d3.rollups(d.data, (v) => v.length, (r) => r.kind).sort((a, b) => b[1] - a[1]);
+    [[null, d.data.length], ...counts].forEach(([k, n]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = `${k || 'All'} ${n}`;
+      b.setAttribute('aria-pressed', String(logKind === k));
+      b.addEventListener('click', () => { logKind = k; drawLog(); });
+      chips.append(b);
+    });
+    d.data.filter((r) => !logKind || r.kind === logKind).slice().reverse().forEach((r) => {
+      const tr = document.createElement('tr');
+      tr.dataset.key = r.n;
+      const when = document.createElement('td');
+      when.textContent = fmtWhen(new Date(r.at));
+      const kind = document.createElement('td');
+      const chip = document.createElement('span');
+      chip.className = 'fr-kind';
+      const dot = document.createElement('i');
+      dot.style.background = kindOf(r.kind).c;
+      chip.append(dot, r.kind);
+      kind.append(chip);
+      const state = document.createElement('td');
+      state.className = 'fr-col-state';
+      state.textContent = r.state;
+      const msg = document.createElement('td');
+      msg.textContent = r.message;
+      tr.append(when, kind, state, msg);
+      body.append(tr);
+    });
+  }
+
+  dash.onData(() => {
+    fillMarks();
+    drawLine();
+    drawRiver();
+    drawPace();
+    drawDrafts();
+    drawLog();
+  });
+})();
+</script>

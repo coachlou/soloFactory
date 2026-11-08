@@ -1,0 +1,249 @@
+<style>
+  .lv { font-family: var(--font-anthropic-sans); color: var(--color-fg); display: grid; gap: var(--cds-gap-lg); }
+  .lv h1 { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); margin: 0; }
+  .lv .take { margin: var(--cds-gap-xs) 0 0; color: var(--color-fg-muted); font-size: var(--cds-font-size-body); }
+  .lv .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: var(--cds-gap-md); }
+  .lv .card { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-lg); min-width: 0; }
+  .lv .lab { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .lv .big { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); font-variant-numeric: tabular-nums; margin-top: var(--cds-gap-xs); line-height: 1.15; }
+  .lv .sub { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin-top: var(--cds-gap-xs); }
+  .lv h2 { font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); margin: 0; }
+  .lv .note { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin: var(--cds-gap-xs) 0 var(--cds-gap-md); }
+  .lv .warn { color: var(--color-warn); }
+  .lv .bad { color: var(--color-bad); }
+  .lv .ok { color: var(--color-ok); }
+  .lv .chart { position: relative; min-height: 220px; }
+  .lv .legend { display: flex; flex-wrap: wrap; gap: var(--cds-gap-md); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin-bottom: var(--cds-gap-sm); }
+  .lv .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+  .lv .tip { position: absolute; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); white-space: nowrap; display: none; }
+  .lv .tip .when { color: var(--cds-text-secondary); }
+  .lv .scroll { max-height: 520px; overflow: auto; }
+  .lv table { width: 100%; border-collapse: collapse; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+  .lv th { position: sticky; top: 0; background: var(--color-panel); text-align: left; font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); padding: var(--cds-pad-xs) var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); }
+  .lv td { padding: var(--cds-pad-xs) var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); vertical-align: top; }
+  .lv td.msg { word-break: break-word; }
+  .lv .filter { display: flex; gap: var(--cds-gap-sm); flex-wrap: wrap; margin-bottom: var(--cds-gap-sm); }
+  .lv .filter button { font: inherit; font-size: var(--cds-font-size-caption); border: 1px solid var(--color-border-line); background: var(--color-bg); color: var(--color-fg); border-radius: 999px; padding: 2px 10px; cursor: pointer; }
+  .lv .filter button[aria-pressed=true] { background: var(--color-fg); color: var(--color-bg); }
+  .lv .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: var(--cds-gap-md); }
+  .lv .now { display: grid; gap: var(--cds-gap-sm); }
+  .lv .now .what { font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); }
+  .lv .now .act { font-family: ui-monospace, monospace; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); word-break: break-word; }
+  .lv .steps { list-style: none; margin: var(--cds-gap-md) 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr)); gap: var(--cds-gap-sm); }
+  .lv .steps li { border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-sm); font-size: var(--cds-font-size-caption); display: grid; gap: 2px; align-content: start; }
+  .lv .steps .bar { height: 4px; border-radius: 2px; background: var(--cds-chart-muted); margin-bottom: 4px; }
+  .lv .steps li[data-status=verified] .bar { background: var(--color-ok); }
+  .lv .steps li[data-status=current] { border-color: var(--color-fg); }
+  .lv .steps li[data-status=current] .bar { background: var(--color-warn); }
+  .lv .steps li[data-status=stopped] { border-color: var(--color-bad); }
+  .lv .steps li[data-status=stopped] .bar { background: var(--color-bad); }
+  .lv .steps li[data-status=queued] { color: var(--color-fg-muted); }
+  .lv .steps .sid { font-weight: var(--cds-font-weight-medium); word-break: break-word; }
+  .lv .steps .st { color: var(--color-fg-muted); }
+  @keyframes lv-sweep { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+  @keyframes lv-flash { from { background: color-mix(in srgb, var(--color-warn) 25%, transparent); } to { background: transparent; } }
+  @media (prefers-reduced-motion: no-preference) {
+    .lv .steps li[data-status=current] .bar { background: linear-gradient(90deg, var(--color-warn) 0 40%, color-mix(in srgb, var(--color-warn) 30%, transparent) 50%, var(--color-warn) 60% 100%); background-size: 200% 100%; animation: lv-sweep 1.6s linear infinite; }
+    .lv tr.fresh td { animation: lv-flash 2.5s var(--cds-ease-out); }
+  }
+  [data-dash-source-state=empty] { color: transparent; }
+  [data-dash-source-state=refreshing] { opacity: .5; transition: opacity var(--cds-dur-slow); }
+  @media (max-width: 600px) { .lv .hide-narrow { display: none; } }
+</style>
+
+<div class="lv">
+  <header id="top">
+    <h1 data-source="run" data-field="name" class="dash-skeleton">—</h1>
+    <p class="take" id="takeaway">
+      <span data-source="run" data-field="stage">—</span> ·
+      quiet for <span data-source="run" data-field="quietMinutes" id="t-quiet">—</span> min ·
+      supervision: <span data-source="run" data-field="supervision" id="t-sup">—</span>
+    </p>
+  </header>
+
+  <section class="card now" id="now">
+    <div class="lab">Working on now · since <span data-source="run" data-field="nowSince" id="now-since">—</span></div>
+    <div class="what" data-source="run" data-field="nowLabel">—</div>
+    <div class="act">last action: <span data-source="run" data-field="lastAction">—</span></div>
+    <ol class="steps" id="steps" data-source="plan"></ol>
+  </section>
+
+  <section class="tiles" id="tiles">
+    <div class="card"><div class="lab">State</div><div class="big" data-source="run" data-field="state">—</div><div class="sub">attempt <span data-source="run" data-field="attempt">—</span> of <span data-source="run" data-field="repairBudget">—</span></div></div>
+    <div class="card"><div class="lab">Quiet for</div><div class="big"><span data-source="run" data-field="quietMinutes" id="quiet">—</span> min</div><div class="sub">since the last event, at snapshot time</div></div>
+    <div class="card"><div class="lab">Last event</div><div class="big" data-source="run" data-field="lastEventAt" id="last">—</div><div class="sub">snapshot <span data-source="run" data-field="snapshotAt" id="snap">—</span></div></div>
+    <div class="card"><div class="lab">Acceptance cases passed</div><div class="big"><span data-source="run" data-field="casesPassed" class="num">—</span></div><div class="sub">of <span data-source="run" data-field="casesTotal" class="num">—</span> in the contract</div></div>
+    <div class="card"><div class="lab">Gates, whole run</div><div class="big"><span data-source="run" data-field="gatesPassed" class="num">—</span></div><div class="sub">passed · <span data-source="run" data-field="gatesFailed" class="num bad">—</span> failed</div></div>
+    <div class="card"><div class="lab">Plan features verified</div><div class="big"><span data-source="run" data-field="featuresVerified">—</span></div><div class="sub">of <span data-source="run" data-field="featuresTotal">—</span> in the current plan</div></div>
+  </section>
+
+  <section class="card" id="pulse-card">
+    <h2>Pulse, last 12 hours</h2>
+    <p class="note">Events per 10 minutes, by kind. A gap means the factory was silent.</p>
+    <div class="legend" id="legend" data-source="pulse"></div>
+    <div class="chart dash-skeleton" id="pulse" data-source="pulse run"><div class="tip" id="tip"></div></div>
+  </section>
+
+  <div class="grid2">
+    <section class="card" id="feed-card" style="grid-column: 1 / -1">
+      <h2>Latest activity</h2>
+      <p class="note">The 150 most recent events, newest first.</p>
+      <div class="filter" id="filter"></div>
+      <div class="scroll">
+        <table id="feed" data-source="activity" data-row-key="n">
+          <thead><tr>
+            <th data-field="n" class="hide-narrow">#</th>
+            <th data-field="at">Time (UTC)</th>
+            <th data-field="group">Kind</th>
+            <th data-field="state" class="hide-narrow">Stage</th>
+            <th data-field="message">What happened</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="card" id="features-card">
+      <h2>Current plan</h2>
+      <p class="note">Features in the active repair plan.</p>
+      <table id="features" data-source="features" data-row-key="id">
+        <thead><tr>
+          <th data-field="order">#</th>
+          <th data-field="id">Feature</th>
+          <th data-field="status">Status</th>
+          <th data-field="reviews">Reviews</th>
+          <th data-field="repairs">Repairs</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </div>
+</div>
+
+<script>
+const GROUPS = ['Tool call', 'Gate', 'Agent', 'Progress', 'Incident', 'Other'];
+const color = (g) => g === 'Incident' ? 'var(--color-bad)' : g === 'Other' ? 'var(--cds-chart-muted)' : dash.colors[GROUPS.indexOf(g)];
+const fmtTime = (s) => d3.utcFormat('%b %-d %H:%M')(new Date(s));
+const fmtN = d3.format(',');
+let kindFilter = 'All';
+
+function setText(sel, v) { document.querySelectorAll(sel).forEach((el) => { el.textContent = v; el.classList.remove('dash-skeleton'); }); }
+
+function drawRun() {
+  const r = dash.data('run');
+  const row = r.status === 'ok' ? r.data[0] : null;
+  document.querySelectorAll('[data-source="run"]').forEach((el) => {
+    const f = el.dataset.field;
+    if (!row) { el.textContent = '—'; return; }
+    let v = row[f];
+    if (f === 'lastEventAt' || f === 'snapshotAt' || f === 'nowSince') v = fmtTime(v);
+    else if (typeof v === 'number' && el.classList.contains('num')) v = fmtN(v);
+    el.textContent = v === '' || v == null ? '—' : String(v);
+    el.classList.remove('dash-skeleton');
+  });
+  if (!row) return;
+  const q = Number(row.quietMinutes);
+  const cls = q >= 30 ? 'bad' : q >= 10 ? 'warn' : 'ok';
+  ['quiet', 't-quiet'].forEach((id) => { document.getElementById(id).className = cls; });
+  document.getElementById('t-sup').className = /needs|stuck|stalled/i.test(row.supervision) ? 'warn' : '';
+}
+
+function drawPulse() {
+  const box = document.getElementById('pulse');
+  const tip = document.getElementById('tip');
+  d3.select(box).selectAll('svg, .msg').remove();
+  const p = dash.data('pulse'), r = dash.data('run');
+  const legend = d3.select('#legend').html('');
+  if (p.status !== 'ok' || r.status !== 'ok') {
+    if (p.status === 'error' || r.status === 'error') {
+      box.classList.remove('dash-skeleton');
+      d3.select(box).append('div').attr('class', 'msg').style('display', 'flex').style('align-items', 'center').style('justify-content', 'center').style('min-height', '220px')
+        .html('<span style="width:.375rem;height:.375rem;border-radius:50%;background:var(--color-bad);margin-right:6px"></span><span class="lab">Failed to load</span>');
+    }
+    return;
+  }
+  box.classList.remove('dash-skeleton');
+  GROUPS.forEach((g) => { const s = legend.append('span'); s.append('span').attr('class', 'sw').style('background', color(g)); s.append('span').text(g); });
+
+  const end = d3.utcMinute.every(10).floor(new Date(r.data[0].snapshotAt));
+  const buckets = d3.utcMinute.every(10).range(d3.utcHour.offset(end, -12), d3.utcMinute.offset(end, 10));
+  const key = (d) => d.toISOString().replace('.000', '');
+  const byB = new Map(buckets.map((b) => [key(b), Object.fromEntries(GROUPS.map((g) => [g, 0]))]));
+  p.data.forEach((d) => { const m = byB.get(d.bucket); if (m) m[d.group] = (m[d.group] || 0) + Number(d.events); });
+  const rows = buckets.map((b) => ({ b, ...byB.get(key(b)) }));
+  const stack = d3.stack().keys(GROUPS)(rows);
+
+  const W = box.clientWidth, H = 220, m = { t: 8, r: 8, b: 24 };
+  const y = d3.scaleLinear([0, d3.max(rows, (d) => d3.sum(GROUPS, (g) => d[g])) || 1], [H - m.b, m.t]).nice();
+  const svg = d3.select(box).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`);
+  const yAxis = svg.append('g').call(d3.axisLeft(y).ticks(4).tickSize(0)).attr('font-size', null).attr('font-family', null);
+  yAxis.select('.domain').remove();
+  yAxis.selectAll('text').attr('fill', 'var(--color-fg-muted)').style('font-size', 'var(--cds-font-size-caption)');
+  const lw = d3.max(yAxis.selectAll('text').nodes(), (n) => n.getComputedTextLength()) || 0;
+  m.l = lw + 10; yAxis.attr('transform', `translate(${m.l - 4},0)`);
+  const x = d3.scaleBand(buckets.map(key), [m.l, W - m.r]).paddingInner(0.15);
+  svg.insert('g', ':first-child').selectAll('line').data(y.ticks(4)).join('line')
+    .attr('x1', m.l).attr('x2', W - m.r).attr('y1', y).attr('y2', y).attr('stroke', 'var(--cds-chart-grid)');
+  svg.append('g').selectAll('g').data(stack).join('g').attr('fill', (s) => color(s.key))
+    .selectAll('rect').data((s) => s).join('rect')
+    .attr('x', (d) => x(key(d.data.b))).attr('width', x.bandwidth())
+    .attr('y', (d) => y(d[1])).attr('height', (d) => Math.max(0, y(d[0]) - y(d[1])));
+  const xAxis = svg.append('g').attr('transform', `translate(0,${H - m.b})`)
+    .call(d3.axisBottom(x).tickValues(buckets.filter((b) => b.getUTCMinutes() === 0 && b.getUTCHours() % (W < 500 ? 4 : 2) === 0).map(key)).tickFormat((k) => d3.utcFormat('%H:%M')(new Date(k))).tickSize(0))
+    .attr('font-size', null).attr('font-family', null);
+  xAxis.select('.domain').attr('stroke', 'var(--cds-chart-axis)');
+  xAxis.selectAll('text').attr('fill', 'var(--color-fg-muted)').attr('dy', '1em').style('font-size', 'var(--cds-font-size-caption)');
+  const hl = svg.append('rect').attr('fill', 'none').attr('stroke', 'var(--color-fg)').attr('rx', 2).style('display', 'none');
+  svg.append('rect').attr('x', m.l).attr('y', m.t).attr('width', W - m.l - m.r).attr('height', H - m.t - m.b).attr('fill', 'transparent')
+    .on('mousemove', (ev) => {
+      const [px] = d3.pointer(ev);
+      const i = Math.max(0, Math.min(rows.length - 1, Math.floor((px - m.l) / x.step())));
+      const d = rows[i], tot = d3.sum(GROUPS, (g) => d[g]);
+      hl.style('display', null).attr('x', x(key(d.b))).attr('width', x.bandwidth()).attr('y', y(tot)).attr('height', Math.max(1, y(0) - y(tot)));
+      tip.innerHTML = '';
+      d3.select(tip).append('div').attr('class', 'when').text(`${fmtTime(d.b)} · ${fmtN(tot)} events`);
+      GROUPS.filter((g) => d[g]).forEach((g) => { const l = d3.select(tip).append('div'); l.append('span').attr('class', 'sw').style('background', color(g)); l.append('span').text(`${g} ${fmtN(d[g])}`); });
+      tip.style.display = 'block';
+      const tx = Math.min(px + 12, W - tip.offsetWidth - 4);
+      tip.style.left = Math.max(0, tx) + 'px'; tip.style.top = '8px';
+    })
+    .on('mouseleave', () => { tip.style.display = 'none'; hl.style('display', 'none'); });
+}
+
+function drawPlan() {
+  const p = dash.data('plan');
+  const rows = p.status === 'ok' ? p.data : [];
+  const li = d3.select('#steps').selectAll('li').data(rows, (d) => d.id).join((e) => {
+    const l = e.append('li'); l.append('div').attr('class', 'bar'); l.append('div').attr('class', 'sid'); l.append('div').attr('class', 'ttl'); l.append('div').attr('class', 'st'); return l;
+  });
+  li.attr('data-status', (d) => d.status);
+  li.select('.sid').text((d) => `${d.step}. ${d.id}`);
+  li.select('.ttl').text((d) => d.title);
+  li.select('.st').text((d) => d.status === 'verified' ? 'done' : d.status === 'current' ? 'in progress' : d.status === 'stopped' ? 'stopped' : 'up next');
+}
+
+let seenTop = null;
+function drawFeed() {
+  const a = dash.data('activity');
+  const f = d3.select('#filter').html('');
+  ['All', ...GROUPS].forEach((g) => f.append('button').attr('aria-pressed', g === kindFilter).text(g).on('click', () => { kindFilter = g; drawFeed(); }));
+  const tb = d3.select('#feed tbody');
+  const rows = a.status === 'ok' ? a.data.filter((d) => kindFilter === 'All' || d.group === kindFilter) : [];
+  const tr = tb.selectAll('tr').data(rows, (d) => d.n).join('tr').attr('data-key', (d) => d.n);
+  if (seenTop != null) tr.classed('fresh', (d) => d.n > seenTop);
+  if (a.status === 'ok' && a.data.length) seenTop = Math.max(seenTop ?? 0, a.data[0].n);
+  tr.selectAll('td').data((d) => [
+    [String(d.n), 'hide-narrow'], [fmtTime(d.at), ''], [d.group, ''], [d.state || '—', 'hide-narrow'], [d.message, 'msg']
+  ]).join('td').attr('class', (c) => c[1]).text((c) => c[0])
+    .style('color', (c, i, n) => i === 2 && c[0] === 'Incident' ? 'var(--color-bad)' : null);
+}
+
+function drawFeatures() {
+  const fd = dash.data('features');
+  const rows = fd.status === 'ok' ? fd.data : [];
+  d3.select('#features tbody').selectAll('tr').data(rows, (d) => d.id).join('tr')
+    .selectAll('td').data((d) => [String(d.order), d.id, d.status, String(d.reviews), String(d.repairs)]).join('td').text((v) => v)
+    .attr('class', (v, i) => i === 2 ? (v === 'verified' ? 'ok' : v === 'current' ? 'warn' : '') : null);
+}
+
+dash.onData(() => { drawRun(); drawPlan(); drawPulse(); drawFeed(); drawFeatures(); });
+</script>
