@@ -1,6 +1,7 @@
-## Unreleased
+## 0.10.14: update notice (2026-11-08)
 
 - Update notice: at start, on page load and from a *Check for updates* button, the factory reads `version` from the public `coachlou/soloFactory` main `package.json` and, when it is newer, turns the header button into an *Update available* pill whose popover shows both versions and the paste-in update prompt; nothing covers the work, so the owner updates when it suits them (the INSTALL runbook via `gh api`). No polling, 3s timeout, a 10-minute in-process cache, silent on failure except a manual check ("couldn't check"). Off with `SOLOFACTORY_UPDATE_CHECK=0`, always off under `node --test`. `GET /api/update`. Test: `test/update-check.test.mjs`.
+- Planned runs (planVersion 2) skip the slice contract, so the specification prompt never carried the test-command rule and Node 26 failed on `node --test test/`. The rule now sits in the shared spec text (85c02af). Closes the 0.10.12 known leftover.
 
 ## 0.10.13: Sonnet builders (2026-11-08)
 
