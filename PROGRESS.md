@@ -1,4 +1,4 @@
-## Unreleased (on main after 0.10.11, 2026-11-08)
+## 0.10.12: safe-to-resume answer, test-command fixes (2026-11-08)
 
 From the builder-model smokes for one member's 5h-window report (notes: `builder-model-ab-smoke.md` in the side-session folder).
 
@@ -8,6 +8,7 @@ From the builder-model smokes for one member's 5h-window report (notes: `builder
 - Planner: a test reads and asserts only on files its own feature writes (`OWN_FILES_RULE`). A FOUNDATION case that banned spawning in every `test/` file broke on a later feature's e2e test.
 - Smoke on merged main 3c5ad7a (Sonnet builders, Habit Ledger): 6 features, 18 workers, 0 repairs, 3.05M tokens, $4.08, 14 min. The shipped `npm test` passes 39/39. Before the fixes, the same brief cost 1–3 repairs per run.
 - Known leftover: the specification stage's PLAN.md can still name `node --test test/`; the feature planner overrides it.
+- Install runbook: a *below 0.10.12* update step; the Windows note no longer suggests `wsl -e bash -lc '<command>'`, which broke on the runbook's single-quoted commands.
 - Tests: 400/400.
 
 ## 0.10.11: cost ceiling, saved drafts, long-duration checks (2026-11-07)

@@ -391,7 +391,8 @@ Windows as usual and go to the same address.
 `C:\Users\...`, or PowerShell or Git Bash), it is the wrong side. Do not run this runbook's
 `sh` commands there: `$HOME`, `<SF>` and `gh` would all refer to Windows, so the Step 0
 check reports NOT INSTALLED even when SoloFactory is in Ubuntu. Hand each command to the
-owner for the Ubuntu window, or run it as `wsl -e bash -lc '<command>'`.
+owner for the Ubuntu window. Wrapping it as `wsl -e bash -lc '<command>'` breaks on the
+single quotes most of these commands contain, so use that only for a command that has none.
 
 **Tested status:** this track follows Microsoft's and NodeSource's documented steps, but it
 has not yet been walked end to end on a real Windows machine. If a step behaves differently
@@ -862,6 +863,12 @@ could change or remove them:
 - The Guide saves the draft brief as the interview goes (`.factory/draft-brief.json`). Reopening the page restores it; *Start over* clears it; starting the run deletes it.
 - The Guide also rewrites checks that would need hours or days of real time or media (*recordings up to 6 hours*, *delete after 30 days*) into a short sample or a test clock, keeping the long limit as a setting. Seeded sample history (*30 days of seeded history*) is left alone.
 - Nothing to migrate by hand: run records load as before. The first time the factory opens a project scaffolded before 0.10.11, it replaces the untouched lead paragraph of that project's `.aai/instructions.md` (it pointed workers at a parent folder they cannot read); an owner's own edits stay.
+
+**If they were below 0.10.12 before the update**, say in one breath that a stopped run's card now says whether it is safe to press Resume. What you need to know yourself:
+
+- When Resume is the offered step, the card adds *Safe to resume?*. *Yes. No processing errors* means the run stopped on a limit (usage window, spending limit, provider outage, or a pause), with the features verified and new checks passed since the last Resume. *Not yet* means a full allotment since the last Resume verified nothing: choose **Report this run** instead of resuming. *Check first* means it stopped on an error; compare progress with the last stop.
+- New builds use `npm test` with a plain `node --test` script and run the whole suite on the first feature, so a broken test command fails early instead of costing a repair at the end. Existing apps are unchanged.
+- Nothing to migrate by hand.
 
 **If they were below 0.10.2 before the update**, a run on Linux or WSL that parked as *Repair budget exhausted* even though its tests passed (the log ends in `EINVAL: invalid argument, fsync`) will pass its checks now. If the card offers **Resume** (it says *SoloFactory changed since this gate failed*), choose it: the check reruns for free and the run carries on. Otherwise choose **Prepare repair plan**. The repair feature normally runs its checks before building anything, so a feature that passes them goes on to review without a rebuild. If the test runner ever crashes after every test passed, the run now stops with an infrastructure error instead of spending its repairs.
 
