@@ -1,10 +1,10 @@
 <!-- Draft for aimm-members. Not sent. Screenshots live in the linked GitHub guide (docs/update-notice.md). -->
 
-Subject: SoloFactory 0.10.16: it now tells you when there's an update
+Subject: SoloFactory 0.10.17: it now tells you when there's an update
 
 Hi [Name],
 
-SoloFactory 0.10.16 is out. The headline is a small feature you'll use for as long as you run the factory: **it now tells you when a newer version exists.** This is also the last update letter you need to watch for. From here on, the app tells you itself.
+SoloFactory 0.10.17 is out. The headline is a small feature you'll use for as long as you run the factory: **it now tells you when a newer version exists.** This is also the last update letter you need to watch for. From here on, the app tells you itself.
 
 ## The update notice
 
@@ -20,6 +20,7 @@ If you haven't updated in a while, these come along too:
 
 - **Building and repairs run on Sonnet.** Opus still plans and checks the work. In my test builds the apps came out the same, and each feature used about a third less of your plan, so a 5-hour window lasts much longer. To keep Opus for everything, start with `SOLOFACTORY_CLAUDE_MODEL=opus bash start.sh`.
 - **"Safe to resume?" on the stopped-run card.** When a run stops, the card says whether it stopped on a usage limit or an error, and whether it made progress since your last Resume. If it did, resume. If it stopped again on the same feature with the same checks passing, choose **Report this run** and send it to me.
+- **Every model setting is in the manual.** *Settings* now lists the Claude and Codex model and effort variables with their defaults.
 - **Fewer false failures from the test command.** Runs set up the test command correctly from the first feature, so they no longer pay for a repair on a test script that was never wired up.
 
 ## How to update
@@ -27,7 +28,7 @@ If you haven't updated in a while, these come along too:
 This one last time, the email is your notice. Open Claude Code (or Codex) on the computer where SoloFactory lives. On Windows, open it in the Ubuntu window, not in PowerShell. Then paste this:
 
 ```
-Please update my existing SoloFactory install to version 0.10.16. Read the install runbook and follow its update path:
+Please update my existing SoloFactory install to version 0.10.17. Read the install runbook and follow its update path:
 
 gh api -H 'Accept: application/vnd.github.raw' repos/coachlou/aimm/contents/aai-release/solofactory/INSTALL.md
 
