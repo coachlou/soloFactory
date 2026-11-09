@@ -472,6 +472,15 @@ carry a strategy forward.
      told not to write cumulative regression proofs. If any built feature has no `writes`,
      impact selection returns nothing and no earlier proofs rerun. Recovery phases do not do
      this per-feature rerun (see below).
+   - **A feature may update an earlier proof its change broke.** When rerun earlier proofs
+     fail, the rest still run and one failure carries every failing command
+     (`details.commands`), so a single repair sees them all. Their test files go on the cursor
+     (`brokenProofs`); for non-recovery features the `writes` gate widens into those files only
+     (modified, never new, never a file an unbuilt feature owns) and the repair prompt allows an
+     expectation update to the new contract that keeps every check. The edited files stay on
+     `sliceStats[id].editedProofs`; both the feature and the final review requests carry them,
+     and both reviewers must open those files and block an edit that weakened what the test
+     proved.
    - **Independent features keep building past a blocked one.** When a feature fails
      `quality_gate_failed`, `review_rejected` or `review_unstable`, every feature in the plan has
      `writes`, and some unbuilt feature does not depend on it, the controller commits its work
