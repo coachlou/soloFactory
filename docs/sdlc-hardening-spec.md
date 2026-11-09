@@ -4,7 +4,7 @@
 Nothing here is implemented.** SPEC.md stays the source of truth; items move there as they ship.
 The 2026-10-06 version of this file predates planned features and is superseded. Audited the same
 day by an independent review against the code; its corrections are folded in and its ranking is the
-**Priority** table at the end. Implementation specs for the L-effort items: `docs/sdlc-hardening-impl.md`.
+**Priority** table at the end. Implementation specs for the L-effort items: `docs/sdlc-hardening-impl.md`; the problems it found are folded in below.
 
 **Goal.** Close the gaps that remain between SoloFactory and a mature AI-native SDLC (artifact
 chain intent → spec → plan → diff → review → incident → intent, with deterministic gates and human
@@ -74,7 +74,10 @@ for a release that never passed its gates.
   Relaunch <previous run>** as one visible path.
 - The old app keeps running while the tree holds the new release's files. Node has its code in
   memory, but files it reads from disk at request time (static assets, templates) are the new
-  ones until the swap. Acceptable for the seconds a deploy takes; note it in the code.
+  ones until the swap. That is already true for the whole follow-on build, since the old app is only
+  stopped at deploy; the swap adds the seconds the checks take. Note it in the code.
+- A release that fails its checks is stopped inside `deployLocal`. Today `relaunch()` leaves such an
+  app running (only the deploy loop stops it); this closes that orphan.
 - Tests: a fixture follow-on whose start command exits immediately leaves the earlier fixture app
   answering `/health` and still `live`; a passing follow-on stops the earlier app only after its
   own health check.
@@ -115,8 +118,11 @@ ceiling skips turns without a reported cost, which is every Codex turn.
   Settings table (the docs gate already enforces this).
 - **Token ceiling (2a).** `SOLOFACTORY_MAX_RUN_TOKENS` alongside the cost ceiling, summed from usage
   every adapter reports, with the same park code (`run_budget_reached`), Resume allotment and card
-  text, modelled on the existing worker ceiling check. The cost ceiling stays for Claude, where it
-  means something.
+  text, modelled on the existing worker ceiling check. Default 25,000,000: the 0.10.12 smoke spent
+  3.05M tokens for $4.08, so the $30 cost ceiling is about 22M (counts are mostly cache reads). A run
+  that parked before tokens were recorded takes its Resume allotment from `details.spend.tokens`.
+  The cost ceiling stays for Claude, where it means something. SPEC.md does not yet document the
+  worker or cost ceilings; 2a adds a §7 bullet covering all three.
 - **Cross-provider review: cut for now.** Add it only when smoke rows show it changes outcomes
   (the Jev lesson: measure outcome change, not accuracy).
 
@@ -131,10 +137,12 @@ it, so a later change can bring them back unnoticed.
 
 - **Release gate (3a).** `build-distro.sh --check` runs before every `npm test` and in CI, so the
   check must fire only for a release: when `package.json`'s version differs from the latest tag.
+  CI checks out at depth 1 with no tags, so with no tag found the gate skips.
   Then, when the release's diff touches `src/prompts.mjs`, `src/providers.mjs`,
   `skills/factory-guide.md`, model defaults or `src/factory.mjs`, `smoke/results.jsonl` must hold a
-  passing row for a commit in that release for each brief. A written waiver line in the PROGRESS
-  entry (`- Smoke: waived, <reason>`) satisfies it, so the gate never blocks a docs-only fix.
+  passing row for a commit in that release for each brief. Ledger rows hold a 7-character commit
+  and the brief's `workingName`, so match by hash prefix and name. A written waiver line in the
+  version's own PROGRESS entry (`## <version>`, as the docs gate reads it, not Unreleased) (`- Smoke: waived, <reason>`) satisfies it, so the gate never blocks a docs-only fix.
 - **Incident cases (3b, deferred).** `smoke/cases/<id>/`: a frozen brief, a saved project tree (a git bundle) and
   the stage and cursor to resume from, plus the expected result (`passed`, or a named park code).
   `smoke.mjs case <id>` restores the tree into a fresh home and resumes there, so a replay costs one
@@ -204,12 +212,19 @@ state project-specific review rules other than the brief.
 
 - Add a security line to the final and feature review prompts: input validation at trust
   boundaries, path handling under `data/`, secrets committed to the tree, unsafe defaults in auth or
-  sessions the brief asked for. Findings are blockers with `qa/` bug tests like any other defect.
-- A controller check, not a review item: fail a gate when the tree contains a file matching the
-  credential patterns `feedback.mjs` already scrubs. Provider-neutral and cheap.
+  sessions the brief asked for. In the final review, findings are blockers with `qa/` bug tests like
+  any other defect; feature reviews have no `qa/` mechanism and report blockers only.
+- A controller check, not a review item: fail a gate when a file the run added or changed contains
+  a credential. Scan contents, not names, and only the run's own changes (skipping `.factory/` and
+  `.aai/`), or a follow-on whose shipped tree already matches would fail with nothing to repair. Of
+  the `feedback.mjs` SCRUB patterns only the two credential ones apply, and they must be copied or
+  moved, not imported: `feedback.mjs` imports from `factory.mjs`, so importing back is circular.
 - `.aai/review.md`, scaffolded once from `templates/project/` like the other `.aai/` files and
   never overwritten, holds owner review rules ("money is integer cents", "no external fonts").
-  It is listed among the review request's source files, so reviewers must check it and cite it.
+  The review request carries it in a separate `reviewPolicy` field, so reviewers must check it and
+  cite it. It must not join the request's `sources`: `validateReview` rebuilds those from
+  `.factory/uploads/` only, so every review would fail, and widening that set would mark every
+  existing run `inputs_changed`.
 
 ## 7. Live-app incidents: dropped
 
@@ -225,8 +240,9 @@ Split: **8a page check** (Effort L · Return M) can ride along with item 1; **8b
 **Why.** Reviewers must report missing visual evidence and cite executed browser evidence, but
 nothing gives them a browser, so the evidence is whatever a build agent improvised.
 
-- **Page check (8a).** After deploy, the controller fetches `/` and fails the deploy gate on a 5xx
-  or an empty body, sharing the deploy repair budget. No browser needed.
+- **Page check (8a).** After deploy, the controller fetches `/` and fails the deploy gate on a 5xx,
+  no answer, or an empty body on a 2xx, sharing the deploy repair budget. A 404 with a body passes,
+  so API-only apps still deploy. Relaunch runs the same check. No browser needed.
 - **Browser evidence (8b, deferred).** If a headless Chromium is available (`SOLOFACTORY_BROWSER`, or a discoverable Playwright
   install), after deploy and before final review the controller loads `/` and each route the
   metrics report, waits for network idle, and saves a screenshot, console errors and visible text
