@@ -625,6 +625,18 @@ design rules at all. Verified: 83/83.
 
 ## Backlog
 
+### SDLC hardening (proposal, rewritten 2026-11-09)
+
+Not implemented. Full design in [docs/sdlc-hardening-spec.md](docs/sdlc-hardening-spec.md),
+rewritten against cd22719 so it covers only what planned features, the watchdog and the smoke set
+left open. Harness-neutral by rule: guarantees are controller checks, budgets use what every
+provider reports. In build order: health-check a follow-on release before stopping the live one
+(today a failed deploy leaves nothing running); an adapter parity table, a token run ceiling and
+Codex per-stage models and config isolation; the smoke set as a release gate with incident replay
+cases and a Codex arm; a case-reporter backstop for edited earlier proofs (`proof_weakened`);
+cross-run failure fingerprints as lesson candidates; a security review pass and `.aai/review.md`;
+controller-run browser evidence; live-app incidents as proposed briefs.
+
 ### Ask pane: run-aware questions while the factory turns (idea, 2026-09-18)
 
 Not implemented. A chat pane beside a run that answers questions about it, read-only:
