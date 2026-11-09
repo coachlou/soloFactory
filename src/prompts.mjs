@@ -306,9 +306,16 @@ ${DATA_RULE}`;
 // obligations, and the controller reran every feature and integration proof just before this turn. Re-auditing
 // each obligation from scratch duplicated that work (smoke 9: 298 s final review), so the final reviewer
 // concentrates on what no feature review could see. Every check still gets a review-result.json entry.
+// A later feature may update an earlier feature's proof test that its change broke (0cb4bd5); nothing else rereads it.
+const EDITED_PROOFS_RULE = `review-request.json editedProofs (when present) maps a feature to earlier
+features' test files it changed because its change broke them. Open each and compare it with git: block when
+an edit weakened what the test proved (removed or loosened an assertion, skipped a case) instead of updating it
+to the new agreed behavior.`;
+
 const FEATURE_REVIEWED_SCOPE = `
 Every feature already passed its own proofs and scoped review; their recorded results are in
-review-request.json caseResults. Do not re-audit individual obligations from scratch.
+review-request.json caseResults. Do not re-audit individual obligations from scratch, except
+the edited proofs below. ${EDITED_PROOFS_RULE}
 Spend this review on what no single feature review could see: integration (cross-feature
 interactions, shared state such as storage, config and middleware, and API consistency of routes,
 error shapes and status codes across features) and deploy readiness (the health endpoint, the
@@ -660,7 +667,7 @@ targeted checks of real behavior the proofs do not exercise. A requirement with 
 check covered by cases, judge only that each case's test asserts what its case says it asserts — open the
 test, not the whole app. Judge uncased checks directly against real behavior. Earlier features are
 already reviewed: do not reread, rerun or explore their code or tests unless this feature's check
-depends on it. Later planned features may still be missing and must not
+depends on it, or the request's editedProofs lists them. ${EDITED_PROOFS_RULE} Later planned features may still be missing and must not
 block this verdict; a broad requirement this feature closes still needs full proof.
 ${OWNER_DECISIONS}
 ${HOST_RULE}

@@ -39,12 +39,14 @@ export function originalChecks(brief) {
 }
 
 // Scoped reviews pass their own checks and the candidate source identity the verdict must name.
-export async function prepareReview(appDir, job, { checks = originalChecks(job.brief), candidate, caseResults } = {}) {
+export async function prepareReview(appDir, job, { checks = originalChecks(job.brief), candidate, caseResults, editedProofs } = {}) {
   const request = {
     version: 1, jobId: job.id, token: randomUUID(), contractDigest: await contractDigest(appDir), checks,
     sources: await sourceSet(appDir, runInputs(job)),
     ...(candidate ? { candidate } : {}),
     ...(caseResults ? { caseResults } : {}),
+    // Earlier features' test files a later feature updated because its change broke them, keyed by that later feature.
+    ...(editedProofs && Object.keys(editedProofs).length ? { editedProofs } : {}),
     ...(job.ownerDecisions?.length ? { ownerDecisions: job.ownerDecisions } : {}),
   };
   if (!request.checks.length) throw new Error("Review requires at least one intake requirement or acceptance scenario.");

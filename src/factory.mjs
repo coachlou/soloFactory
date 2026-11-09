@@ -483,7 +483,8 @@ export class SoloFactory {
       let request;
       const pending = integrationProofs(job).map((entry) => ({ id: entry.key, text: obligationCheck(entry.obligation).text }));
       const caseIds = integrationProofs(job).flatMap((entry) => (entry.obligation.cases ?? []).map((item) => item.id));
-      try { request = await prepareReview(appDir, job, { checks: [...originalChecks(job.brief), ...pending], caseResults: caseIds.length ? Object.fromEntries(caseIds.map((id) => [id, job.caseResults?.[id] ?? { status: "missing" }])) : undefined }); }
+      const editedProofs = Object.fromEntries(Object.entries(job.sliceStats ?? {}).filter(([, stats]) => stats.editedProofs?.length).map(([id, stats]) => [id, stats.editedProofs]));
+      try { request = await prepareReview(appDir, job, { checks: [...originalChecks(job.brief), ...pending], caseResults: caseIds.length ? Object.fromEntries(caseIds.map((id) => [id, job.caseResults?.[id] ?? { status: "missing" }])) : undefined, editedProofs }); }
       catch (error) { throw new FactoryError("review_rejected", `Cannot review the frozen contract: ${error.message}`); }
       if (job.reviewContractDigest && request.contractDigest !== job.reviewContractDigest) {
         throw new FactoryError("review_rejected", "Frozen contract changed after the first review; scope cannot be narrowed during repair.");
@@ -793,6 +794,7 @@ export class SoloFactory {
         reviews: cursor.reviews,
         commit: cursor.commit,
         ...(cursor.widened && { widened: cursor.widened }),
+        ...(cursor.brokenProofs?.length && { editedProofs: cursor.brokenProofs }),
       };
       job.sliceDone = [...(job.sliceDone ?? []), slice.id];
       job.sliceIndex = i + 1;
@@ -961,7 +963,7 @@ export class SoloFactory {
         if (cursor.reviews >= reviewLimit) throw new FactoryError("review_unstable", `Feature ${slice.id} did not reach a stable reviewed candidate after ${cursor.reviews} reviews.`);
         cursor.reviews += 1;
         const caseIds = runnable.flatMap((item) => (item.cases ?? []).map((entry) => entry.id));
-        const request = await prepareReview(appDir, job, { checks: reviewChecks, candidate: cursor.candidate, caseResults: caseIds.length ? Object.fromEntries(caseIds.map((id) => [id, job.caseResults?.[id] ?? { status: "missing" }])) : undefined });
+        const request = await prepareReview(appDir, job, { checks: reviewChecks, candidate: cursor.candidate, caseResults: caseIds.length ? Object.fromEntries(caseIds.map((id) => [id, job.caseResults?.[id] ?? { status: "missing" }])) : undefined, editedProofs: cursor.brokenProofs?.length ? { [slice.id]: cursor.brokenProofs } : undefined });
         // Kept off job.reviewRequest, which always names the final whole-app review.
         cursor.reviewRequest = request;
         await this.store.writeState(job);

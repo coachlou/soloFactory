@@ -179,6 +179,10 @@ test("a feature that breaks an earlier feature's proof may update that proof's t
   assert.match(prompts[0] ?? "", /broke an earlier feature's proof \(server\.test\.mjs\)/);
   assert.ok(events.filter((event) => event.type === "slice.writes_widened").some((event) => event.files.includes("server.test.mjs")));
   assert.equal(events.filter((event) => event.gate === "writes").length, 0);
+  // The edited proof outlives the feature, so the final reviewer is told to check it was not weakened.
+  assert.deepEqual(result.sliceStats["SLICE-UI"].editedProofs, ["server.test.mjs"]);
+  assert.deepEqual(result.reviewRequest?.editedProofs, { "SLICE-UI": ["server.test.mjs"] });
+  assert.equal(result.sliceStats["SLICE-SKELETON"].editedProofs, undefined);
 });
 
 test("a feature's own failing proof is not reported as a broken earlier proof", async () => {
