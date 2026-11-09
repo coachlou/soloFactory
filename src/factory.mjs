@@ -82,6 +82,30 @@ export class FactoryError extends Error {
 // one SoloFactory per run, and a project's next release must stop the previous release's app.
 const liveByProject = new Map();
 
+// A newer run blocks a relaunch only if its work may still be in the folder: dismissed with a rollback
+// point means the server rewound it. runs: JobStore.list(), newest first.
+export function newerRunBlocks(runs, jobId) {
+  return runs.slice(0, runs.findIndex((run) => run.id === jobId)).some((run) => !(run.dismissed && run.baseCommit));
+}
+
+// The release a parked follow-on falls back to, for its card. runs: JobStore.list(), newest first.
+export function previousRelease(job, runs) {
+  if (!job.followOn || !PARKED_STATES.has(job.state) || job.dismissed) return null;
+  const at = runs.findIndex((run) => run.id === job.id);
+  const prior = at < 0 ? null : runs.slice(at + 1).find((run) => run.state === "completed" && run.deployment?.url);
+  if (!prior) return null;
+  const live = prior.deployment.status === "live";
+  // Dismiss rewinds to job.baseCommit and marks the job dismissed; relaunch is then allowed unless another newer run blocks it.
+  const afterDismiss = runs.map((run) => (run.id === job.id ? { ...run, dismissed: true } : run));
+  return {
+    jobId: prior.id,
+    name: prior.brief?.workingName || prior.id,
+    url: prior.deployment.url,
+    live,
+    relaunchable: !live && Boolean(job.baseCommit) && !newerRunBlocks(afterDismiss, prior.id),
+  };
+}
+
 // Test files and fixtures: never widened into, since editing another feature's tests can weaken them, unless this
 // feature broke that test's proof (cursor.brokenProofs).
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
@@ -1688,25 +1712,6 @@ export class SoloFactory {
     const port = await availablePort();
     const url = `http://127.0.0.1:${port}`;
     const appDir = this.store.appDir(job.id);
-    const previous = liveByProject.get(appDir);
-    if (previous) {
-      liveByProject.delete(appDir);
-      if (previous.jobId !== job.id) {
-        try {
-          const old = await this.store.read(previous.jobId);
-          if (old.deployment?.status === "live") {
-            old.deployment.status = "replaced";
-            old.deployment.stoppedAt = new Date().toISOString();
-            old.deployment.replacedBy = job.id;
-            await this.store.writeState(old);
-            await this.emit(old.id, { type: "deployment.replaced", state: old.state, message: `Replaced by run ${job.id}.` });
-          }
-        } catch {
-          // A missing old run record must not block the new release from deploying.
-        }
-      }
-      stopApp(previous.child);
-    }
     // Checked here, after the awaits above: from spawn to this.deployments.set is synchronous, so a stop
     // or shutdown that landed earlier would otherwise leave an app nobody kills (an aborted signal never fires).
     if (signal.aborted) throw new FactoryError("cancelled", "Deployment cancelled.");
@@ -1724,7 +1729,6 @@ export class SoloFactory {
     child.stdout.pipe(log);
     child.stderr.pipe(log);
     this.deployments.set(job.id, child);
-    liveByProject.set(appDir, { jobId: job.id, child });
     signal.addEventListener("abort", () => stopApp(child), { once: true });
     child.once("exit", async (code) => {
       log.end();
@@ -1745,14 +1749,46 @@ export class SoloFactory {
     });
 
     await this.emit(job.id, { type: "deployment.started", state: job.state, message: `Waiting for ${url}${manifest.healthPath}` });
-    await waitForHttp(`${url}${manifest.healthPath}`, child, signal);
-    // Health answered, so a failing metrics route is the app's bug: give it the same repair as a bad schema.
-    const metrics = await fetchJson(`${url}${manifest.metricsPath}`).catch((error) => {
-      throw new FactoryError("invalid_metrics", `The app metrics endpoint failed: ${error.message}.`, { missing: [], received: undefined });
-    });
-    validateMetrics(metrics);
-    if (child.exitCode !== null || child.signalCode !== null) throw new FactoryError("deployment_exited", `App exited with ${child.exitCode ?? child.signalCode} right after its health check.`);
+    try {
+      await waitForHttp(`${url}${manifest.healthPath}`, child, signal);
+      // Health answered, so a failing metrics route is the app's bug: give it the same repair as a bad schema.
+      const metrics = await fetchJson(`${url}${manifest.metricsPath}`).catch((error) => {
+        throw new FactoryError("invalid_metrics", `The app metrics endpoint failed: ${error.message}.`, { missing: [], received: undefined });
+      });
+      validateMetrics(metrics);
+      if (child.exitCode !== null || child.signalCode !== null) throw new FactoryError("deployment_exited", `App exited with ${child.exitCode ?? child.signalCode} right after its health check.`);
+    } catch (error) {
+      stopApp(child); // a release that failed its checks never replaces the live one
+      throw error;
+    }
+    // The previous release served until now. Anything it reads from disk per request comes from the new
+    // release's files, as it already did for the whole follow-on build; this adds the seconds the checks take.
+    await this.retirePrevious(job, appDir);
+    if (child.exitCode === null && child.signalCode === null) liveByProject.set(appDir, { jobId: job.id, child });
     return { mode: "local", status: "live", url, port, pid: child.pid, startedAt: new Date().toISOString() };
+  }
+
+  // Retires the project's previous release once the new one passed its checks. The record is written
+  // before the stop, so the old child's exit handler sees "replaced" rather than recording "stopped".
+  async retirePrevious(job, appDir) {
+    const previous = liveByProject.get(appDir);
+    if (!previous) return;
+    liveByProject.delete(appDir);
+    if (previous.jobId !== job.id) {
+      try {
+        const old = await this.store.read(previous.jobId);
+        if (old.deployment?.status === "live") {
+          old.deployment.status = "replaced";
+          old.deployment.stoppedAt = new Date().toISOString();
+          old.deployment.replacedBy = job.id;
+          await this.store.writeState(old);
+          await this.emit(old.id, { type: "deployment.replaced", state: old.state, message: `Replaced by run ${job.id}.` });
+        }
+      } catch {
+        // A missing old run record must not block the new release from deploying.
+      }
+    }
+    stopApp(previous.child);
   }
 
   // The exit handler only corrects a stored "live", so an app that exited before that write landed is
@@ -1771,9 +1807,7 @@ export class SoloFactory {
     if (job.state !== "completed" || job.deployment?.status === "live") throw new FactoryError("not_relaunchable", "Only a completed run whose app is not running can be relaunched.");
     // A newer run blocks only if its work may still be in the folder: set aside with a rollback
     // point means the server rewound it, so the folder holds this job's release again.
-    const runs = await this.store.list();
-    const newer = runs.slice(0, runs.findIndex((run) => run.id === job.id));
-    if (newer.some((run) => !(run.dismissed && run.baseCommit))) throw new FactoryError("not_relaunchable", "A newer run exists in this project; relaunch that one.");
+    if (newerRunBlocks(await this.store.list(), job.id)) throw new FactoryError("not_relaunchable", "A newer run exists in this project; relaunch that one.");
     const manifest = await this.readManifest(this.store.appDir(jobId));
     await mkdir(path.join(this.store.appDir(jobId), ".factory", "logs"), { recursive: true }); // gitignored, so may be absent
     job.deployment = await this.deployLocal(job, manifest, new AbortController().signal);

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { JobStore } from "./store.mjs";
 import { withReviewDiagnostics } from "./review.mjs";
 import { amendmentPacket, assertBatch, validateRecoveryApproval } from "./feature-recovery.mjs";
-import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, admitsPlanning, assertPlanInputsRevised, assertPlanReviewable, buildRecovery, buildRecoveryPacket, continuationAction, SoloFactory, withContinuation } from "./factory.mjs";
+import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, admitsPlanning, assertPlanInputsRevised, assertPlanReviewable, buildRecovery, buildRecoveryPacket, continuationAction, previousRelease, SoloFactory, withContinuation } from "./factory.mjs";
 import { watchConfig } from "./watchdog.mjs";
 import {
   INTERVIEW_RESPONSE_SCHEMA,
@@ -411,7 +411,9 @@ export async function createSoloFactoryServer(options = {}) {
         const job = await ensureRecovery(await jobStore.read(jobMatch[1]), jobStore);
         // Superseded plans grow without bound (36MB on a long run) and the 1.5s poll crashed the tab; the UI never reads them.
         const [{ recoveryPhaseHistory, ...annotated }] = await annotateJobs(jobProject.get(job.id) ?? active.id, [job]);
-        return json(response, 200, { job: { ...annotated, idleGaps: await jobStore.idleGaps(job.id) }, events: await jobStore.events(job.id) });
+        // Only a parked follow-on has a fallback release, and finding it reads every run's state file.
+        const previous = job.followOn && PARKED.has(job.state) && !job.dismissed ? previousRelease(job, await jobStore.list()) : null;
+        return json(response, 200, { job: { ...annotated, idleGaps: await jobStore.idleGaps(job.id), previousRelease: previous }, events: await jobStore.events(job.id) });
       }
       const telemetryMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/telemetry$/);
       if (request.method === "GET" && telemetryMatch) {

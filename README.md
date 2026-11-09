@@ -36,8 +36,8 @@ mockup or screenshot (png, jpg, gif, webp); images are saved under the project's
 queue and you land back in a fresh interview, so the next release can be shaped while this
 one builds. Runs in one project go one after another, each building on the last; runs in
 different projects can overlap when `SOLOFACTORY_MAX_ACTIVE_RUNS` is above 1 (default 1).
-A brief for a project that already shipped is specified as a follow-on release, and deploying
-it stops the previous release's app. **Factory** in the top bar opens the board: every run
+A brief for a project that already shipped is specified as a follow-on release. The previous
+release keeps running until the new one passes its deploy checks, so a failed deploy leaves it up. **Factory** in the top bar opens the board: every run
 of every project by column, with slice progress; click a card to open that run.
 
 A **project** is the workspace the factory builds into. Projects are discovered under

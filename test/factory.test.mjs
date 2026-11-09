@@ -5,7 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import http from "node:http";
 import { JobStore } from "../src/store.mjs";
-import { buildRecoveryPacket, FactoryError, SoloFactory, validateMetrics } from "../src/factory.mjs";
+import { buildRecoveryPacket, FactoryError, previousRelease, SoloFactory, validateMetrics } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
 import { ALL_BLOCKERS, CONTROLLER_FACTS, PLAN_CHECKLIST, buildPrompt, continuationPrompt, featurePlanPrompt, featureReviewPrompt, planAuditPrompt, planCorrectionPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "../src/prompts.mjs";
 
@@ -649,7 +649,22 @@ test("a project's next release replaces its previous live deployment", async (t)
     return result;
   };
   const first = await release();
+  // At the moment the first release is marked replaced, the second must already answer and the first still serve.
+  const writeState = store.writeState.bind(store);
+  let atSwap = null;
+  store.writeState = async (state) => {
+    if (!atSwap && state.id === first.id && state.deployment?.status === "replaced") {
+      const events = await store.events((await store.list())[0].id, 500);
+      const newUrl = events.map((event) => /Waiting for (http:\/\/127\.0\.0\.1:\d+)/.exec(event.message ?? "")?.[1]).filter(Boolean).at(-1);
+      atSwap = {
+        newer: await fetch(`${newUrl}/health`).then((r) => r.ok, () => false),
+        older: await fetch(`${first.deployment.url}/health`).then((r) => r.ok, () => false),
+      };
+    }
+    return writeState(state);
+  };
   const second = await release();
+  assert.deepEqual(atSwap, { newer: true, older: true }, "the new release passed health before the old one was retired");
   const old = await store.read(first.id);
   assert.equal(old.deployment.status, "replaced");
   assert.equal(old.deployment.replacedBy, second.id);
@@ -657,6 +672,57 @@ test("a project's next release replaces its previous live deployment", async (t)
   assert.equal((await fetch(`${second.deployment.url}/health`)).ok, true);
   const live = factories.flatMap((factory) => [...factory.deployments.values()]);
   assert.equal(live.length, 1, "exactly one live child per project");
+});
+
+test("a follow-on whose app exits on launch leaves the previous release live and answering", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-keep-live-"));
+  const store = new JobStore(root);
+  await store.init();
+  const factories = [];
+  t.after(() => Promise.all(factories.map((factory) => factory.shutdown())));
+  const firstJob = await store.create({ brief, transcript, provider: "fixture" });
+  const firstFactory = new SoloFactory({ store, provider: createFixtureProvider() });
+  factories.push(firstFactory);
+  const first = await firstFactory.start(firstJob.id);
+  assert.equal(first.state, "completed", first.error?.message);
+
+  const fixture = createFixtureProvider();
+  const broken = { id: "fixture", async run(options) {
+    const result = await fixture.run(options);
+    if (/^build-slice-/.test(options.context.stage)) {
+      const file = path.join(options.cwd, "package.json");
+      const pkg = JSON.parse(await readFile(file, "utf8"));
+      pkg.scripts.start = 'node -e "process.exit(3)"';
+      await writeFile(file, JSON.stringify(pkg, null, 2));
+    }
+    return result;
+  } };
+  const secondJob = await store.create({ brief, transcript, provider: "fixture" });
+  const secondFactory = new SoloFactory({ store, provider: broken, maxRepairs: 0 });
+  factories.push(secondFactory);
+  const second = await secondFactory.start(secondJob.id);
+  assert.equal(second.state, "failed");
+  assert.equal(second.error.code, "deployment_exited", second.error.message);
+  assert.equal((await fetch(`${first.deployment.url}/health`)).ok, true, "the previous release still answers");
+  const kept = await store.read(first.id);
+  assert.equal(kept.deployment.status, "live");
+  assert.equal(kept.deployment.replacedBy, undefined);
+  assert.deepEqual(previousRelease(await store.read(second.id), await store.list()), {
+    jobId: first.id, name: "Pocket Pulse", url: first.deployment.url, live: true, relaunchable: false,
+  });
+});
+
+test("a parked follow-on names its fallback and whether Dismiss then Relaunch restores it", () => {
+  const shipped = { id: "a", state: "completed", brief: { workingName: "Habit" }, deployment: { status: "stopped", url: "http://127.0.0.1:1" } };
+  const parked = { id: "b", state: "failed", followOn: true, baseCommit: "c".repeat(40) };
+  assert.deepEqual(previousRelease(parked, [parked, shipped]), { jobId: "a", name: "Habit", url: "http://127.0.0.1:1", live: false, relaunchable: true });
+  assert.equal(previousRelease({ ...parked, baseCommit: undefined }, [parked, shipped]).relaunchable, false, "no rollback point");
+  assert.equal(previousRelease(parked, [{ id: "c", state: "failed" }, parked, shipped]).relaunchable, false, "another newer run still blocks");
+  const live = { ...shipped, deployment: { ...shipped.deployment, status: "live" } };
+  assert.deepEqual(previousRelease(parked, [parked, live]), { jobId: "a", name: "Habit", url: "http://127.0.0.1:1", live: true, relaunchable: false });
+  assert.equal(previousRelease({ ...parked, followOn: false }, [parked, shipped]), null);
+  assert.equal(previousRelease({ ...parked, dismissed: true }, [parked, shipped]), null);
+  assert.equal(previousRelease({ ...parked, state: "completed" }, [parked, shipped]), null);
 });
 
 test("pause during slice 1 parks before slice 2 on a committed tree; resume replays nothing", async () => {
@@ -776,6 +842,27 @@ http.createServer((q, r) => { if (q.url === "/health") return r.end("ok"); r.sta
   const factory = new SoloFactory({ store, provider: createFixtureProvider() });
   try {
     await assert.rejects(factory.deployLocal(job, manifest, new AbortController().signal), (error) => error.code === "invalid_metrics" && /HTTP 500/.test(error.message));
+  } finally {
+    await factory.shutdown();
+  }
+});
+
+test("a relaunch whose app fails its checks stops that app", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-relaunch-fail-"));
+  const store = new JobStore(root);
+  await store.init();
+  await writeFile(path.join(root, "app.mjs"), `import http from "node:http";
+http.createServer((q, r) => { if (q.url === "/health") return r.end("ok"); r.statusCode = 500; r.end("boom"); }).listen(process.env.PORT);`);
+  const cmd = ["npm", "run", "x"];
+  await writeFile(path.join(root, "factory.json"), JSON.stringify({ version: 1, healthPath: "/health", metricsPath: "/_factory/metrics", commands: { install: cmd, test: cmd, build: cmd, start: ["node", "app.mjs"] } }));
+  const job = await store.create({ brief, transcript, provider: "fixture" });
+  Object.assign(job, { state: "completed", deployment: { mode: "local", status: "stopped", url: "http://127.0.0.1:1" } });
+  await store.writeState(job);
+  const factory = new SoloFactory({ store, provider: createFixtureProvider() });
+  try {
+    await assert.rejects(factory.relaunch(job.id), (error) => error.code === "invalid_metrics");
+    for (let waited = 0; factory.deployments.has(job.id) && waited < 2000; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(factory.deployments.has(job.id), false, "the failed app was stopped, not orphaned");
   } finally {
     await factory.shutdown();
   }

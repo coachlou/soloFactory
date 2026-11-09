@@ -137,8 +137,12 @@ stats. Restarting from the first slice is a fresh run and is refused in favour o
 The Factory board (`GET /api/board`) shows every run of every project by column, collapsing
 `repairing` into building and every parked state into one column. When a project already has `factory.json`, the run is a follow-on
 release: the PRD is updated cumulatively, the plan and acceptance contract cover only the
-increment, no walking-skeleton slice is required, and deploying it stops the previous
-release's app (`deployment.status: "replaced"`). Switching projects never cancels a run.
+increment, no walking-skeleton slice is required, and deploying it starts the new release beside
+the previous one, stopping the previous app (`deployment.status: "replaced"`) only after the new one
+passes its deploy checks. A follow-on that fails deploy leaves the previous release live, and
+`GET /api/jobs/:id` returns `previousRelease` (`{jobId, name, url, live, relaunchable}`) for a parked
+follow-on. When the previous app is not running and `relaunchable` is true, the card offers
+**Dismiss, then Relaunch**. Switching projects never cancels a run.
 
 The worker may edit only the generated app workspace. It cannot change job state directly.
 Commands are spawned as argument arrays, never interpolated into a shell. The environment
@@ -356,8 +360,8 @@ versions and the paste-in prompt that points the owner's agent at the install ru
 - `POST /api/interview/turn` — run one Factory Guide turn inside the active project and return
   structured coverage; the transcript is appended to that project's `.aai/memory/interviews/guide.log`.
 - `POST /api/jobs` — validate intake, freeze input, queue a run; `202` with `queuePosition`.
-- `GET /api/jobs/:id` — current state, `queuePosition`/`blockedBy` while queued, and bounded
-  event history.
+- `GET /api/jobs/:id` — current state, `queuePosition`/`blockedBy` while queued, bounded
+  event history, and `previousRelease` (the release a parked follow-on falls back to, else `null`).
 - `POST /api/jobs/:id/cancel` — cancel active work, or remove a queued run (`dequeued: true`).
 - `POST /api/jobs/:id/dismiss` — mark a parked run dismissed so its project's queue proceeds.
 - `POST /api/jobs/:id/pause` — ask the active run to park at its next stage boundary;

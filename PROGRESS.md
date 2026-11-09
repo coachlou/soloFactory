@@ -1,5 +1,6 @@
 ## Unreleased
 
+- A follow-on release now starts beside the live one and replaces it only after its own health and metrics checks pass. Before, `deployLocal` stopped the previous app first, so a follow-on that failed deploy left the owner with nothing running. Now the previous release stays live, and a parked follow-on's card says where it runs (`GET /api/jobs/:id` returns `previousRelease`); if it is not running, the card offers **Dismiss, then Relaunch**. A relaunch whose app fails its checks no longer leaves that app running. Known limit: the dashboard stops polling a parked run, so a fallback that dies while its card is open shows the button on the next reopen or reload. Checked: 412/412 tests; fixture smoke set; a demo-server follow-on run (fallback live while parked, then killed, Dismiss then Relaunch restores it) and the same flow clicked in Chromium. Docs: SPEC §4 and §9, README, manual Lifecycle, drive.md dismiss row. Spec: docs/sdlc-hardening-spec.md item 1.
 - Risk-gated per-feature review for smoke A/B (dev-only `SOLOFACTORY_FEATURE_REVIEW=all|risky`, default `all`, saved on the job and kept on retry). Under `risky`, a feature skips its scoped review unless one of these holds:
   - an obligation has no cases;
   - a case is on the browser surface;

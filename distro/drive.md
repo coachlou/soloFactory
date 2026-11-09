@@ -184,7 +184,7 @@ and the same `nextAction`. Ask the owner before any of these actions:
 |---|---|
 | `/api/jobs/<id>/restart` `{"fromSlice":"<slice id>"}` | re-runs from a completed slice onward (not the first; that is start over); keeps the repair count, drops stale sessions and repair plans |
 | `/api/jobs/<id>/retry` | start over: a fresh run from the same brief; the parked one is rolled back and dismissed |
-| `/api/jobs/<id>/dismiss` | sets the run aside and unblocks the project's queue; if the app shipped before, puts it back to that release (its `data/` is kept) |
+| `/api/jobs/<id>/dismiss` | sets the run aside and unblocks the project's queue; if the app shipped before, puts it back to that release (its `data/` is kept). A parked follow-on's `job.previousRelease` names that release; when `relaunchable` is true, `/dismiss` then `POST /api/jobs/<previousRelease.jobId>/relaunch` brings it back up |
 | `/api/jobs/<id>/pause`, `/cancel` | pauses or stops an active run, or dequeues a queued one |
 | `/api/jobs/<id>/relaunch` | restarts a completed app whose server stopped |
 | `/api/jobs/<id>/inputs?name=<file>` (raw body) | adds a spec file (md, txt, json, html, yaml, csv, pdf, image) to an idle parked run |

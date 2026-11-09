@@ -85,7 +85,7 @@
   <ul>
     <li>Runs in one project go one after another, each building on the tree the last one left. A hint under the queue button says so when the project already has a run active, queued, or parked, since independent fixes for one app are cheaper as a single brief.</li>
     <li>Runs in different projects can overlap when <code>SOLOFACTORY_MAX_ACTIVE_RUNS</code> is above 1.</li>
-    <li>A second brief for a project that already shipped becomes a follow-on release. Deploying it stops the previous release's app.</li>
+    <li>A second brief for a project that already shipped becomes a follow-on release. The previous release keeps running until the new one passes its checks, then stops. If the new release fails to deploy, the previous one stays up and the run's card says where; if it is not running, the card offers <strong>Dismiss, then Relaunch</strong> to put it back.</li>
     <li><b class="btn">Remove from queue</b> drops a brief that has not started.</li>
   </ul>
 

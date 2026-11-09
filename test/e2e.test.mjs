@@ -888,6 +888,21 @@ test("the activity stream keeps rare stage and gate rows under thousands of tool
   assert.deepEqual(streamRows(events, "gate").map((entry) => entry.type), ["gate.passed"]);
 });
 
+test("a parked follow-on's card names the running release or offers Dismiss, then Relaunch", async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const note = new Function(`${source.match(/function previousReleaseNote\([\s\S]*?\n}\n/)[0]}; return previousReleaseNote;`)();
+  const prior = { jobId: "a", name: "Habit", url: "http://127.0.0.1:5001" };
+  assert.equal(note({}), null);
+  assert.deepEqual(note({ previousRelease: { ...prior, live: true, relaunchable: false } }), { text: "Previous release still running at http://127.0.0.1:5001.", relaunch: null });
+  const offer = note({ previousRelease: { ...prior, live: false, relaunchable: true } });
+  assert.equal(offer.relaunch, "a");
+  assert.equal(offer.label, "Dismiss, then Relaunch Habit");
+  assert.match(offer.text, /not running\. Dismiss puts its files back; Relaunch then starts it\./);
+  const blocked = note({ previousRelease: { ...prior, live: false, relaunchable: false } });
+  assert.equal(blocked.relaunch, null);
+  assert.match(blocked.text, /once every newer run is dismissed/);
+});
+
 test("the pipeline view's time so far leaves out pauses and stops", async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const lift = (name) => source.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n}\\n`))[0];

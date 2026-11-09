@@ -687,6 +687,15 @@ function renderAmendment(features, next, phase, action) {
   if (alternative) { const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = alternative.reason; features.append(hint); action(alternative.label, "recovery-plan"); }
 }
 
+// A parked follow-on's fallback (server: previousRelease in src/factory.mjs).
+function previousReleaseNote(job) {
+  const prior = job.previousRelease;
+  if (!prior) return null;
+  if (prior.live) return { text: `Previous release still running at ${prior.url}.`, relaunch: null };
+  if (prior.relaunchable) return { text: `The previous release (${prior.name}) is not running. Dismiss puts its files back; Relaunch then starts it.`, relaunch: prior.jobId, label: `Dismiss, then Relaunch ${prior.name}` };
+  return { text: `The previous release (${prior.name}) is not running. It can be relaunched once every newer run is dismissed with a rollback point.`, relaunch: null };
+}
+
 function renderRecovery() {
   const phase = state.job.recoveryPhase;
   const recovery = state.job.recovery ?? (phase ? { title: phase.status === "planning" ? "Preparing repair plan" : "Repairs", summary: phase.status === "planning" ? "Planning repair features from the review findings and every spec and prototype input." : `${phase.done.length}/${phase.plan?.slices.length ?? 0} recovery features verified`, actions: [], workspace: "Preserved project workspace", automaticRetry: "Each feature has bounded repairs; final deployment requires the full original review." } : null);
@@ -706,6 +715,22 @@ function renderRecovery() {
     const line = document.createElement("p"); line.id = "run-spend";
     line.textContent = `Spent so far: ${plural(spend.workers, "worker")}, ${count(spend.tokens)} tokens, cost ${spend.costUsd == null ? "unknown" : `$${spend.costUsd.toFixed(2)}`}, ${formatSpan(spend.elapsedMs)} elapsed.${spend.grantTurns == null ? "" : ` Approving grants up to ${plural(spend.grantTurns, "repair turn")}.`}`+(spend.idleApprovals ? ` Last ${spend.idleApprovals === 1 ? "approval" : `${spend.idleApprovals} approvals`} verified no features.` : "");
     features.append(line);
+  }
+  const fallback = PARKED.includes(state.job.state) ? previousReleaseNote(state.job) : null;
+  if (fallback) {
+    const note = document.createElement("p"); note.id = "previous-release"; note.textContent = fallback.text; features.append(note);
+    if (fallback.relaunch) {
+      const button = document.createElement("button"); button.type = "button"; button.className = "button"; button.textContent = fallback.label;
+      button.addEventListener("click", async () => {
+        button.disabled = true; clearError();
+        try {
+          await api(`/api/jobs/${state.job.id}/dismiss`, { method: "POST", body: {} });
+          await api(`/api/jobs/${fallback.relaunch}/relaunch`, { method: "POST", body: {} });
+          await poll(); refreshProjects();
+        } catch (error) { showError(error); button.disabled = false; }
+      });
+      features.append(button);
+    }
   }
   const action = (label, endpoint, body = {}) => {
     const button = document.createElement("button"); button.textContent = label; button.type = "button";
