@@ -934,7 +934,7 @@ export class SoloFactory {
         const label = resumed ? labels.resume : labels.build;
         // The last feature writes the README; left to the final reviewer it is a source change that forces the post-review gate rerun.
         const [index, total] = position.split("/");
-        const prompt = featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed, precheck: cursor.precheck, last: index === total });
+        const prompt = featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed, precheck: cursor.precheck, last: index === total, ownerDecisions: job.ownerDecisions });
         const before = await candidate();
         try {
           await this.invoke(job, label, prompt, signal, { resumeSessionId: this.resumeSessionFor(job, label) });
@@ -942,7 +942,7 @@ export class SoloFactory {
           // A build that hit the safety cap while still changing files is too big for one turn, not stuck:
           // continue it once in its own session (the stage's one continuation allowance) instead of parking.
           if (error.code !== "agent_hard_timeout" || await candidate() === before || !await this.allowContinuation(job, labels.build)) throw error;
-          await this.invoke(job, labels.resume, featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed: true, precheck: cursor.precheck, last: index === total }), signal, { resumeSessionId: error.details?.sessionId ?? this.resumeSessionFor(job, labels.resume) });
+          await this.invoke(job, labels.resume, featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed: true, precheck: cursor.precheck, last: index === total, ownerDecisions: job.ownerDecisions }), signal, { resumeSessionId: error.details?.sessionId ?? this.resumeSessionFor(job, labels.resume) });
         }
         await save("checking");
         if (scope.buildOnly) return job;

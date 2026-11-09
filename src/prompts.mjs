@@ -294,7 +294,9 @@ Release QA findings to fix. Their tests are the evidence: never edit them.
 ${bugs.map((bug) => `- ${bug.proof.command.at(-1)}: ${bug.description}`).join("\n")}`
     : "";
   return `You are the repair worker. Read ${failurePath} first, then only the parts of the frozen
-.factory contract${slice ? "" : " and plan"} that the failure touches. Fix the root cause of the recorded controller
+.factory contract${slice ? "" : " and plan"} that the failure touches. Before changing any code, write three lines:
+"Symptom: ..." (what the gate saw), "Cause: ..." (why it happens), "Files: ..." (the files at fault). End your final
+message with the same three lines. Fix the root cause of the recorded controller
 gate failure with the smallest coherent change. Do not weaken, skip, rename, or delete tests,
 health checks, metrics, build commands, or acceptance criteria.${sliceLines}${bugLines}
 Run the relevant checks and leave the app ready for the controller to rerun every gate.
@@ -618,7 +620,7 @@ case text, clause by clause.
 - The proof command exits 0 on this candidate. A check that cannot run on this machine is a blocker to
   report, never something to skip or fake.`;
 
-export function featureBuildPrompt(slice, { owned, planDigest, planFile = ".factory/slices.json", featureFile = ".factory/logs/feature.json", followOn = false, resumed = false, precheck = null, last = false }) {
+export function featureBuildPrompt(slice, { owned, planDigest, planFile = ".factory/slices.json", featureFile = ".factory/logs/feature.json", followOn = false, resumed = false, precheck = null, last = false, ownerDecisions = [] }) {
   const { feature, commands } = sharedCommands(slice);
   return `You are the implementation worker for ONE approved feature (plan digest ${planDigest}).
 Your feature is given in full below (or in the file it names): do not read ${planFile} or other features' plans. Read the frozen
@@ -636,7 +638,8 @@ Original requirements this feature closes (prove the full wording):
 ${JSON.stringify(owned, null, 2)}
 
 ${REVIEW_BAR}
-
+A check with no cases is judged directly against real behavior, not by a test alone: make it work in the running app the way a reviewer would exercise it.
+${ownerDecisions.length ? `The owner's decisions from repair planning, newest last. What they explicitly approve is approved: build to them and do not work around them.\n${ownerDecisions.map((d) => `- ${d.text ?? d}`).join("\n")}\n` : ""}
 Build one case at a time: write its proof test, then the minimum real behavior that passes it, and run that
 proof until it passes before starting the next case, so an interrupted turn leaves passing cases, not half-wired
 code. Run only this feature's proof commands, plus targeted tests of earlier code you changed; do not run the

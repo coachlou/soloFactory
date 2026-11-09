@@ -247,6 +247,17 @@ test('the builder and feature repair see the exact bar the feature reviewer appl
   assert.ok(!repairPrompt('.factory/last-failure-1.txt').includes(REVIEW_BAR), 'non-feature repairs have no case bar');
 });
 
+test('the builder is told the reviewer rules it would otherwise not see, and every repair writes a root-cause note', () => {
+  const slice = plan([requirement()]).slices[0];
+  const base = { owned: [], planDigest: 'digest' };
+  assert.match(featureBuildPrompt(slice, base), /no cases is judged directly against real behavior/);
+  assert.doesNotMatch(featureBuildPrompt(slice, base), /owner's decisions/);
+  assert.match(featureBuildPrompt(slice, { ...base, ownerDecisions: [{ text: 'Waive the PDF export check.' }] }), /owner's decisions[\s\S]*- Waive the PDF export check\./);
+  for (const prompt of [repairPrompt('f.txt'), repairPrompt('f.txt', slice)]) {
+    assert.match(prompt, /Before changing any code, write three lines[\s\S]*Symptom:[\s\S]*Cause:[\s\S]*Files:/);
+  }
+});
+
 // Keeping an id is a promise that the obligation still asserts the same thing; a rewrite must be a superseding case.
 test('a kept obligation keeps its behavior, expected result, proof command and cases', () => {
   const base = plan([requirement()]);
