@@ -92,34 +92,15 @@ These profiles apply to Claude runs; the provider of an existing run remains
 unchanged. Update the installation and restart at a safe pause boundary to load
 new adapter settings.
 
-## Verify the factory
-
-```bash
-npm test
-```
-
-The suite exercises intake validation, API-key scrubbing, command restrictions,
-activity-aware agent timeouts, bounded same-session continuation, same-run recovery,
-failure repair, the complete HTTP workflow, a real generated Node app, health checks, and
-live metrics. It runs the distro check first, and GitHub Actions runs it on Linux for every
-push and pull request.
-
-Before a release that changes prompts, models or the controller, run the real-provider
-smoke set by hand (about $10 and 35 minutes for both briefs):
-
-```bash
-node scripts/smoke.mjs
-```
-
-It builds each brief in `smoke/briefs/` in a fresh home and appends one row per run to
-`smoke/results.jsonl`; `node scripts/smoke.mjs table` prints the ledger. A free dry run of
-the loop: `SOLOFACTORY_DEMO=1 SMOKE_PROVIDER=fixture SMOKE_LEDGER=/tmp/smoke.jsonl node scripts/smoke.mjs`.
+## Try it without spending
 
 For a deterministic browser demo that does not consume subscription quota:
 
 ```bash
 SOLOFACTORY_DEMO=1 SOLOFACTORY_HOME=./solofactory-demo npm start
 ```
+
+Tests, CI and the release smoke set live in the source repository only; see `DEVELOPING.md` there.
 
 ## Report a problem or an idea
 
