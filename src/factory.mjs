@@ -1346,7 +1346,7 @@ export class SoloFactory {
       // The first feature also runs the suite while it is tiny: a broken test script (e.g. `node --test test/`
       // on Node 26) otherwise surfaced only at integration and cost a repair in every 2026-11-08 smoke arm.
       const firstFeature = !current.sliceDone?.length;
-      const earlier = slice ? new Set(proofs.filter((proof) => !proof.id.startsWith(`${slice.id}.`)).map((proof) => JSON.stringify(proof.proof.command))) : null;
+      const earlier = slice ? new Set(proofs.filter((proof) => !ownProof(slice, proof)).map((proof) => JSON.stringify(proof.proof.command))) : null;
       const failure = (slice?.writes && await this.writesFailure(current, slice)) || await this.verify(current, manifest, signal, { includeInstall, proofs, first, earlier, skipTest: Boolean(slice && proofs.length && !firstFeature) });
       if (!failure) {
         if (!slice) {
@@ -1370,7 +1370,7 @@ export class SoloFactory {
       // changes): its test files may be updated to the new contract, so the writes gate and repair prompt allow them.
       const failed = new Set((failure.details?.commands ?? [failure.details?.command]).map((command) => JSON.stringify(command)));
       const broken = slice && current.featureCursor?.id === slice.id && proofs
-        .filter((proof) => !proof.id.startsWith(`${slice.id}.`) && failed.has(JSON.stringify(proof.proof.command)))
+        .filter((proof) => !ownProof(slice, proof) && failed.has(JSON.stringify(proof.proof.command)))
         .flatMap((proof) => proof.proof.command.filter((arg) => TEST_PATH.test(arg)));
       if (broken?.length) current.featureCursor.brokenProofs = [...new Set([...(current.featureCursor.brokenProofs ?? []), ...broken])];
       current = await this.repair(current, failure, signal, slice, proofs.filter((proof) => proof.description));
@@ -2187,6 +2187,8 @@ function obligationCheck(item) {
 
 // The feature a turn or gate serves, for per-feature measurement; null while planning or integrating.
 const featureOf = (job) => job.recoveryPhase?.cursor?.id ?? job.featureCursor?.id ?? null;
+// A feature's own proofs arrive as its acceptance items (bare ids) or prefixed by its id; earlier features' are prefixed.
+const ownProof = (slice, proof) => slice.acceptance.includes(proof) || proof.id.startsWith(`${slice.id}.`);
 // Per feature: attempts only advance on repairs, so two clean features shared `test-3.log` and the later overwrote the earlier's evidence.
 const gateLog = (job, gate) => `.factory/logs/${[gate, featureOf(job), job.attempt].filter((part) => part != null).join("-")}.log`;
 // Every proof the controller may gate on, so a builder or repair agent can run it before finishing.

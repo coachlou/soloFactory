@@ -71,6 +71,7 @@ async function declaredRun(stray) {
       for (const slice of value.slices) slice.writes = slice.dependsOn.length ? ["index.html", "ui.test.mjs"] : ["*"];
       // A distinct command, so the skeleton's proof is its own gate rather than deduplicated into npm test.
       value.slices[0].acceptance[0].proof.command = ["node", "--test", "server.test.mjs"];
+      if (stray === "own") value.slices[1].acceptance[0].proof.command = ["node", "--test", "ui.test.mjs"];
       if (stray === "broken2") value.slices[0].acceptance.push({ ...value.slices[0].acceptance[0], id: "SKELETON-2", behavior: "GET /health answers ok", proof: { command: ["node", "--test", "metrics.test.mjs"], expect: "metrics.test.mjs passes" } });
       await writeFile(file, JSON.stringify(value, null, 2));
     }
@@ -80,7 +81,7 @@ async function declaredRun(stray) {
       if (stray === "committed") await store.git("add", "stray.mjs").then(() => store.git("commit", "-qm", "agent commit"));
     }
     // SLICE-UI changes the skeleton's server and breaks its proof; the repair updates that proof's test.
-    const broken = { broken: ["server.test.mjs"], broken2: ["server.test.mjs", "metrics.test.mjs"] }[stray];
+    const broken = { broken: ["server.test.mjs"], broken2: ["server.test.mjs", "metrics.test.mjs"], own: ["ui.test.mjs"] }[stray];
     if (broken && stage === "build-slice-SLICE-UI") { uiBuilt = true; await appendFile(path.join(options.cwd, "server.mjs"), "\n// new contract\n"); }
     if (broken && stage.startsWith("repair-")) { prompts.push(options.prompt); failures.push(await readFile(path.join(options.cwd, options.prompt.match(/\.factory\/last-failure-\d+\.txt/)[0]), "utf8")); for (const file of broken) await appendFile(path.join(options.cwd, file), "\n// expectation updated\n"); }
     // An existing file another (built) feature owns: source widens the writes, a test never does.
@@ -90,7 +91,8 @@ async function declaredRun(stray) {
   const logs = [];
   const factory = new SoloFactory({ store, provider, commandRunner: async ({ logPath, args }) => {
     logs.push(path.basename(logPath));
-    const file = args.find((arg) => ["server.test.mjs", "metrics.test.mjs"].includes(arg));
+    // "own": SLICE-UI's own proof fails until repaired; the other modes fail the skeleton's proofs.
+    const file = args.find((arg) => (stray === "own" ? ["ui.test.mjs"] : ["server.test.mjs", "metrics.test.mjs"]).includes(arg));
     if (uiBuilt && file && !(await readFile(path.join(store.appDir(job.id), file), "utf8")).includes("expectation updated")) return { code: 1, output: `${file}: expected the old row` };
     return { code: 0, output: "passed" };
   }, deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9982" }) });
@@ -145,21 +147,14 @@ test("a later feature that edits an earlier feature's files reruns that feature'
   assert.ok(uiChecks.some((event) => event.type === "gate.started" && /^proof-SLICE-SKELETON\./.test(event.gate)), "the skeleton's proofs ran inside SLICE-UI's checks");
 });
 
-test("with ownership on, a later feature editing an earlier feature's code must own its proof tests", () => {
-  const owned = { ...opts, ownership: true };
+test("a repair plan where a later feature edits an earlier feature's code without its test is admitted", () => {
+  // Plan-time proof ownership was removed: every saved smoke plan shares one entry file across features.
   const a = feature("A", { dependsOn: ["BASE"], closes: ["MH-1"], writes: ["src/public/app.js", "test/A.test.mjs"] });
-  const b = (writes) => feature("B", { dependsOn: ["A", "C"], closes: ["MH-2"], writes });
-  const c = feature("C", { dependsOn: ["BASE"], writes: ["src/other.js", "test/C.test.mjs"] });
-  const offending = plan(base(), a, c, b(["src/public/app.js", "test/B.test.mjs"]));
-  validateFeaturePlan(offending, opts); // off by default: approved plans re-validate unchanged
-  assert.throws(() => validateFeaturePlan(offending, owned), (error) => /B edits src\/public\/app\.js of A without test\/A\.test\.mjs/.test(error.message) && !/\bC edits/.test(error.message));
-  validateFeaturePlan(plan(base(), a, c, b(["src/public/app.js", "test/B.test.mjs", "test/A.test.mjs"])), owned);
-  // A "./" proof path is the same file; and a freshly drafted repair plan gets the check, a saved one does not.
-  a.acceptance[0].proof.command[2] = "./test/A.test.mjs";
+  const b = feature("B", { dependsOn: ["A"], closes: ["MH-2"], writes: ["src/public/app.js", "test/B.test.mjs"] });
+  const shared = plan(base(), a, b);
   const request = { id: "req", jobId: "job", contractDigest: "contract", checks, sources: [{ path: "spec.md" }], completed: [] };
-  const cited = { ...offending, requestId: "req", slices: offending.slices.map((slice) => ({ ...slice, acceptance: slice.acceptance.map((item) => ({ ...item, sources: [{ path: "spec.md", locator: "§1" }] })) })) };
-  assert.throws(() => validateRecoveryPlan(cited, request, { fresh: true }), /B edits src\/public\/app\.js of A/);
-  validateRecoveryPlan(cited, request);
+  const cited = { ...shared, requestId: "req", slices: shared.slices.map((slice) => ({ ...slice, acceptance: slice.acceptance.map((item) => ({ ...item, sources: [{ path: "spec.md", locator: "§1" }] })) })) };
+  validateRecoveryPlan(cited, request, { fresh: true });
 });
 
 test("a feature whose fix needs an existing source file outside its writes widens them instead of failing", async () => {
@@ -184,6 +179,14 @@ test("a feature that breaks an earlier feature's proof may update that proof's t
   assert.match(prompts[0] ?? "", /broke an earlier feature's proof \(server\.test\.mjs\)/);
   assert.ok(events.filter((event) => event.type === "slice.writes_widened").some((event) => event.files.includes("server.test.mjs")));
   assert.equal(events.filter((event) => event.gate === "writes").length, 0);
+});
+
+test("a feature's own failing proof is not reported as a broken earlier proof", async () => {
+  const { result, events, prompts } = await declaredRun("own");
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.ok(prompts.length >= 1, "the own proof failed and was repaired");
+  assert.doesNotMatch(prompts[0], /broke an earlier feature's proof/);
+  assert.ok(!events.some((event) => event.type === "slice.writes_widened" && event.files.includes("ui.test.mjs")));
 });
 
 test("a feature that breaks several earlier proofs gets them all in one repair", async () => {

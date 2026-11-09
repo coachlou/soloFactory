@@ -204,6 +204,7 @@ test('the feature builder is told how cases are proved', () => {
   assert.match(prompt, /test script is plain "node --test" with no directory argument/);
   assert.match(prompt, /a script that prints its own\nok\/fail lines records nothing/);
   assert.match(prompt, /do not read \.factory\/slices\.json or other features' plans/);
+  assert.match(prompt, /every form control you render an accessible name/);
 });
 
 test('only the last feature builder is asked for the README', () => {

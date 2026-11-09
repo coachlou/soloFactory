@@ -634,7 +634,9 @@ Build one case at a time: write its proof test, then the minimum real behavior t
 proof until it passes before starting the next case, so an interrupted turn leaves passing cases, not half-wired
 code. Run only this feature's proof commands, plus targeted tests of earlier code you changed; do not run the
 whole test suite, which the controller runs at final integration and which can exhaust your 45-minute turn. Source-
-string assertions do not prove user behavior. An obligation with cases needs one node:test per case
+string assertions do not prove user behavior. Give every form control you render an accessible name (a label or aria-label)
+that says which item it acts on when it repeats per row, e.g. "Mark Read done": final review blocks on a nameless control
+(run dc4129e4: an unnamed per-habit checkbox cost a review round and a repair). An obligation with cases needs one node:test per case
 whose name contains [CASE-ID], run by its proof command without a --test-reporter flag of its own; the
 controller passes it only when every case's own test passed. Cases are read only from node:test events, so even
 a standalone script proof must import node:test and wrap each case in test(); a script that prints its own
