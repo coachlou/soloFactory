@@ -1070,7 +1070,7 @@ export class SoloFactory {
         // A broken metrics contract or a crash on launch is usually a code defect the repair worker can fix
         // (e.g. a production-only env check); a port or timeout problem is not. Same bounded repair budget as the gates.
         if (error.code !== "invalid_metrics" && error.code !== "deployment_exited") throw error;
-        this.deployments.get(job.id)?.kill("SIGTERM");
+        stopApp(this.deployments.get(job.id));
         await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "deploy", message: error.message });
         let output;
         if (error.code === "invalid_metrics") {
@@ -1696,7 +1696,7 @@ export class SoloFactory {
           // A missing old run record must not block the new release from deploying.
         }
       }
-      previous.child.kill("SIGTERM");
+      stopApp(previous.child);
     }
     const logPath = path.join(appDir, ".factory", "logs", "deployment.log");
     const log = createWriteStream(logPath, { flags: "a" });
@@ -1704,12 +1704,15 @@ export class SoloFactory {
       cwd: this.store.appDir(job.id),
       env: subscriptionEnvironment({ PORT: String(port), NODE_ENV: "production" }),
       stdio: ["ignore", "pipe", "pipe"],
+      // Own process group: `npm start` runs `sh -c node ...`, and where sh does not exec (dash) a
+      // SIGTERM to npm alone orphans the app, which keeps its port and our pipes open.
+      detached: process.platform !== "win32",
     });
     child.stdout.pipe(log);
     child.stderr.pipe(log);
     this.deployments.set(job.id, child);
     liveByProject.set(appDir, { jobId: job.id, child });
-    signal.addEventListener("abort", () => child.kill("SIGTERM"), { once: true });
+    signal.addEventListener("abort", () => stopApp(child), { once: true });
     child.once("exit", async (code) => {
       log.end();
       this.deployments.delete(job.id);
@@ -1849,9 +1852,15 @@ export class SoloFactory {
   }
 
   async shutdown() {
-    for (const child of this.deployments.values()) child.kill("SIGTERM");
+    for (const child of this.deployments.values()) stopApp(child);
     this.deployments.clear();
   }
+}
+
+// Stops a deployed app with its whole process group (see deployLocal).
+function stopApp(child) {
+  if (!child) return;
+  try { process.kill(-child.pid, "SIGTERM"); } catch { child.kill("SIGTERM"); }
 }
 
 export function inferFailedState(job) {
@@ -2137,7 +2146,7 @@ async function waitForHttp(url, child, signal, timeoutMs = 30_000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  child.kill("SIGTERM");
+  stopApp(child);
   throw new FactoryError("health_check_failed", `No successful health response from ${url}.`);
 }
 
