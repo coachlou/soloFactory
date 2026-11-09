@@ -74,7 +74,9 @@ factory. Resume the preserved run after restarting; its completed features remai
 
 ## Claude model settings
 
-Claude uses `sonnet` with `medium` effort for the Guide, coding, and repairs.
+Claude uses `sonnet` with `medium` effort for coding and repairs. The Guide interview uses `opus`
+with `medium` effort and an `opus` advisor (`SOLOFACTORY_CLAUDE_GUIDE_MODEL`, `SOLOFACTORY_CLAUDE_GUIDE_EFFORT`,
+`SOLOFACTORY_CLAUDE_GUIDE_ADVISOR`; set the advisor to an empty value to turn it off).
 Specification, feature planning, plan review, plan correction, recovery planning, feature review,
 and final AI review also use `opus`, with `low` effort. Model aliases
 resolve through the installed Claude Code CLI. Deterministic tests run as commands and do not use a model.

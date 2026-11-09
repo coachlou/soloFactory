@@ -237,14 +237,23 @@ Read, create and change them with Write and Edit, and search with Glob and Grep.
 async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode = "write", resumeSessionId = null, context = {} }) {
   await mkdir(cwd, { recursive: true });
   const reasoningTask = /^(specification(?:-|$)|feature-plan(?:-|$)|plan-review$|plan-correction-|recovery-plan-)|(?:^|-)review(?:-|$)/.test(context.stage ?? "");
-  const model = reasoningTask
+  // The Guide interview turns a vague idea into a brief every later stage builds on, so it gets Opus at medium
+  // with an Opus advisor (Lou, 2026-11-08), not the Sonnet build profile. Turns are few, so the cost is small.
+  const guideTask = context.stage === "interview";
+  const model = guideTask
+    ? process.env.SOLOFACTORY_CLAUDE_GUIDE_MODEL || "opus"
+    : reasoningTask
     ? process.env.SOLOFACTORY_CLAUDE_REASONING_MODEL || "opus"
     // Builders and repairs on Sonnet: same review pass rate as Opus on the 2026-11-08 smokes at about a third
     // less per feature, and Opus filled a member's 5h subscription window in one run. Judgment stays on Opus.
     : process.env.SOLOFACTORY_CLAUDE_MODEL || "sonnet";
-  const effort = reasoningTask
+  const effort = guideTask
+    ? process.env.SOLOFACTORY_CLAUDE_GUIDE_EFFORT || "medium"
+    : reasoningTask
     ? process.env.SOLOFACTORY_CLAUDE_REASONING_EFFORT || "low"
     : process.env.SOLOFACTORY_CLAUDE_EFFORT || "medium";
+  // ponytail: Claude Code takes an advisor model only, not an advisor effort; the advisor runs at its own level.
+  const advisor = guideTask ? process.env.SOLOFACTORY_CLAUDE_GUIDE_ADVISOR ?? "opus" : "";
   // stream-json, not json: json printed nothing until exit, so 45-minute build turns left empty logs, fed the
   // watchdog nothing and had no session id to continue after a cap (SEARCH-UI, 2026-10-14). Sessions persist
   // so a capped or interrupted turn resumes its own context instead of starting cold.
@@ -253,6 +262,7 @@ async function claudeRun({ cwd, prompt, schema, logPath, signal, onEvent, mode =
   // Agent turns must not inherit the owner's personal Claude Code config: on 2026-10-12 builds ran the user's
   // Fable advisor (62% of a feature's cost), an rtk hook that rewrote commands, and every claude.ai connector.
   args.push("--setting-sources", "project,local", "--strict-mcp-config");
+  if (advisor) args.push("--settings", JSON.stringify({ advisorModel: advisor }));
   args.push("--permission-mode", mode === "read" ? "plan" : "acceptEdits");
   // Headless acceptEdits silently denies unlisted shell commands, so repair agents shipped fixes they could not run
   // (~20 denials per repair on 2026-09-27; 46 across smoke 11's builds). Allow the commands the controller's own

@@ -167,10 +167,13 @@
     <tr><td><code>SOLOFACTORY_MAX_RUN_WORKERS</code></td><td>Workers one run may start before it parks for your go-ahead (Resume grants another allotment). Default 150; 0 turns the ceiling off.</td></tr>
     <tr><td><code>SOLOFACTORY_MAX_RUN_COST_USD</code></td><td>Dollars of Claude-reported cost one run may spend before it parks for your go-ahead (Resume grants another allotment). Default 30; 0 turns the ceiling off. Codex reports no cost, so a Codex run is held by the worker ceiling.</td></tr>
     <tr><td><code>SOLOFACTORY_UPDATE_CHECK</code></td><td>Set to 0 to turn off the check for a newer SoloFactory release. Default on.</td></tr>
-    <tr><td><code>SOLOFACTORY_CLAUDE_MODEL</code></td><td>Claude model for builders, repairs and the Guide. Default <code>sonnet</code>.</td></tr>
-    <tr><td><code>SOLOFACTORY_CLAUDE_EFFORT</code></td><td>Claude effort for builders, repairs and the Guide. Default <code>medium</code>.</td></tr>
+    <tr><td><code>SOLOFACTORY_CLAUDE_MODEL</code></td><td>Claude model for builders and repairs. Default <code>sonnet</code>.</td></tr>
+    <tr><td><code>SOLOFACTORY_CLAUDE_EFFORT</code></td><td>Claude effort for builders and repairs. Default <code>medium</code>.</td></tr>
     <tr><td><code>SOLOFACTORY_CLAUDE_REASONING_MODEL</code></td><td>Claude model for planning, plan review, correction and reviews. Default <code>opus</code>.</td></tr>
     <tr><td><code>SOLOFACTORY_CLAUDE_REASONING_EFFORT</code></td><td>Claude effort for planning, plan review, correction and reviews. Default <code>low</code>.</td></tr>
+    <tr><td><code>SOLOFACTORY_CLAUDE_GUIDE_MODEL</code></td><td>Claude model for the Guide interview. Default <code>opus</code>.</td></tr>
+    <tr><td><code>SOLOFACTORY_CLAUDE_GUIDE_EFFORT</code></td><td>Claude effort for the Guide interview. Default <code>medium</code>.</td></tr>
+    <tr><td><code>SOLOFACTORY_CLAUDE_GUIDE_ADVISOR</code></td><td>Advisor model the Guide can consult. Default <code>opus</code>; set it empty to turn the advisor off.</td></tr>
     <tr><td><code>SOLOFACTORY_CODEX_MODEL</code></td><td>Codex model for every stage. Default <code>gpt-6.1-sol</code>.</td></tr>
     <tr><td><code>SOLOFACTORY_CODEX_REASONING_EFFORT</code></td><td>Codex reasoning effort. Default <code>medium</code>.</td></tr>
     <tr><td><code>SOLOFACTORY_AGENT_IDLE_MINUTES</code></td><td>Agent idle deadline, reset by any output. Default 6.</td></tr>

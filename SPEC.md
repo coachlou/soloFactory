@@ -315,7 +315,8 @@ Only one job may be active because the target user does not benefit from resourc
   the controller's own gate and proof commands plus read-only orientation; the prompt tells them
   compound shell commands are denied. Builders and repairs default to Sonnet
   (`SOLOFACTORY_CLAUDE_MODEL`); planning, plan review, correction and reviews default to Opus at low
-  effort (`SOLOFACTORY_CLAUDE_REASONING_MODEL`).
+  effort (`SOLOFACTORY_CLAUDE_REASONING_MODEL`); the Guide interview defaults to Opus at medium effort
+  with an Opus advisor (`SOLOFACTORY_CLAUDE_GUIDE_*`).
 - Generated code executes with the owner's local OS permissions. v0.1 does not claim hostile
   code isolation; users should run it only in a trusted local account/workspace.
 

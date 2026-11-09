@@ -1,3 +1,8 @@
+## Unreleased
+
+- The Guide interview moves from Sonnet to Opus at medium effort, with an Opus advisor (`SOLOFACTORY_CLAUDE_GUIDE_MODEL`, `_EFFORT`, `_ADVISOR`; empty advisor turns it off). Builders and repairs stay on Sonnet. Claude Code sets an advisor model only, not its effort.
+- Docs: manual Settings table gains the three Guide rows; README and SPEC model notes updated.
+
 ## 0.10.17: docs gate in pre-release QA (2026-11-08)
 
 - `npm test` (via `build-distro.sh --check`) fails when `src/` reads a `SOLOFACTORY_*` setting missing from the manual's Settings table (test-only ones in `scripts/internal-env.txt`), or when this version's PROGRESS entry has no `- Docs:` bullet. The ambient-library release runbook gains a docs-review step before tagging.
