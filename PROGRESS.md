@@ -625,17 +625,17 @@ design rules at all. Verified: 83/83.
 
 ## Backlog
 
-### SDLC hardening (proposal, rewritten 2026-11-09)
+### SDLC hardening (proposal, rewritten and audited 2026-11-09)
 
-Not implemented. Full design in [docs/sdlc-hardening-spec.md](docs/sdlc-hardening-spec.md),
-rewritten against cd22719 so it covers only what planned features, the watchdog and the smoke set
-left open. Harness-neutral by rule: guarantees are controller checks, budgets use what every
-provider reports. In build order: health-check a follow-on release before stopping the live one
-(today a failed deploy leaves nothing running); an adapter parity table, a token run ceiling and
-Codex per-stage models and config isolation; the smoke set as a release gate with incident replay
-cases and a Codex arm; a case-reporter backstop for edited earlier proofs (`proof_weakened`);
-cross-run failure fingerprints as lesson candidates; a security review pass and `.aai/review.md`;
-controller-run browser evidence; live-app incidents as proposed briefs.
+Not implemented. Full design and a ranked effort/return table in
+[docs/sdlc-hardening-spec.md](docs/sdlc-hardening-spec.md). Harness-neutral by rule: guarantees are
+controller checks, budgets use what every provider reports. Top of the ranking: health-check a
+follow-on release before stopping the live one (today a failed deploy leaves nothing running until
+Dismiss → Relaunch); a token run ceiling (the cost ceiling never binds on Codex); a case-reporter
+backstop for edited earlier proofs; a security review line, credential-file gate and
+`.aai/review.md`; a page check at deploy. Later: adapter parity table and Codex per-stage models,
+the smoke set as a release gate, a cross-run lessons script, Codex config isolation, incident
+replay cases, browser evidence. Dropped: live-app incident briefs.
 
 ### Ask pane: run-aware questions while the factory turns (idea, 2026-09-18)
 
