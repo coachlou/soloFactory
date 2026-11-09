@@ -100,14 +100,15 @@ test("summarizeRun gives one smoke-ledger row", () => {
   ];
   const state = { id: "r1", state: "completed", completedAt: "2026-11-09T00:03:00Z", brief: { workingName: "Demo" }, sliceDone: ["A", "B"], slicePlanIds: ["A", "B"], sliceStats: { A: { repairs: 1 } } };
   const row = summarizeRun(state, events, { arm: "x", commit: "abc" });
-  assert.deepEqual({ ...row }, { at: "2026-11-09T00:03:00Z", commit: "abc", brief: "Demo", arm: "x", run: "r1", result: "passed", features: 2, planned: 2, firstPass: 1, repairs: 1, planBlocks: 1, reviewsRun: 0, reviewsSkipped: 0, skippedFindings: 0, costUsd: 3, costPerFeature: 1.5, wallMin: 2 });
-  assert.match(formatSmokeTable([row]), /\| 2026-11-09 \| abc \| Demo \| x \| passed \| 2 of 2 \| 1 \| 1 \| 1 \| 0 \| 0 \| 0 \| \$3\.00 \| \$1\.50 \| 2 min \|/);
+  assert.deepEqual({ ...row }, { at: "2026-11-09T00:03:00Z", commit: "abc", brief: "Demo", arm: "x", run: "r1", result: "passed", features: 2, planned: 2, firstPass: 1, repairs: 1, planBlocks: 1, reviewsRun: 0, reviewsSkipped: 0, skippedFindings: 0, unattributedFindings: 0, costUsd: 3, costPerFeature: 1.5, wallMin: 2 });
+  assert.match(formatSmokeTable([row]), /\| 2026-11-09 \| abc \| Demo \| x \| passed \| 2 of 2 \| 1 \| 1 \| 1 \| 0 \| 0 \| 0 \| 0 \| \$3\.00 \| \$1\.50 \| 2 min \|/);
   assert.equal(summarizeRun({ ...state, state: "failed", error: { code: "run_budget_reached" } }, []).result, "failed (run_budget_reached)");
 });
 
-test("summarizeRun counts scoped reviews, skipped features and final-review bugs on skipped features", () => {
+test("summarizeRun counts scoped reviews, skipped features, every final finding on them, and unattributed findings", () => {
   const state = { id: "r2", state: "completed", sliceDone: ["A", "B"], sliceStats: { A: { reviews: 2 }, B: { reviews: 0 } }, recoveryPhase: { stats: { R1: { reviews: 0, batched: true }, R2: { reviews: 1 } } } };
-  const events = [ev("review.bug", { feature: "B" }), ev("review.bug", { feature: "A" }), ev("review.bug", { feature: "R1" })];
+  // R1 is a batched recovery feature; the null finding sits in files no feature declares.
+  const events = [ev("review.finding", { feature: "B" }), ev("review.finding", { feature: "A" }), ev("review.finding", { feature: "R1" }), ev("review.finding", { feature: "R1" }), ev("review.finding", { feature: null }), ev("review.bug", { feature: "B" })];
   const row = summarizeRun(state, events);
-  assert.deepEqual([row.reviewsRun, row.reviewsSkipped, row.skippedFindings], [3, 2, 2]);
+  assert.deepEqual([row.reviewsRun, row.reviewsSkipped, row.skippedFindings, row.unattributedFindings], [3, 2, 3, 1]);
 });

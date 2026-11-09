@@ -926,3 +926,14 @@ test("a stopped or paused latest run is announced from every project, but not th
   assert.deepEqual(runsNeedingYou(projects, null).map((run) => `${run.name}:${run.state}`), ["Habit Loop:paused", "b:failed", "f:interrupted"]);
   assert.deepEqual(runsNeedingYou(projects, "b-run").map((run) => run.jobId), ["a-run", "f-run"]);
 });
+
+test("start over keeps the original run's feature-review mode, not the server's current one", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-retry-"));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true });
+  const base = await listen(app, t);
+  const original = await app.store.create({ brief: { workingName: "Retry" }, transcript: [], provider: "fixture", featureReview: "risky" });
+  const response = await fetch(`${base}/api/jobs/${original.id}/retry`, { method: "POST" });
+  assert.equal(response.status, 202);
+  const { job } = await response.json();
+  assert.equal(job.featureReview, "risky");
+});

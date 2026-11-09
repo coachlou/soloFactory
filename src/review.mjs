@@ -43,6 +43,15 @@ export function originalChecks(brief) {
 export const unreviewedFeatures = (job) => [...new Set([job.sliceStats, job.recoveryPhase?.stats]
   .flatMap((stats) => Object.entries(stats ?? {}).filter(([, entry]) => entry.reviews === 0).map(([id]) => id)))];
 
+// SOLOFACTORY_FEATURE_REVIEW=risky: a feature needs its scoped review unless a gate can judge all of it — every
+// obligation has cases, none on the browser surface, every check it closes is cited by a case, and it edited no
+// earlier feature's proof. (Plan validation already ties closed checks to cases; the explicit check keeps the rule whole.)
+export function featureNeedsReview({ runnable, owned = [], brokenProofs = [] }) {
+  const cased = new Set(runnable.flatMap((item) => (item.cases ?? []).flatMap((entry) => entry.refs ?? [])));
+  return brokenProofs.length > 0 || owned.some((check) => !cased.has(check.id))
+    || runnable.some((item) => !item.cases?.length || item.cases.some((entry) => entry.surface === "browser"));
+}
+
 export async function prepareReview(appDir, job, { checks = originalChecks(job.brief), candidate, caseResults, editedProofs, unreviewed } = {}) {
   const request = {
     version: 1, jobId: job.id, token: randomUUID(), contractDigest: await contractDigest(appDir), checks,

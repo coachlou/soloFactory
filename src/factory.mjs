@@ -10,7 +10,7 @@ import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./pro
 import { buildPrompt, continuationPrompt, featureBuildPrompt, featurePlanPrompt, featureReviewPrompt, planAuditPrompt, planCorrectionPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
 import { PLAN_SCHEMA_FIXES, assertConsolidation, caseResults, featureProofs, impactedFeatures, proofsOf, orderSlices, integrationProofs, outsideWrites, writesCover, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
 export { pendingProofFailure };
-import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, unreviewedFeatures, validatePlanReview, validateReview } from "./review.mjs";
+import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, featureNeedsReview, sourceSet, unreviewedFeatures, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
 import { measureRun } from "./measure.mjs";
 import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, watchConfig, workerAlive } from "./watchdog.mjs";
@@ -954,10 +954,8 @@ export class SoloFactory {
         const reached = scope.cursor ? [] : await this.reachedProofs(job, slice);
         job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: await depsDigest(appDir) !== job.installedDeps, slice, proofs: [...runnable.filter((item) => item.proof), ...reached] });
         cursor.candidate = await candidate();
-        // "risky" reviews only features a gate cannot judge: uncased checks, browser cases, edited earlier proofs.
         // A skipped feature is audited in full by the final review (unreviewedFeatures). Recovery always reviews.
-        const risky = scope.cursor || job.featureReview !== "risky" || cursor.brokenProofs?.length
-          || runnable.some((item) => !item.cases?.length || item.cases.some((entry) => entry.surface === "browser"));
+        const risky = scope.cursor || job.featureReview !== "risky" || featureNeedsReview({ runnable, owned, brokenProofs: cursor.brokenProofs });
         if (!risky) await this.emit(job.id, { type: "review.skipped", state: job.state, slice: slice.id, message: `Feature ${slice.id} is low risk; its review moves to the final review` });
         await save(risky ? "reviewing" : "committing");
       }
@@ -1459,9 +1457,14 @@ export class SoloFactory {
     const owned = new Map();
     // Every finding's test stays a proof for the rest of the run, so final integration reruns fixed bugs.
     job.bugProofs ??= [];
+    // Every finding is recorded against the latest feature, main or recovery plan, declaring one of its files (null: none),
+    // whatever path repairs it; the smoke ledger counts these. Routing below stays on the main plan.
+    const writers = [...(job.approvedPlan?.plan?.slices ?? []), ...(job.recoveryPhase?.plan?.slices ?? [])].filter((slice) => slice.writes);
     for (const bug of failure.details?.bugs ?? []) {
       const proof = { id: `BUG-${job.bugProofs.length + 1}`, proof: { command: ["node", "--test", bug.test] }, description: bug.description };
       job.bugProofs.push(proof);
+      const writer = writers.findLast((slice) => (bug.files ?? []).some((file) => writesCover(slice.writes, file)));
+      await this.emit(job.id, { type: "review.finding", state: job.state, feature: writer?.id ?? null, bug: proof.id, message: `${proof.id} found${writer ? ` in ${writer.id}` : " outside every feature's writes"}: ${bug.description}` });
       const owner = slices.findLast((slice) => slice.writes && bug.files.some((file) => writesCover(slice.writes, file)));
       if (owner) (owned.get(owner) ?? owned.set(owner, []).get(owner)).push(proof);
     }

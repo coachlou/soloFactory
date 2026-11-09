@@ -61,6 +61,7 @@ test("a release finding goes to the feature owning the failing file, and its rep
   assert.equal(result.state, "completed", result.error?.message);
   const bug = events.find((event) => event.type === "review.bug");
   assert.equal(bug?.feature, "SLICE-UI", "the latest feature declaring index.html owns it");
+  assert.equal(events.find((event) => event.type === "review.finding")?.feature, "SLICE-UI", "the finding is counted against its feature");
   assert.ok(events.some((event) => event.type === "gate.failed" && event.gate === "proof-BUG-1"), "the finding's test ran and failed before any repair");
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /inside slice SLICE-UI/);
@@ -83,6 +84,7 @@ test("a finding no feature owns takes the unscoped repair", async () => {
   const { result, prompts, events } = await qaRun({ files: ["nowhere/x.js"] });
   assert.equal(result.state, "completed", result.error?.message);
   assert.equal(events.filter((event) => event.type === "review.bug").length, 0);
+  assert.deepEqual(events.filter((event) => event.type === "review.finding").map((event) => event.feature), [null], "still counted, as unattributed");
   assert.doesNotMatch(prompts[0], /inside slice/);
 });
 

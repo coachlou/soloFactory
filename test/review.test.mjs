@@ -154,7 +154,7 @@ test('an approved repair plan recovers an exhausted review without overwriting p
 
 // --- registry, candidate binding and plan verdicts (no factory) ---
 import { mkdir } from 'node:fs/promises';
-import { originalChecks, prepareReview, validateReview, preparePlanReview, validatePlanReview } from '../src/review.mjs';
+import { featureNeedsReview, originalChecks, prepareReview, validateReview, preparePlanReview, validatePlanReview } from '../src/review.mjs';
 
 async function contractDir(t) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'solo-contract-'));
@@ -230,4 +230,13 @@ test('a review is void when its own supplied inputs change, not when another bri
   await validateReview(dir, req);
   await writeFile(path.join(dir, '.factory/uploads/spec.md'), 'v2');
   await assert.rejects(validateReview(dir, req), /inputs changed/);
+});
+
+test("risky mode reviews a feature that closes a check no case cites, even when every obligation is cased", () => {
+  const cli = (refs) => ({ id: "O-1", refs, cases: [{ id: "O-1-C", surface: "cli", refs }] });
+  assert.equal(featureNeedsReview({ runnable: [cli(["SC-1"])], owned: [{ id: "SC-1" }] }), false, "fully cased: a gate judges it");
+  assert.equal(featureNeedsReview({ runnable: [cli(["SC-1"])], owned: [{ id: "SC-1" }, { id: "MH-2" }] }), true, "MH-2 is closed but uncased");
+  assert.equal(featureNeedsReview({ runnable: [{ id: "O-2", refs: [] }] }), true, "an uncased obligation");
+  assert.equal(featureNeedsReview({ runnable: [{ ...cli([]), cases: [{ id: "B", surface: "browser", refs: [] }] }] }), true, "a browser case");
+  assert.equal(featureNeedsReview({ runnable: [cli([])], brokenProofs: ["test/a.test.mjs"] }), true, "an edited earlier proof");
 });
