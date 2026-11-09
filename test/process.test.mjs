@@ -287,8 +287,8 @@ process.stdout.write(ok(noise(260_000)) + ok(noise(150_000)) + ok(noise(150_000)
 });
 
 test("process output keeps complete records for diagnostics across chunk boundaries and the tail cap", async () => {
-  const record = (n) => JSON.stringify({ type: "item.completed", item: { type: "command_execution", status: "completed", exit_code: 0, aggregated_output: `${n} ${"y".repeat(90_000)} UNAUTHORIZED` } });
-  const script = `const r=${JSON.stringify([1, 2, 3, 4].map(record))};let i=0;const out=r.join("\\n")+"\\n";const t=setInterval(()=>{process.stdout.write(out.slice(i,i+7_000));i+=7_000;if(i>=out.length)clearInterval(t);},1);`;
+  // Records are built in the child: embedded, the -e argument tops Linux's 128 KB per-argument limit (E2BIG).
+  const script = `const r=[1,2,3,4].map((n)=>JSON.stringify({type:"item.completed",item:{type:"command_execution",status:"completed",exit_code:0,aggregated_output:n+" "+"y".repeat(90000)+" UNAUTHORIZED"}}));let i=0;const out=r.join("\\n")+"\\n";const t=setInterval(()=>{process.stdout.write(out.slice(i,i+7_000));i+=7_000;if(i>=out.length)clearInterval(t);},1);`;
   const result = await runProcess({ executable: process.execPath, args: ["-e", script], hardTimeoutMs: 10_000 });
   assert.equal(result.code, 0);
   assert.ok(result.output.length <= 200_000);
