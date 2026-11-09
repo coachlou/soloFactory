@@ -15,7 +15,7 @@ live metrics. It runs the distro check first, and GitHub Actions runs it on Linu
 push and pull request.
 
 Before a release that changes prompts, models or the controller, run the real-provider
-smoke set by hand (about $10 and 35 minutes for both briefs):
+smoke set by hand (about $10 and 35 minutes for the two small briefs; `household-inventory.json` is a mid-size brief of about 12-15 features that shows per-feature overhead and costs more):
 
 ```bash
 node scripts/smoke.mjs

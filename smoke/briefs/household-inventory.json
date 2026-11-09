@@ -1,0 +1,88 @@
+{
+  "provider": "claude",
+  "brief": {
+    "workingName": "Household Inventory",
+    "promise": "Know what the household owns, where it is, and what is running low.",
+    "primaryUser": "One person keeping track of pantry, cleaning and tool supplies at home",
+    "problem": "Items are bought twice or run out unnoticed because nothing records what is where.",
+    "currentAlternative": "A paper list on the fridge and memory",
+    "businessModel": "Free personal tool; no payments",
+    "usage": "A few edits a day on a few hundred items",
+    "visualDirection": "Plain multi-page app, system font: items list, locations page, tags page, low-stock page, import/export page, activity log page",
+    "deployment": "Local Node server listening on the PORT it is given",
+    "coreWorkflow": [
+      "Create locations such as Pantry or Garage",
+      "Add items with quantity, unit, location, tags and a low-stock threshold",
+      "Adjust quantities as things are used or bought and watch the low-stock list",
+      "Search and filter items, then export or import them as CSV"
+    ],
+    "mustHaves": [
+      "Create, rename and delete locations; deleting a location that still holds items is rejected with a message naming how many items it holds",
+      "Create an item with a name, a non-negative quantity, a unit, one location and a low-stock threshold; a blank name, a negative quantity or an unknown location is rejected with a clear message and nothing is stored",
+      "Edit and delete an item",
+      "Items carry zero or more tags; tags are lower-cased and trimmed, and a tags page lists every tag with its item count",
+      "Adjust an item's quantity by a signed amount; an adjustment that would take it below zero is rejected and the quantity is unchanged",
+      "Every create, edit, adjustment and delete appends an entry (time, item name, action, quantity before and after) to an activity log page that lists newest first",
+      "The low-stock page lists items whose quantity is at or below their threshold, lowest ratio of quantity to threshold first; items with threshold 0 never appear",
+      "Search items by name, case-insensitive, matching every word typed",
+      "Filter the items list by location and by tag; both filters combine with search",
+      "Sort the items list by name, quantity or location, ascending or descending",
+      "Export all items as CSV with the header name,quantity,unit,location,tags,threshold; tags are joined by semicolons and fields containing commas or quotes are quoted",
+      "Import items from CSV in that format: rows with a valid shape are added, a row whose name and location match an existing item adds to its quantity, unknown locations are created, and invalid rows are skipped and listed with their line number in the result",
+      "Move all items from one location to another in one action, recorded in the activity log",
+      "A home page shows total item count, total low-stock count and the five most recent activity entries",
+      "Data persists in data/inventory.json across restarts; a missing or empty data file starts an empty inventory"
+    ],
+    "nonGoals": [
+      "Accounts or login",
+      "Barcode scanning or photos",
+      "Prices, currencies or shopping integrations",
+      "Multiple households"
+    ],
+    "dataAndAccess": [
+      "Single local user, no authentication",
+      "All data in data/inventory.json"
+    ],
+    "integrations": [
+      "None"
+    ],
+    "acceptanceScenarios": [
+      "Creating the location Pantry and an item Rice quantity 2 kg threshold 3 shows Rice in the items list and on the low-stock page",
+      "Adjusting Rice by +5 removes it from the low-stock page and adds an activity entry showing 2 then 7",
+      "Adjusting Rice by -20 is rejected with a message and the quantity stays 7",
+      "Deleting the Pantry location while Rice is in it is rejected naming 1 item; after moving its items to Garage the delete succeeds",
+      "Tagging two items ' Staple ' and 'staple' results in one tag 'staple' with count 2 on the tags page",
+      "Searching 'ric kg' finds nothing but searching 'rice' finds Rice, and filtering by location Garage plus tag staple narrows the list correctly",
+      "Exporting then importing the same CSV into an empty inventory recreates identical items; importing it again doubles every quantity",
+      "Importing a CSV with one malformed row adds the valid rows and reports the malformed row by its line number",
+      "A name such as 'Salt, fine' round-trips through export and import intact",
+      "After restarting the server the items, locations and activity log are all still present"
+    ],
+    "constraints": [
+      "Node 24 or newer, no runtime npm dependencies; tests use node:test",
+      "npm test runs only fast tests under test/"
+    ],
+    "manualChecks": []
+  },
+  "transcript": [
+    {
+      "role": "user",
+      "content": "A local household inventory app: I record items by location with tags and low-stock thresholds, adjust quantities, search and filter, see a low-stock page and an activity log, and move data in and out as CSV."
+    }
+  ],
+  "coverage": {
+    "promise": "complete",
+    "user": "complete",
+    "problem": "complete",
+    "workflow": "complete",
+    "mustHaves": "complete",
+    "nonGoals": "complete",
+    "dataAndAccess": "complete",
+    "integrations": "complete",
+    "business": "complete",
+    "visual": "complete",
+    "deployment": "complete",
+    "acceptance": "complete",
+    "constraints": "complete"
+  }
+}
