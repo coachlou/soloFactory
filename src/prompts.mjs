@@ -314,11 +314,21 @@ features' test files it changed because its change broke them. Open each and com
 an edit weakened what the test proved (removed or loosened an assertion, skipped a case) instead of updating it
 to the new agreed behavior.`;
 
-const FEATURE_REVIEWED_SCOPE = `
-Every feature already passed its own proofs and scoped review; their recorded results are in
+// Features that skipped their scoped review (SOLOFACTORY_FEATURE_REVIEW=risky, or a batched repair plan) are the
+// exception: this review is the only obligation-level audit they get. With none, the text is unchanged.
+const featureReviewedScope = (unreviewed = []) => {
+  const ids = unreviewed.join(", ");
+  return `
+Every feature${ids ? ` except ${ids}` : ""} already passed its own proofs and scoped review; their recorded results are in
 review-request.json caseResults. Do not re-audit individual obligations from scratch, except
-the edited proofs below. ${EDITED_PROOFS_RULE}
-Spend this review on what no single feature review could see: integration (cross-feature
+the edited proofs below${ids ? ` and the features review-request.json lists as unreviewed` : ""}. ${EDITED_PROOFS_RULE}${ids ? `
+Unreviewed features (${ids}) passed their proofs but no scoped review. Find each one in the approved
+plan and audit its obligations and every check it closes from scratch: open each case's test and judge it against the bar
+below, and judge uncased checks against real behavior. Report each defect as a bug like any other.
+${REVIEW_BAR}` : ""}
+${INTEGRATION_SCOPE}`;
+};
+const INTEGRATION_SCOPE = `Spend this review on what no single feature review could see: integration (cross-feature
 interactions, shared state such as storage, config and middleware, and API consistency of routes,
 error shapes and status codes across features) and deploy readiness (the health endpoint, the
 metrics endpoint, and startup behavior: PORT, first run with missing data directories or files).
@@ -333,10 +343,10 @@ test once before reporting it and confirm it fails because of the app, not the t
 drops forbidden request headers (Host, Origin, Content-Length): when a bug depends on one, send the request with
 node:http and prove the header arrived (for example by echoing it from a stub server) before blaming the app.`;
 
-export function reviewPrompt({ featureReviewed = false } = {}) {
+export function reviewPrompt({ featureReviewed = false, unreviewed = [] } = {}) {
   return `You are the final implementation reviewer. Audit the current app against every
 requirement in .factory/PRD.md and every scenario in .factory/ACCEPTANCE.md. Inspect the real
-code and tests. ${MANUAL_RULE}${featureReviewed ? FEATURE_REVIEWED_SCOPE + "\n" : ""} Do not change application source: report each
+code and tests. ${MANUAL_RULE}${featureReviewed ? featureReviewedScope(unreviewed) + "\n" : ""} Do not change application source: report each
 correctness, wiring, error-handling, accessibility, privacy or operator-documentation gap as a
 blocker, and a repair turn fixes it under the checks. If you change source, the controller discards
 a passing verdict and reviews again. Do not deploy and do not claim a

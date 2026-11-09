@@ -10,7 +10,7 @@ import { assertAllowedCommand, runProcess, subscriptionEnvironment } from "./pro
 import { buildPrompt, continuationPrompt, featureBuildPrompt, featurePlanPrompt, featureReviewPrompt, planAuditPrompt, planCorrectionPrompt, planReviewPrompt, repairPrompt, reviewPrompt, sliceBuildPrompt, sliceContinuationPrompt, specificationPrompt } from "./prompts.mjs";
 import { PLAN_SCHEMA_FIXES, assertConsolidation, caseResults, featureProofs, impactedFeatures, proofsOf, orderSlices, integrationProofs, outsideWrites, writesCover, pendingChecks, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from "./wbs.mjs";
 export { pendingProofFailure };
-import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, validatePlanReview, validateReview } from "./review.mjs";
+import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, sourceSet, unreviewedFeatures, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
 import { measureRun } from "./measure.mjs";
 import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, watchConfig, workerAlive } from "./watchdog.mjs";
@@ -484,7 +484,8 @@ export class SoloFactory {
       const pending = integrationProofs(job).map((entry) => ({ id: entry.key, text: obligationCheck(entry.obligation).text }));
       const caseIds = integrationProofs(job).flatMap((entry) => (entry.obligation.cases ?? []).map((item) => item.id));
       const editedProofs = Object.fromEntries(Object.entries(job.sliceStats ?? {}).filter(([, stats]) => stats.editedProofs?.length).map(([id, stats]) => [id, stats.editedProofs]));
-      try { request = await prepareReview(appDir, job, { checks: [...originalChecks(job.brief), ...pending], caseResults: caseIds.length ? Object.fromEntries(caseIds.map((id) => [id, job.caseResults?.[id] ?? { status: "missing" }])) : undefined, editedProofs }); }
+      const unreviewed = job.planVersion === 2 ? unreviewedFeatures(job) : [];
+      try { request = await prepareReview(appDir, job, { checks: [...originalChecks(job.brief), ...pending], caseResults: caseIds.length ? Object.fromEntries(caseIds.map((id) => [id, job.caseResults?.[id] ?? { status: "missing" }])) : undefined, editedProofs, unreviewed }); }
       catch (error) { throw new FactoryError("review_rejected", `Cannot review the frozen contract: ${error.message}`); }
       if (job.reviewContractDigest && request.contractDigest !== job.reviewContractDigest) {
         throw new FactoryError("review_rejected", "Frozen contract changed after the first review; scope cannot be narrowed during repair.");
@@ -492,7 +493,7 @@ export class SoloFactory {
       job.reviewContractDigest = request.contractDigest;
       job.reviewRequest = request;
       await this.store.writeState(job);
-      const prompt = reviewPrompt({ featureReviewed: job.planVersion === 2 });
+      const prompt = reviewPrompt({ featureReviewed: job.planVersion === 2, unreviewed });
       const reviewed = await sourceBaseline(this.store, { head: false });
       try {
         await this.invoke(job, "review", prompt, signal);
@@ -953,7 +954,12 @@ export class SoloFactory {
         const reached = scope.cursor ? [] : await this.reachedProofs(job, slice);
         job = await this.verifyWithRepairs(job, await this.readManifest(appDir), signal, { includeInstall: await depsDigest(appDir) !== job.installedDeps, slice, proofs: [...runnable.filter((item) => item.proof), ...reached] });
         cursor.candidate = await candidate();
-        await save("reviewing");
+        // "risky" reviews only features a gate cannot judge: uncased checks, browser cases, edited earlier proofs.
+        // A skipped feature is audited in full by the final review (unreviewedFeatures). Recovery always reviews.
+        const risky = scope.cursor || job.featureReview !== "risky" || cursor.brokenProofs?.length
+          || runnable.some((item) => !item.cases?.length || item.cases.some((entry) => entry.surface === "browser"));
+        if (!risky) await this.emit(job.id, { type: "review.skipped", state: job.state, slice: slice.id, message: `Feature ${slice.id} is low risk; its review moves to the final review` });
+        await save(risky ? "reviewing" : "committing");
       }
       if (cursor.substage === "reviewing") {
         job = await this.stage(job, "reviewing", `Reviewing feature ${position} — ${slice.title}`);

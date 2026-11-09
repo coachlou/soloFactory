@@ -85,6 +85,10 @@ export async function createSoloFactoryServer(options = {}) {
   const fixtureMode = options.fixtureMode ?? process.env.SOLOFACTORY_DEMO === "1";
   // Repair turns per gate budget. Only a smoke test lowers it, to reach an exhausted budget on a real provider.
   const maxRepairs = /^\d+$/.test(process.env.SOLOFACTORY_MAX_REPAIRS ?? "") ? Number(process.env.SOLOFACTORY_MAX_REPAIRS) : 2;
+  // Which features get a scoped review: "all" (default) or "risky" (uncased or browser checks, edited earlier proofs).
+  // Saved on each new run, so a resume keeps the value its run started with. Smoke A/B only.
+  const featureReview = process.env.SOLOFACTORY_FEATURE_REVIEW || "all";
+  if (!["all", "risky"].includes(featureReview)) throw new Error(`SOLOFACTORY_FEATURE_REVIEW must be "all" or "risky", not "${featureReview}".`);
   // Tests that exercise the owner's manual Approve path turn the automatic repair start off.
   const autoStartRepairs = options.autoStartRepairs ?? true;
   watchConfig(); // fails fast on an invalid progress window or loop threshold
@@ -394,7 +398,7 @@ export async function createSoloFactoryServer(options = {}) {
         // Same scan the Guide's review screen shows. A brief posted straight here (e.g. from chat) has
         // no Guide turn to send it back to, so like the Guide's second pass it queues with notices, never a block.
         const notices = briefNotices(validated.brief);
-        const job = await store.create({ brief: validated.brief, transcript: body.transcript, provider, sdlc, notices });
+        const job = await store.create({ brief: validated.brief, transcript: body.transcript, provider, sdlc, notices, featureReview });
         await enqueue(active.id, job.id);
         await rm(draftFile(active.dir), { force: true });
         const [annotated] = await annotateJobs(active.id, [await store.read(job.id)]);
@@ -618,7 +622,7 @@ export async function createSoloFactoryServer(options = {}) {
         const jobStore = storeFor(projectId);
         const original = await jobStore.read(retryMatch[1]);
         if (runs.get(projectId)?.jobId === original.id) return json(response, 409, { error: "That run is still active." });
-        const job = await jobStore.create({ brief: original.brief, transcript: original.transcript, provider: original.provider, notices: briefNotices(original.brief) });
+        const job = await jobStore.create({ brief: original.brief, transcript: original.transcript, provider: original.provider, notices: briefNotices(original.brief), featureReview: original.featureReview ?? featureReview });
         // Starting over replaces the original, so it no longer holds the queue, and the new run goes first.
         if (PARKED.has(original.state)) {
           await rollBack(original, jobStore);

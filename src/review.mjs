@@ -39,7 +39,11 @@ export function originalChecks(brief) {
 }
 
 // Scoped reviews pass their own checks and the candidate source identity the verdict must name.
-export async function prepareReview(appDir, job, { checks = originalChecks(job.brief), candidate, caseResults, editedProofs } = {}) {
+// Features whose scoped review never ran: skipped as low risk, or built in a batched repair plan.
+export const unreviewedFeatures = (job) => [...new Set([job.sliceStats, job.recoveryPhase?.stats]
+  .flatMap((stats) => Object.entries(stats ?? {}).filter(([, entry]) => entry.reviews === 0).map(([id]) => id)))];
+
+export async function prepareReview(appDir, job, { checks = originalChecks(job.brief), candidate, caseResults, editedProofs, unreviewed } = {}) {
   const request = {
     version: 1, jobId: job.id, token: randomUUID(), contractDigest: await contractDigest(appDir), checks,
     sources: await sourceSet(appDir, runInputs(job)),
@@ -48,6 +52,7 @@ export async function prepareReview(appDir, job, { checks = originalChecks(job.b
     // Earlier features' test files a later feature updated because its change broke them, keyed by that later feature.
     ...(editedProofs && Object.keys(editedProofs).length ? { editedProofs } : {}),
     ...(job.ownerDecisions?.length ? { ownerDecisions: job.ownerDecisions } : {}),
+    ...(unreviewed?.length ? { unreviewed } : {}),
   };
   if (!request.checks.length) throw new Error("Review requires at least one intake requirement or acceptance scenario.");
   await rm(path.join(appDir, ".factory", "review-result.json"), { force: true });

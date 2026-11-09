@@ -17,7 +17,7 @@ const deployer = async () => ({ mode: "fixture", status: "live", url: "http://12
 const passing = async () => ({ code: 0, output: "passed" });
 
 // A default (planned) run whose fixture turns can be post-processed per stage by `after`.
-async function plannedRun({ after = async () => {}, commandRunner = passing, uploads = {} } = {}) {
+async function plannedRun({ after = async () => {}, commandRunner = passing, uploads = {}, featureReview } = {}) {
   const store = new JobStore(await mkdtemp(path.join(os.tmpdir(), "solo-factory-features-")));
   await store.init();
   // Supplied specs and prototype handoffs arrive at intake and are attached by the brief's own transcript.
@@ -26,7 +26,7 @@ async function plannedRun({ after = async () => {}, commandRunner = passing, upl
     await writeFile(path.join(store.appDir(), ".factory/uploads", name), body);
   }
   const attached = Object.keys(uploads).map((name) => ({ role: "user", content: `Attached file: .factory/uploads/${name}` }));
-  const job = await store.create({ brief, transcript: [...transcript, ...attached], provider: "fixture" });
+  const job = await store.create({ brief, transcript: [...transcript, ...attached], provider: "fixture", featureReview });
   assert.equal(job.planVersion, 2);
   const fixture = createFixtureProvider();
   const provider = { id: "fixture", async run(options) {
@@ -1273,4 +1273,61 @@ test("a capped build that changed nothing parks instead of continuing", async ()
   assert.equal(result.state, "failed");
   assert.equal(result.error.code, "agent_hard_timeout");
   assert.deepEqual(result.watch?.continuations ?? {}, {});
+});
+
+// SOLOFACTORY_FEATURE_REVIEW=risky: the skeleton's checks all have CLI cases (low risk), the UI's have a browser case.
+async function riskRun(featureReview, { cased = true } = {}) {
+  const source = { path: ".factory/ACCEPTANCE.md", locator: "Acceptance contract" };
+  const final = {};
+  const after = async (stage, cwd, context, prompt) => {
+    if (stage === "feature-plan" && cased) await patch(path.join(cwd, ".factory/slices.json"), (plan) => {
+      for (const [slice, surface] of [[plan.slices[0], "cli"], [plan.slices[1], "browser"]]) {
+        for (const item of slice.acceptance) item.cases = [{ id: `${item.id}-C`, surface, action: "use it", expect: "it works", refs: item.refs, sources: [source] }];
+      }
+    });
+    if (stage === "review") Object.assign(final, { prompt, request: await json(path.join(cwd, ".factory/review-request.json")) });
+  };
+  // Every proof run reports every case test as passed.
+  const commandRunner = async (options) => {
+    const events = options.env?.SOLOFACTORY_CASE_EVENTS;
+    if (events) await writeFile(events, ["SKELETON-1-C", "UI-1-C"].map((id) => JSON.stringify({ type: "test:pass", name: `[${id}] works` })).join("\n") + "\n");
+    return { code: 0, output: "passed" };
+  };
+  const { store, job, factory } = await plannedRun({ after, commandRunner, featureReview });
+  await factory.run(job.id);
+  return { store, state: await store.read(job.id), turns: await started(store, job.id), events: await store.events(job.id, 1000), final };
+}
+
+test("risky mode: a low-risk feature commits with no scoped review, a browser-case feature is still reviewed, and the final review audits the skipped one", async () => {
+  const { state, turns, events, final } = await riskRun("risky");
+  assert.equal(state.state, "completed", state.error?.message);
+  assert.equal(state.featureReview, "risky");
+  assert.equal(count(turns, "feature-review-SLICE-SKELETON-"), 0);
+  assert.equal(count(turns, "feature-review-SLICE-UI-"), 1);
+  assert.ok(events.some((e) => e.type === "review.skipped" && e.slice === "SLICE-SKELETON"));
+  assert.ok(state.sliceDone.includes("SLICE-SKELETON"));
+  assert.equal(state.sliceStats["SLICE-SKELETON"].reviews, 0);
+  assert.deepEqual(final.request.unreviewed, ["SLICE-SKELETON"]);
+  assert.match(final.prompt, /Every feature except SLICE-SKELETON already passed/);
+  assert.match(final.prompt, /Unreviewed features \(SLICE-SKELETON\)/);
+  assert.match(final.prompt, /clause by clause/);
+});
+
+test("default feature review (all) reviews every feature and leaves the final review prompt unchanged", async () => {
+  const { state, turns, events, final } = await riskRun(undefined);
+  assert.equal(state.state, "completed", state.error?.message);
+  assert.equal(state.featureReview, "all");
+  assert.equal(count(turns, "feature-review-SLICE-SKELETON-"), 1);
+  assert.equal(count(turns, "feature-review-SLICE-UI-"), 1);
+  assert.ok(!events.some((e) => e.type === "review.skipped"));
+  assert.equal(final.request.unreviewed, undefined);
+  assert.match(final.prompt, /Every feature already passed/);
+  assert.doesNotMatch(final.prompt, /Unreviewed features|clause by clause/);
+});
+
+test("risky mode still reviews a feature whose checks have no cases", async () => {
+  const { state, turns, events } = await riskRun("risky", { cased: false });
+  assert.equal(state.state, "completed", state.error?.message);
+  assert.equal(count(turns, "feature-review-SLICE-SKELETON-"), 1);
+  assert.ok(!events.some((e) => e.type === "review.skipped"));
 });

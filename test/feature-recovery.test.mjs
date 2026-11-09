@@ -95,13 +95,13 @@ test('a kept feature may cite a check that built features already closed, but a 
   assert.throws(() => validateRecoveryPlan(p, { ...scoped, closedChecks }, { fresh: true }), /unknown check MH-8/);
 });
 
-async function setup(t, mutate = async () => {}, { uploads = {}, alreadyPasses = false, autoStart = false } = {}) {
+async function setup(t, mutate = async () => {}, { uploads = {}, alreadyPasses = false, autoStart = false, sdlc = 'single' } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'solo-feature-recovery-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const store = new JobStore(root); await store.init();
   // Supplied specs and prototype handoffs arrive at intake, before the run.
   for (const [name, body] of Object.entries(uploads)) { await mkdir(path.join(root, '.factory/uploads'), { recursive: true }); await writeFile(path.join(root, '.factory/uploads', name), body); }
-  const job = await store.create({ brief: { workingName: 'Recovery fixture', mustHaves: ['Live saved searches', 'Edit people'], acceptanceScenarios: ['A new item enters its smart album'] }, transcript: [{ role: 'user', content: 'Recover the missing behavior' }, ...Object.keys(uploads).map(name => ({ role: 'user', content: `Attached file: .factory/uploads/${name}` }))], provider: 'fixture', sdlc: 'single' });
+  const job = await store.create({ brief: { workingName: 'Recovery fixture', mustHaves: ['Live saved searches', 'Edit people'], acceptanceScenarios: ['A new item enters its smart album'] }, transcript: [{ role: 'user', content: 'Recover the missing behavior' }, ...Object.keys(uploads).map(name => ({ role: 'user', content: `Attached file: .factory/uploads/${name}` }))], provider: 'fixture', sdlc });
   const fixture = createFixtureProvider(); let recovering = false; let deployments = 0;
   const stages = []; const prompts = {};
   // 'default' omits the option, so the test runs the constructor default the server also uses.
@@ -239,6 +239,24 @@ test('a big repair plan builds every repair before one test pass and skips per-r
   assert.ok(builds.at(-1) < order.findIndex(stage => stage.startsWith('gate:')), order.join(' '));
   assert.ok(!order.some(stage => /^recovery-.*-review-\d+$/.test(stage)), order.join(' '));
   assert.equal(result.recoveryPhase.done.length, ready.recoveryPhase.plan.slices.length);
+});
+
+// Before 2026-11-09 a batched repair plan on a planned run got the narrowed "already reviewed" final review, so its
+// repairs had no obligation-level review at all. The final review now names them and audits them in full.
+test('the final review after a batched repair plan audits the unreviewed repair features', async t => {
+  const env = await setup(t, async () => {}, { sdlc: 'slices' });
+  assert.equal(env.failed.planVersion, 2);
+  const ready = await env.factory.planRecovery(env.failed.id);
+  env.factory.batchRepairsFrom = 1;
+  const result = await env.factory.startRecovery(ready.id, ready.recoveryPhase.planDigest);
+  assert.equal(result.state, 'completed', result.error?.message);
+  const ids = ready.recoveryPhase.plan.slices.map(slice => slice.id);
+  assert.ok(ids.length);
+  for (const id of ids) assert.equal(result.recoveryPhase.stats[id].reviews, 0);
+  const prompt = env.prompts.review;
+  assert.match(prompt, /Unreviewed features \(/);
+  for (const id of ids) assert.ok(prompt.includes(id), `${id} missing from the final review prompt`);
+  assert.deepEqual(result.reviewRequest.unreviewed.filter(id => ids.includes(id)).sort(), [...ids].sort());
 });
 
 test('a spent feature gate replans only its replacement and reviews the merged plan with scoped checks', async t => {
