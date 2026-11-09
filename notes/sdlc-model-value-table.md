@@ -175,12 +175,14 @@ Code at 587a032, isolated homes `.solofactory/armb-habit` and `.solofactory/armb
 |---|---|---|---|---|---|---|
 | Habit Ledger | A (Opus low) | passed | 6 | 0 | $4.08 | 14 min |
 | Habit Ledger | B (Opus medium) | **failed** (stuck on MARK-DONE) | 3 of plan | 3 | $9.63 | 28 min |
+| Habit Ledger | B retest (restart from ADD-HABITS on 898ade3) | **hit $15 cap** in feature 4; MARK-DONE passed | 3 of 5 | 2 | $15.32 total | about 1h total |
+| Habit Ledger | B fresh (898ade3) | passed | 4 | 1 (final-review bug) | $11.90 | 35 min |
 | Voice Notes | A (Opus low) | passed | 6 | 1 | $5.23 | 19 min |
 | Voice Notes | B (Opus medium) | **hit $15 cap** | 12 planned | 4 | $15.25 | 53 min |
 
 What happened:
-- **Reasoning stages ate the budget.** On Habit Ledger they cost about $7.8 of $9.63. Planning alone took 3 plan reviews and 2 corrections (17 min). Plan review 1 has blocked in all five Opus-medium Habit Ledger runs to date.
+- **Reasoning stages ate the budget.** On Habit Ledger they cost about $7.8 of $9.63. Planning alone took 3 plan reviews and 2 corrections (17 min). Plan review 1 has blocked in all six Opus-medium Habit Ledger runs to date.
 - **More planning, not better planning.** Voice Notes was sliced into 12 features against 6, and each feature review ($0.28–$0.70) cost more than its build ($0.11–$0.49).
 - **The known planning defect recurred anyway.** ADD-HABITS froze a test that regex-pins `<li data-habit-id="h_…">Read</li>`, which conflicts with the row shape MARK-DONE needs. Three Opus-medium plan reviews missed it, and three Sonnet repairs could not get past it.
 
-Verdict: recommendation 1 withdrawn, keep Opus low. Recommendation 2 (Opus high only for recovery planning and final review) is untested; the cost pattern here argues for scoping any effort bump to rare stages only. The pinned-markup defect is a planning-prompt fix, not a model-effort fix.
+Verdict: recommendation 1 withdrawn, keep Opus low. Recommendation 2 (Opus high only for recovery planning and final review) is untested; the cost pattern here argues for scoping any effort bump to rare stages only. The pinned-markup defect was not a model-effort problem. It is fixed in the controller instead (0cb4bd5, 898ade3): a feature may now update an earlier feature's test that its change breaks, and one repair gets every such test. In the retest, MARK-DONE broke two earlier tests and one repair fixed both. The run then hit the cap, so Opus medium still did not finish Habit Ledger. The retest's cost and wall time are totals over the original run and both restarts. A fresh run on 898ade3 then passed: 4 features, 1 repair, $11.90 and 35 min, which is 2.9× arm A's cost and 2.5× its time for fewer features. So the controller fix lets Opus medium finish, but it still does not pay for itself; the verdict stands.
