@@ -60,8 +60,8 @@ async function declaredRun(stray) {
   await store.init();
   const job = await store.create({ brief, transcript, provider: "fixture" });
   const fixture = createFixtureProvider();
-  let uiBuilt = false, fixed = false;
-  const prompts = [];
+  let uiBuilt = false;
+  const prompts = [], failures = [];
   const provider = { id: "fixture", async run(options) {
     const result = await fixture.run(options);
     const { stage } = options.context;
@@ -71,15 +71,18 @@ async function declaredRun(stray) {
       for (const slice of value.slices) slice.writes = slice.dependsOn.length ? ["index.html", "ui.test.mjs"] : ["*"];
       // A distinct command, so the skeleton's proof is its own gate rather than deduplicated into npm test.
       value.slices[0].acceptance[0].proof.command = ["node", "--test", "server.test.mjs"];
+      if (stray === "broken2") value.slices[0].acceptance.push({ ...value.slices[0].acceptance[0], id: "SKELETON-2", behavior: "GET /health answers ok", proof: { command: ["node", "--test", "metrics.test.mjs"], expect: "metrics.test.mjs passes" } });
       await writeFile(file, JSON.stringify(value, null, 2));
     }
+    if (stray === "broken2" && stage === "build-slice-SLICE-SKELETON") await writeFile(path.join(options.cwd, "metrics.test.mjs"), "// metrics\n");
     if (["new", "committed", true].includes(stray) && stage === "build-slice-SLICE-UI") {
       await writeFile(path.join(options.cwd, "stray.mjs"), "export {};\n");
       if (stray === "committed") await store.git("add", "stray.mjs").then(() => store.git("commit", "-qm", "agent commit"));
     }
     // SLICE-UI changes the skeleton's server and breaks its proof; the repair updates that proof's test.
-    if (stray === "broken" && stage === "build-slice-SLICE-UI") { uiBuilt = true; await appendFile(path.join(options.cwd, "server.mjs"), "\n// new contract\n"); }
-    if (stray === "broken" && stage.startsWith("repair-")) { prompts.push(options.prompt); await appendFile(path.join(options.cwd, "server.test.mjs"), "\n// expectation updated\n"); }
+    const broken = { broken: ["server.test.mjs"], broken2: ["server.test.mjs", "metrics.test.mjs"] }[stray];
+    if (broken && stage === "build-slice-SLICE-UI") { uiBuilt = true; await appendFile(path.join(options.cwd, "server.mjs"), "\n// new contract\n"); }
+    if (broken && stage.startsWith("repair-")) { prompts.push(options.prompt); failures.push(await readFile(path.join(options.cwd, options.prompt.match(/\.factory\/last-failure-\d+\.txt/)[0]), "utf8")); for (const file of broken) await appendFile(path.join(options.cwd, file), "\n// expectation updated\n"); }
     // An existing file another (built) feature owns: source widens the writes, a test never does.
     if (["source", "test"].includes(stray) && stage === "build-slice-SLICE-UI") await appendFile(path.join(options.cwd, stray === "source" ? "server.mjs" : "server.test.mjs"), "\n// touched\n");
     return result;
@@ -87,14 +90,12 @@ async function declaredRun(stray) {
   const logs = [];
   const factory = new SoloFactory({ store, provider, commandRunner: async ({ logPath, args }) => {
     logs.push(path.basename(logPath));
-    if (uiBuilt && args.includes("server.test.mjs")) {
-      fixed ||= (await readFile(path.join(store.appDir(job.id), "server.test.mjs"), "utf8")).includes("expectation updated");
-      if (!fixed) return { code: 1, output: "server.test.mjs: expected the old row" };
-    }
+    const file = args.find((arg) => ["server.test.mjs", "metrics.test.mjs"].includes(arg));
+    if (uiBuilt && file && !(await readFile(path.join(store.appDir(job.id), file), "utf8")).includes("expectation updated")) return { code: 1, output: `${file}: expected the old row` };
     return { code: 0, output: "passed" };
   }, deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9982" }) });
   const result = await factory.start(job.id);
-  return { result, events: await store.events(job.id, 1000), logs, prompts };
+  return { result, events: await store.events(job.id, 1000), logs, prompts, failures };
 }
 
 test("a feature that stays inside its declared writes completes", async () => {
@@ -182,5 +183,17 @@ test("a feature that breaks an earlier feature's proof may update that proof's t
   assert.ok(events.some((event) => event.type === "gate.failed" && /^proof-SLICE-SKELETON\./.test(event.gate ?? "")), "the skeleton proof failed in SLICE-UI's checks");
   assert.match(prompts[0] ?? "", /broke an earlier feature's proof \(server\.test\.mjs\)/);
   assert.ok(events.filter((event) => event.type === "slice.writes_widened").some((event) => event.files.includes("server.test.mjs")));
+  assert.equal(events.filter((event) => event.gate === "writes").length, 0);
+});
+
+test("a feature that breaks several earlier proofs gets them all in one repair", async () => {
+  const { result, events, prompts, failures } = await declaredRun("broken2");
+  assert.equal(result.state, "completed", result.error?.message);
+  const failed = events.filter((event) => event.type === "gate.failed" && /^proof-SLICE-SKELETON\./.test(event.gate ?? "")).map((event) => event.gate);
+  assert.equal(new Set(failed).size, 2, failed.join(", "));
+  assert.equal(prompts.length, 1, "one repair fixed both");
+  assert.equal(failures[0].match(/=== proof-SLICE-SKELETON\./g)?.length, 2, "the repair's failure file holds both outputs");
+  assert.match(failures[0], /server\.test\.mjs: expected the old row[\s\S]*metrics\.test\.mjs: expected the old row/);
+  assert.match(prompts[0], /broke an earlier feature's proof \(server\.test\.mjs, metrics\.test\.mjs\)/);
   assert.equal(events.filter((event) => event.gate === "writes").length, 0);
 });

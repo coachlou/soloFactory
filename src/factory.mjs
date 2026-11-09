@@ -1346,7 +1346,8 @@ export class SoloFactory {
       // The first feature also runs the suite while it is tiny: a broken test script (e.g. `node --test test/`
       // on Node 26) otherwise surfaced only at integration and cost a repair in every 2026-11-08 smoke arm.
       const firstFeature = !current.sliceDone?.length;
-      const failure = (slice?.writes && await this.writesFailure(current, slice)) || await this.verify(current, manifest, signal, { includeInstall, proofs, first, skipTest: Boolean(slice && proofs.length && !firstFeature) });
+      const earlier = slice ? new Set(proofs.filter((proof) => !proof.id.startsWith(`${slice.id}.`)).map((proof) => JSON.stringify(proof.proof.command))) : null;
+      const failure = (slice?.writes && await this.writesFailure(current, slice)) || await this.verify(current, manifest, signal, { includeInstall, proofs, first, earlier, skipTest: Boolean(slice && proofs.length && !firstFeature) });
       if (!failure) {
         if (!slice) {
           const candidate = await sourceBaseline(this.store, { head: false });
@@ -1367,8 +1368,9 @@ export class SoloFactory {
       }
       // An earlier feature's proof this feature broke (run 2026-11-09-bb64b19c: ADD-HABITS pinned the row MARK-DONE
       // changes): its test files may be updated to the new contract, so the writes gate and repair prompt allow them.
+      const failed = new Set((failure.details?.commands ?? [failure.details?.command]).map((command) => JSON.stringify(command)));
       const broken = slice && current.featureCursor?.id === slice.id && proofs
-        .filter((proof) => !proof.id.startsWith(`${slice.id}.`) && JSON.stringify(proof.proof.command) === JSON.stringify(failure.details?.command))
+        .filter((proof) => !proof.id.startsWith(`${slice.id}.`) && failed.has(JSON.stringify(proof.proof.command)))
         .flatMap((proof) => proof.proof.command.filter((arg) => TEST_PATH.test(arg)));
       if (broken?.length) current.featureCursor.brokenProofs = [...new Set([...(current.featureCursor.brokenProofs ?? []), ...broken])];
       current = await this.repair(current, failure, signal, slice, proofs.filter((proof) => proof.description));
@@ -1530,7 +1532,10 @@ export class SoloFactory {
     await this.store.writeState(job);
   }
 
-  async verify(job, manifest, signal, { includeInstall, proofs = [], first = null, skipTest = false }) {
+  async verify(job, manifest, signal, { includeInstall, proofs = [], first = null, skipTest = false, earlier = null }) {
+    // earlier: commands of earlier features' proofs. One that fails does not stop the pass: the rest of them run
+    // too, so a single repair sees every earlier test this feature broke (run 2026-11-09-bb64b19c needed one each).
+    const broken = [];
     // skipTest: a feature's own proofs are its acceptance; the whole suite runs at integration. A proof that
     // is the test command itself keeps the test gate, so its gate name and repair routing are unchanged.
     if (proofs.some((item) => JSON.stringify(item.proof.command) === JSON.stringify(manifest.commands.test))) skipTest = false;
@@ -1561,6 +1566,7 @@ export class SoloFactory {
     const integrated = proofs.some(item => item.key);
     let candidate = null;
     for (const [gate, command, proofKeys = [], cases = []] of gates) {
+      if (broken.length && !earlier.has(JSON.stringify(command))) continue;
       // Install may create a lockfile before tests run. Bind evidence to the source tested,
       // including install itself only when it is also an integration proof.
       if (candidate === null && (gate !== "install" || proofKeys.length)) {
@@ -1640,7 +1646,7 @@ export class SoloFactory {
       }
       if (result.code !== 0 || caseFailure) {
         await this.emit(job.id, { type: "gate.failed", state: job.state, gate, feature, durationMs, cases: caseCounts(result.caseResults), message: `${gate} failed` });
-        return new FactoryError("quality_gate_failed", result.code !== 0 ? `${gate} failed with exit ${result.code}.${caseFailure ? ` ${caseFailure}` : ""}` : caseFailure, {
+        const error = new FactoryError("quality_gate_failed", result.code !== 0 ? `${gate} failed with exit ${result.code}.${caseFailure ? ` ${caseFailure}` : ""}` : caseFailure, {
           gate,
           command,
           durationMs,
@@ -1648,6 +1654,9 @@ export class SoloFactory {
           ...(result.caseResults ? { cases: result.caseResults } : {}),
           output: caseOutput ? `${caseOutput}\n\n${result.output ?? ""}` : result.output,
         });
+        if (!earlier?.has(JSON.stringify(command))) return error;
+        broken.push(error);
+        continue;
       }
       await this.emit(job.id, { type: "gate.passed", state: job.state, gate, feature, durationMs, cases: caseCounts(result.caseResults), message: `${gate} passed` });
       // After install, since install may write the lockfile.
@@ -1655,7 +1664,12 @@ export class SoloFactory {
     }
     job.activeCommand = null;
     await this.store.writeState(job);
-    return null;
+    if (broken.length < 2) return broken[0] ?? null;
+    return new FactoryError("quality_gate_failed", broken.map((error) => error.message).join(" "), {
+      ...broken[0].details,
+      commands: broken.map((error) => error.details.command),
+      output: broken.map((error) => `=== ${error.details.gate} ===\n${error.details.output ?? error.message}`).join("\n\n"),
+    });
   }
 
   async deployLocal(job, manifest, signal) {
