@@ -1,0 +1,15 @@
+# npm test on Linux (members run WSL); pretest runs the distro check.
+name: test
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: git config --global user.name ci && git config --global user.email ci@solofactory.local
+      - run: npm test
