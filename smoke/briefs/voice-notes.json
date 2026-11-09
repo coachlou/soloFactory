@@ -1,0 +1,80 @@
+{
+  "provider": "claude",
+  "brief": {
+    "workingName": "Voice Notes",
+    "promise": "Upload a voice recording and get a searchable transcript back.",
+    "primaryUser": "One person recording meeting and idea notes on a laptop",
+    "problem": "Recordings pile up unheard because nothing turns them into text that can be searched.",
+    "currentAlternative": "Re-listening to recordings to find one sentence",
+    "businessModel": "Free personal tool; no payments",
+    "usage": "A few recordings a day, each a few minutes long",
+    "visualDirection": "Plain single page, system font: an upload control, a recordings list with status, a search box, and a transcript view",
+    "deployment": "Local Node server listening on the PORT it is given",
+    "coreWorkflow": [
+      "Upload a WAV file from the browser",
+      "Watch its status go from pending to transcribed (or failed)",
+      "Search transcripts and open one",
+      "Export a transcript as a .txt file or delete the recording"
+    ],
+    "mustHaves": [
+      "Upload a WAV file (PCM, up to 50 MB); the server stores it under data/recordings/ and records its duration in seconds read from the WAV header",
+      "A non-WAV or truncated file is rejected with a clear message and nothing is stored",
+      "Transcription runs the command named in the TRANSCRIBE_CMD environment variable with the audio path as its last argument (TRANSCRIBE_CMD may include arguments separated by spaces, such as node scripts/fake-transcribe.js) and takes its stdout as the transcript; it runs in the background, one recording at a time, so uploads return immediately",
+      "Each recording shows status pending, transcribing, transcribed or failed; a failed recording shows the command's error and can be retried",
+      "Recordings still pending or transcribing when the server stops are transcribed after it restarts",
+      "Search returns recordings whose transcript contains every search word, case-insensitive",
+      "Export downloads the transcript as <recording name>.txt",
+      "Delete removes the recording, its audio file and its transcript",
+      "Metadata and transcripts persist in data/recordings.json across restarts"
+    ],
+    "nonGoals": [
+      "Recording audio in the browser",
+      "Accounts or login",
+      "Cloud transcription services",
+      "Formats other than WAV"
+    ],
+    "dataAndAccess": [
+      "Single local user, no authentication",
+      "Audio in data/recordings/, metadata in data/recordings.json"
+    ],
+    "integrations": [
+      "A local transcription command (for example whisper.cpp) named by TRANSCRIBE_CMD; tests use a fake command script"
+    ],
+    "acceptanceScenarios": [
+      "Uploading a 3-second 16 kHz mono WAV shows it in the list with duration 3 s and status pending, then transcribed with the fake command's output",
+      "Uploading a text file renamed to .wav is rejected with a clear message and the list is unchanged",
+      "When TRANSCRIBE_CMD exits with an error the recording shows failed with that error; after fixing the command, Retry transcribes it",
+      "With transcripts 'budget meeting notes' and 'meeting with Sam', searching 'Meeting budget' returns only the first",
+      "A recording left pending when the server stops is transcribed after a restart",
+      "Deleting a recording removes it from the list and its file from data/recordings/"
+    ],
+    "constraints": [
+      "Node 24 or newer, no runtime npm dependencies; tests use node:test",
+      "npm test runs only fast tests under test/"
+    ],
+    "manualChecks": [
+      "Transcribe a real recording with whisper.cpp set as TRANSCRIBE_CMD"
+    ]
+  },
+  "transcript": [
+    {
+      "role": "user",
+      "content": "A local voice-notes app: I upload WAV recordings, it stores them, transcribes them with a local command, and lets me search, read, export and delete transcripts."
+    }
+  ],
+  "coverage": {
+    "promise": "complete",
+    "user": "complete",
+    "problem": "complete",
+    "workflow": "complete",
+    "mustHaves": "complete",
+    "nonGoals": "complete",
+    "dataAndAccess": "complete",
+    "integrations": "complete",
+    "business": "complete",
+    "visual": "complete",
+    "deployment": "complete",
+    "acceptance": "complete",
+    "constraints": "complete"
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "provider": "claude",
+  "brief": {
+    "workingName": "Habit Ledger",
+    "promise": "Log daily habits and see a correct monthly summary.",
+    "primaryUser": "One person tracking their own habits on a laptop",
+    "problem": "A paper habit tracker never summarizes the month automatically.",
+    "currentAlternative": "A paper calendar with checkmarks",
+    "businessModel": "Free personal tool; no payments",
+    "usage": "Daily, about one minute",
+    "visualDirection": "Plain single page, system font, a habit list and a summary table",
+    "deployment": "Local Node server listening on the PORT it is given",
+    "coreWorkflow": [
+      "Add a habit by name",
+      "Mark a habit done for a date",
+      "Open the monthly summary"
+    ],
+    "mustHaves": [
+      "Add habits and mark them done for a date",
+      "A monthly summary shows, per habit, days done and completion percent for that month",
+      "Entries persist in data/habits.json across server restarts"
+    ],
+    "nonGoals": [
+      "Accounts or login",
+      "Reminders or notifications",
+      "A mobile app"
+    ],
+    "dataAndAccess": [
+      "Single local user, no authentication",
+      "All data in data/habits.json"
+    ],
+    "integrations": [
+      "None"
+    ],
+    "acceptanceScenarios": [
+      "Adding a habit named Read shows Read in the habit list",
+      "Marking Read done for today shows Read checked for today",
+      "With 30 days of seeded history in which Read is done on 20 days, the summary for that month shows Read 20 of 30 days (67%)"
+    ],
+    "constraints": [
+      "Node 24, no runtime npm dependencies; tests use node:test",
+      "npm test runs only fast unit tests under test/",
+      "The seeded 30-day summary check is an end-to-end script, scripts/populated-summary.mjs, run as `node scripts/populated-summary.mjs`; it starts the server against seeded data and is not part of npm test",
+      "Owner-fixed delivery order: (1) server skeleton and JSON storage, delivered together with scripts/populated-summary.mjs as that feature's acceptance for the seeded 30-day scenario; (2) marking habits done; (3) the monthly summary page. The script cannot pass until marking and the summary page exist, so its proof is deferred to integration; do not move the script to a later feature"
+    ]
+  },
+  "transcript": [
+    {
+      "role": "user",
+      "content": "A tiny local habit log: add habits, mark them done per day, and a monthly summary page that is correct for a full month of history."
+    }
+  ],
+  "coverage": {
+    "promise": "complete",
+    "user": "complete",
+    "problem": "complete",
+    "workflow": "complete",
+    "mustHaves": "complete",
+    "nonGoals": "complete",
+    "dataAndAccess": "complete",
+    "integrations": "complete",
+    "business": "complete",
+    "visual": "complete",
+    "deployment": "complete",
+    "acceptance": "complete",
+    "constraints": "complete"
+  }
+}

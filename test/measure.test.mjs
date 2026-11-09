@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { activity, formatMeasurement, measureRun } from "../src/measure.mjs";
+import { activity, formatMeasurement, formatSmokeTable, measureRun, summarizeRun } from "../src/measure.mjs";
 
 let clock = Date.parse("2026-10-11T00:00:00Z");
 const ev = (type, fields = {}, advance = 1000) => ({ at: new Date(clock += advance).toISOString(), type, ...fields });
@@ -89,4 +89,18 @@ test("a turn still running when the run parks is reported as overlap, not hidden
   const m = measureRun(events);
   assert.ok(m.unavailable.some((note) => /overlap/.test(note)));
   assert.match(formatMeasurement(m), /overlap/);
+});
+
+test("summarizeRun gives one smoke-ledger row", () => {
+  clock = Date.parse("2026-11-09T00:00:00Z");
+  const usage = { inputTokens: 10, outputTokens: 5, costUsd: 1.5 };
+  const events = [
+    ev("agent.started", { stage: "feature-plan" }), ev("plan.blocked"), ev("agent.completed", { usage }),
+    ev("agent.started", { stage: "repair-a" }, 60_000), ev("agent.completed", { usage }, 60_000),
+  ];
+  const state = { id: "r1", state: "completed", completedAt: "2026-11-09T00:03:00Z", brief: { workingName: "Demo" }, sliceDone: ["A", "B"], slicePlanIds: ["A", "B"], sliceStats: { A: { repairs: 1 } } };
+  const row = summarizeRun(state, events, { arm: "x", commit: "abc" });
+  assert.deepEqual({ ...row }, { at: "2026-11-09T00:03:00Z", commit: "abc", brief: "Demo", arm: "x", run: "r1", result: "passed", features: 2, planned: 2, firstPass: 1, repairs: 1, planBlocks: 1, costUsd: 3, costPerFeature: 1.5, wallMin: 2 });
+  assert.match(formatSmokeTable([row]), /\| 2026-11-09 \| abc \| Demo \| x \| passed \| 2 of 2 \| 1 \| 1 \| 1 \| \$3\.00 \| \$1\.50 \| 2 min \|/);
+  assert.equal(summarizeRun({ ...state, state: "failed", error: { code: "run_budget_reached" } }, []).result, "failed (run_budget_reached)");
 });
