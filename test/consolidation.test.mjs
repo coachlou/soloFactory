@@ -253,6 +253,9 @@ test('the builder is told the reviewer rules it would otherwise not see, and eve
   assert.match(featureBuildPrompt(slice, base), /no cases is judged directly against real behavior/);
   assert.doesNotMatch(featureBuildPrompt(slice, base), /owner's decisions/);
   assert.match(featureBuildPrompt(slice, { ...base, ownerDecisions: [{ text: 'Waive the PDF export check.' }] }), /owner's decisions[\s\S]*- Waive the PDF export check\./);
+  const decided = repairPrompt('f.txt', slice, [], undefined, [], [{ text: 'Waive the PDF export check.' }]);
+  assert.match(decided, /owner's decisions[\s\S]*- Waive the PDF export check\./);
+  assert.doesNotMatch(repairPrompt('f.txt', slice, [], undefined, [], []), /owner's decisions/);
   for (const prompt of [repairPrompt('f.txt'), repairPrompt('f.txt', slice)]) {
     assert.match(prompt, /Before changing any code, write three lines[\s\S]*Symptom:[\s\S]*Cause:[\s\S]*Files:/);
   }

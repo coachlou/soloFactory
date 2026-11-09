@@ -275,7 +275,12 @@ ready for deterministic controller verification.
 ${DATA_RULE}`;
 }
 
-export function repairPrompt(failurePath, slice = null, bugs = [], featureFile = ".factory/logs/feature.json", brokenTests = []) {
+// Owner decisions from repair planning, newest last; rendered only when there are any.
+function ownerDecisionsBlock(ownerDecisions, verb) {
+  return ownerDecisions?.length ? `The owner's decisions from repair planning, newest last. What they explicitly approve is approved: ${verb} and do not work around them.\n${ownerDecisions.map((d) => `- ${d.text ?? d}`).join("\n")}\n` : "";
+}
+
+export function repairPrompt(failurePath, slice = null, bugs = [], featureFile = ".factory/logs/feature.json", brokenTests = [], ownerDecisions = []) {
   const sliceLines = slice
     ? `
 The failure is inside slice ${slice.id} (${slice.title}), given in full below: do not read the plan file.
@@ -299,7 +304,7 @@ ${bugs.map((bug) => `- ${bug.proof.command.at(-1)}: ${bug.description}`).join("\
 message with the same three lines. Fix the root cause of the recorded controller
 gate failure with the smallest coherent change. Do not weaken, skip, rename, or delete tests,
 health checks, metrics, build commands, or acceptance criteria.${sliceLines}${bugLines}
-Run the relevant checks and leave the app ready for the controller to rerun every gate.
+${ownerDecisionsBlock(ownerDecisions, "repair to them")}Run the relevant checks and leave the app ready for the controller to rerun every gate.
 
 ${DATA_RULE}`;
 }
@@ -649,7 +654,7 @@ ${JSON.stringify(owned, null, 2)}
 
 ${REVIEW_BAR}
 A check with no cases is judged directly against real behavior, not by a test alone: make it work in the running app the way a reviewer would exercise it.
-${ownerDecisions.length ? `The owner's decisions from repair planning, newest last. What they explicitly approve is approved: build to them and do not work around them.\n${ownerDecisions.map((d) => `- ${d.text ?? d}`).join("\n")}\n` : ""}
+${ownerDecisionsBlock(ownerDecisions, "build to them")}
 Build one case at a time: write its proof test, then the minimum real behavior that passes it, and run that
 proof until it passes before starting the next case, so an interrupted turn leaves passing cases, not half-wired
 code. Run only this feature's proof commands, plus targeted tests of earlier code you changed; do not run the

@@ -1519,7 +1519,7 @@ export class SoloFactory {
     const label = `repair-${job.attempt}`;
     const before = await sourceBaseline(this.store, { head: false });
     try {
-      const turn = await this.invoke(job, label, repairPrompt(failureRelative, slice, bugs, undefined, job.featureCursor?.id === slice?.id ? job.featureCursor?.brokenProofs : []), signal);
+      const turn = await this.invoke(job, label, repairPrompt(failureRelative, slice, bugs, undefined, job.featureCursor?.id === slice?.id ? job.featureCursor?.brokenProofs : [], job.ownerDecisions), signal);
       // Shown beside the waiver so the owner judges a "this test is wrong" claim from the repairer's own words.
       job.lastRepairNote = { attempt: job.attempt, text: String(turn?.message ?? "").slice(-1500) };
       await this.store.writeState(job);
@@ -1527,7 +1527,7 @@ export class SoloFactory {
       // Same rule as a capped build: a repair still changing files at the cap is too big for one turn, not stuck.
       // VISUAL-EVIDENCE, 2026-10-15: two 45-minute repairs each made ~50 edits, then a cold restart burned a repair.
       if (error.code !== "agent_hard_timeout" || await sourceBaseline(this.store, { head: false }) === before || !await this.allowContinuation(job, label)) throw error;
-      await this.invoke(job, `${label}-resume`, repairPrompt(failureRelative, slice, bugs, undefined, job.featureCursor?.id === slice?.id ? job.featureCursor?.brokenProofs : []), signal, { resumeSessionId: error.details?.sessionId ?? null });
+      await this.invoke(job, `${label}-resume`, repairPrompt(failureRelative, slice, bugs, undefined, job.featureCursor?.id === slice?.id ? job.featureCursor?.brokenProofs : [], job.ownerDecisions), signal, { resumeSessionId: error.details?.sessionId ?? null });
     }
     return job;
   }
