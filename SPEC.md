@@ -449,7 +449,12 @@ carry a strategy forward.
    `proof-<id>`; a feature with proofs skips the whole-suite test gate, except the first
    feature, which runs it while the suite is tiny so a broken test command fails early) → reviewing (a scoped review of only that feature's owned checks and
    obligations, bound to a hash of the candidate source; a reviewer that edits source voids
-   its verdict and forces fresh checks; capped at 4 reviews, `review_unstable`) → committing
+   its verdict and forces fresh checks; capped at 4 reviews, `review_unstable`. With the dev setting
+   `SOLOFACTORY_FEATURE_REVIEW=risky`, saved on the job at creation and kept on retry, a low-risk
+   feature skips it and goes straight to committing (`review.skipped`). A feature is low risk when
+   every obligation has cases, none is on the browser surface, every check it closes is cited by a
+   case, and it edited no earlier feature's proof (`featureNeedsReview`, review.mjs). Recovery
+   features always get the review. The default `all` reviews every feature) → committing
    (a durable checkpoint commit; failure is `checkpoint_failed` and nothing advances) →
    verified. Only then does the feature enter `sliceDone`. Gate logs are named per feature
    and attempt (`.factory/logs/<gate>-<feature>-<attempt>.log`), so a later clean feature
@@ -505,6 +510,12 @@ carry a strategy forward.
    original), every release-QA bug proof recorded so far and every `qa/*.test.*` file in the
    tree, so a later repair or follow-on release cannot quietly bring back a fixed bug. Features
    built by an earlier recovery phase are not carried into this rerun.
+   The final reviewer of a feature plan is told every feature already passed its scoped review,
+   and spends the review on integration and deploy readiness. The exception is features whose
+   scoped review never ran (`reviews === 0`): features skipped under `risky`, and features built
+   by a batched repair plan. Their ids go in the review request as `unreviewed`. The reviewer
+   audits each of their obligations and checks from scratch against the review bar. With no such
+   features, the prompt is unchanged.
    **Release QA.** The final reviewer reports defects instead of fixing feature code: for each
    defect it writes a failing `node:test` file under `qa/` and lists `{test, files, description}`
    under `bugs` in `review-result.json`. A review that lists any bug blocks even if its verdict

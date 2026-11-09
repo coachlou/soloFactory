@@ -1,5 +1,13 @@
 ## Unreleased
 
+- Risk-gated per-feature review for smoke A/B (dev-only `SOLOFACTORY_FEATURE_REVIEW=all|risky`, default `all`, saved on the job and kept on retry). Under `risky`, a feature skips its scoped review unless one of these holds:
+  - an obligation has no cases;
+  - a case is on the browser surface;
+  - it closes a check no case cites;
+  - it edited an earlier feature's proof.
+
+  Recovery always reviews. The final review audits every unreviewed feature (skipped, or built in a batched repair plan) from scratch. That also closes an existing gap: batched-recovery features got no obligation-level review. Every final-review bug is emitted as `review.finding` against the feature whose files it touches. The ledger gains Reviews, Skipped, Skipped findings and Unattributed findings. Rejected: a plain on/off skip, and an adaptive "skip after 2 clean reviews" rule. The defects the scoped review catches pass every gate, so nothing could ever turn reviews back on. Analysis: `notes/per-feature-review-flag.md`.
+- Docs: SPEC describes the `risky` skip and the unreviewed-feature final audit. DEVELOPING covers the review A/B and the new ledger columns. The member manual is unchanged, because the setting is dev-only (`scripts/internal-env.txt`).
 - Stopping a built app now stops its whole process group. `npm start` runs `sh -c node …`; where `/bin/sh` does not exec its command (dash on Ubuntu/WSL), a SIGTERM to npm alone left the app running on its port. Found when the first CI run hung: all 49 e2e tests passed, then the file never exited because orphaned fixture apps held its pipes. CI job now capped at 5 min (suite takes about 1). The second CI hang was the real root cause: `close()` listed live runs before an in-flight queue drain launched its run, so that run was never cancelled and deployed an app after shutdown (reproduced locally by delaying the drain 300 ms: hang; with the fix: 37s). `close()` now waits for the drain first, and a deploy no longer spawns once its run was stopped or the server shut down.
 - The Guide interview moves from Sonnet to Opus at medium effort, with an Opus advisor (`SOLOFACTORY_CLAUDE_GUIDE_MODEL`, `_EFFORT`, `_ADVISOR`; empty advisor turns it off). Builders and repairs stay on Sonnet. Claude Code sets an advisor model only, not its effort.
 - CI: a GitHub Actions job runs `npm test` (which runs the distro check first) on Linux on every push and pull request. Members run WSL; the suite had only ever run on macOS.
