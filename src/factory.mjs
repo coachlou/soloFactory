@@ -1698,6 +1698,10 @@ export class SoloFactory {
       }
       stopApp(previous.child);
     }
+    // Checked here, after the awaits above: from spawn to this.deployments.set is synchronous, so a stop
+    // or shutdown that landed earlier would otherwise leave an app nobody kills (an aborted signal never fires).
+    if (signal.aborted) throw new FactoryError("cancelled", "Deployment cancelled.");
+    if (this.closed) throw new FactoryError("cancelled", "SoloFactory is shutting down.");
     const logPath = path.join(appDir, ".factory", "logs", "deployment.log");
     const log = createWriteStream(logPath, { flags: "a" });
     const child = spawn(command[0], command.slice(1), {
@@ -1852,6 +1856,7 @@ export class SoloFactory {
   }
 
   async shutdown() {
+    this.closed = true;
     for (const child of this.deployments.values()) stopApp(child);
     this.deployments.clear();
   }

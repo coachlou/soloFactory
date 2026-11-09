@@ -646,6 +646,9 @@ export async function createSoloFactoryServer(options = {}) {
     async close() {
       closing = true;
       queue.length = 0;
+      // A drain already past its `closing` check launches its run after a few awaits; snapshot only
+      // once it settles, or that run is never cancelled and deploys an app after shutdown.
+      await draining;
       const live = [...runs.values()];
       await Promise.all(live.map((run) => run.factory.cancel(run.jobId, { shutdown: true }).catch(() => {})));
       await Promise.all(live.map((run) => run.promise));
