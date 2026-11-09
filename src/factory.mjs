@@ -82,7 +82,8 @@ export class FactoryError extends Error {
 // one SoloFactory per run, and a project's next release must stop the previous release's app.
 const liveByProject = new Map();
 
-// Test files and fixtures: never widened into, since editing another feature's tests can weaken them.
+// Test files and fixtures: never widened into, since editing another feature's tests can weaken them, unless this
+// feature broke that test's proof (cursor.brokenProofs).
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
 
 // ponytail: size + mtime per file, not content hashes; data/ can hold large uploads.
@@ -1364,6 +1365,12 @@ export class SoloFactory {
         this.active.pauseRequested = false;
         throw new FactoryError("paused", "Paused before repairing", { before: "verifying" });
       }
+      // An earlier feature's proof this feature broke (run 2026-11-09-bb64b19c: ADD-HABITS pinned the row MARK-DONE
+      // changes): its test files may be updated to the new contract, so the writes gate and repair prompt allow them.
+      const broken = slice && current.featureCursor?.id === slice.id && proofs
+        .filter((proof) => !proof.id.startsWith(`${slice.id}.`) && JSON.stringify(proof.proof.command) === JSON.stringify(failure.details?.command))
+        .flatMap((proof) => proof.proof.command.filter((arg) => TEST_PATH.test(arg)));
+      if (broken?.length) current.featureCursor.brokenProofs = [...new Set([...(current.featureCursor.brokenProofs ?? []), ...broken])];
       current = await this.repair(current, failure, signal, slice, proofs.filter((proof) => proof.description));
       manifest = await this.readManifest(this.store.appDir(current.id));
       // Reinstall only when the repair touched dependencies or install itself failed.
@@ -1387,7 +1394,8 @@ export class SoloFactory {
   // base (saved by an older release) falls back to the uncommitted tree.
   // A plan's file lists can miss a file the feature's checks need (run 2026-10-07-4f2dd1cf: VIEWER-DATES wrote only its
   // test while its fix lived in app.js, so three repairs changed nothing). An edit to an existing source file no unbuilt
-  // feature owns widens this feature's writes on its cursor instead of failing; tests, new files and deletions still fail.
+  // feature owns widens this feature's writes on its cursor instead of failing; tests (except a broken earlier proof's), new
+  // files and deletions still fail.
   async writesFailure(job, slice) {
     const recovery = job.recoveryPhase?.cursor?.id === slice.id;
     const cursor = recovery ? job.recoveryPhase.cursor : job.featureCursor?.id === slice.id ? job.featureCursor : null;
@@ -1402,7 +1410,7 @@ export class SoloFactory {
       const plan = recovery ? job.recoveryPhase.plan : job.approvedPlan?.plan;
       const done = (recovery ? job.recoveryPhase.done : job.sliceDone) ?? [];
       const others = (plan?.slices ?? []).filter((item) => item.id !== slice.id && !done.includes(item.id) && item.writes);
-      const widen = outside.filter((file) => modified.has(file) && !TEST_PATH.test(file) && !others.some((item) => writesCover(item.writes, file)));
+      const widen = outside.filter((file) => modified.has(file) && (!TEST_PATH.test(file) || cursor.brokenProofs?.includes(file)) && !others.some((item) => writesCover(item.writes, file)));
       if (widen.length) {
         cursor.widened = [...(cursor.widened ?? []), ...widen];
         await this.store.writeState(job);
@@ -1413,7 +1421,7 @@ export class SoloFactory {
     if (!outside.length) return null;
     const message = `Feature ${slice.id} changed files outside its declared writes: ${outside.join(", ")}.`;
     await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "writes", feature: slice.id, message });
-    return new FactoryError("quality_gate_failed", message, { gate: "writes", output: `${message}\nDeclared writes: ${writes.join(", ")}\nAn existing source file outside the writes is allowed when the fix needs it, but not another feature's tests, a new file outside the writes, a deletion, or a file an unbuilt feature owns. Move the change into an allowed file or revert it.` });
+    return new FactoryError("quality_gate_failed", message, { gate: "writes", output: `${message}\nDeclared writes: ${writes.join(", ")}\nAn existing source file outside the writes is allowed when the fix needs it, but not another feature's tests (unless this feature broke that test's proof), a new file outside the writes, a deletion, or a file an unbuilt feature owns. Move the change into an allowed file or revert it.` });
   }
 
   // Merge check: proofs of built features whose files (or whose dependencies' files) this feature changed
@@ -1498,7 +1506,7 @@ export class SoloFactory {
     const label = `repair-${job.attempt}`;
     const before = await sourceBaseline(this.store, { head: false });
     try {
-      const turn = await this.invoke(job, label, repairPrompt(failureRelative, slice, bugs), signal);
+      const turn = await this.invoke(job, label, repairPrompt(failureRelative, slice, bugs, undefined, job.featureCursor?.id === slice?.id ? job.featureCursor?.brokenProofs : []), signal);
       // Shown beside the waiver so the owner judges a "this test is wrong" claim from the repairer's own words.
       job.lastRepairNote = { attempt: job.attempt, text: String(turn?.message ?? "").slice(-1500) };
       await this.store.writeState(job);
@@ -1506,7 +1514,7 @@ export class SoloFactory {
       // Same rule as a capped build: a repair still changing files at the cap is too big for one turn, not stuck.
       // VISUAL-EVIDENCE, 2026-10-15: two 45-minute repairs each made ~50 edits, then a cold restart burned a repair.
       if (error.code !== "agent_hard_timeout" || await sourceBaseline(this.store, { head: false }) === before || !await this.allowContinuation(job, label)) throw error;
-      await this.invoke(job, `${label}-resume`, repairPrompt(failureRelative, slice, bugs), signal, { resumeSessionId: error.details?.sessionId ?? null });
+      await this.invoke(job, `${label}-resume`, repairPrompt(failureRelative, slice, bugs, undefined, job.featureCursor?.id === slice?.id ? job.featureCursor?.brokenProofs : []), signal, { resumeSessionId: error.details?.sessionId ?? null });
     }
     return job;
   }

@@ -60,6 +60,8 @@ async function declaredRun(stray) {
   await store.init();
   const job = await store.create({ brief, transcript, provider: "fixture" });
   const fixture = createFixtureProvider();
+  let uiBuilt = false, fixed = false;
+  const prompts = [];
   const provider = { id: "fixture", async run(options) {
     const result = await fixture.run(options);
     const { stage } = options.context;
@@ -75,14 +77,24 @@ async function declaredRun(stray) {
       await writeFile(path.join(options.cwd, "stray.mjs"), "export {};\n");
       if (stray === "committed") await store.git("add", "stray.mjs").then(() => store.git("commit", "-qm", "agent commit"));
     }
+    // SLICE-UI changes the skeleton's server and breaks its proof; the repair updates that proof's test.
+    if (stray === "broken" && stage === "build-slice-SLICE-UI") { uiBuilt = true; await appendFile(path.join(options.cwd, "server.mjs"), "\n// new contract\n"); }
+    if (stray === "broken" && stage.startsWith("repair-")) { prompts.push(options.prompt); await appendFile(path.join(options.cwd, "server.test.mjs"), "\n// expectation updated\n"); }
     // An existing file another (built) feature owns: source widens the writes, a test never does.
     if (["source", "test"].includes(stray) && stage === "build-slice-SLICE-UI") await appendFile(path.join(options.cwd, stray === "source" ? "server.mjs" : "server.test.mjs"), "\n// touched\n");
     return result;
   } };
   const logs = [];
-  const factory = new SoloFactory({ store, provider, commandRunner: async ({ logPath }) => { logs.push(path.basename(logPath)); return { code: 0, output: "passed" }; }, deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9982" }) });
+  const factory = new SoloFactory({ store, provider, commandRunner: async ({ logPath, args }) => {
+    logs.push(path.basename(logPath));
+    if (uiBuilt && args.includes("server.test.mjs")) {
+      fixed ||= (await readFile(path.join(store.appDir(job.id), "server.test.mjs"), "utf8")).includes("expectation updated");
+      if (!fixed) return { code: 1, output: "server.test.mjs: expected the old row" };
+    }
+    return { code: 0, output: "passed" };
+  }, deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9982" }) });
   const result = await factory.start(job.id);
-  return { result, events: await store.events(job.id, 1000), logs };
+  return { result, events: await store.events(job.id, 1000), logs, prompts };
 }
 
 test("a feature that stays inside its declared writes completes", async () => {
@@ -162,4 +174,13 @@ test("editing another feature's test outside the writes still fails the writes g
   assert.match(events.find((event) => event.gate === "writes")?.message ?? "", /SLICE-UI changed files outside its declared writes: server\.test\.mjs/);
   assert.equal(events.filter((event) => event.type === "slice.writes_widened").length, 0);
   assert.equal(result.state, "failed");
+});
+
+test("a feature that breaks an earlier feature's proof may update that proof's test to its new contract", async () => {
+  const { result, events, prompts } = await declaredRun("broken");
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.ok(events.some((event) => event.type === "gate.failed" && /^proof-SLICE-SKELETON\./.test(event.gate ?? "")), "the skeleton proof failed in SLICE-UI's checks");
+  assert.match(prompts[0] ?? "", /broke an earlier feature's proof \(server\.test\.mjs\)/);
+  assert.ok(events.filter((event) => event.type === "slice.writes_widened").some((event) => event.files.includes("server.test.mjs")));
+  assert.equal(events.filter((event) => event.gate === "writes").length, 0);
 });

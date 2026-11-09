@@ -275,13 +275,16 @@ ready for deterministic controller verification.
 ${DATA_RULE}`;
 }
 
-export function repairPrompt(failurePath, slice = null, bugs = [], featureFile = ".factory/logs/feature.json") {
+export function repairPrompt(failurePath, slice = null, bugs = [], featureFile = ".factory/logs/feature.json", brokenTests = []) {
   const sliceLines = slice
     ? `
 The failure is inside slice ${slice.id} (${slice.title}), given in full below: do not read the plan file.
 Earlier completed slices must be preserved — fix only what this slice's acceptance criteria need.${slice.writes ? ` Change
 the files its writes list. If the fix needs an existing source file outside them, edit it: the controller adds it to this
-feature's writes. Never edit another feature's tests, create a new file outside the writes, or delete one; those fail its checks.` : ""}
+feature's writes. Never edit another feature's tests, create a new file outside the writes, or delete one; those fail its checks.` : ""}${brokenTests?.length ? `
+This feature's change broke an earlier feature's proof (${brokenTests.join(", ")}). If this feature's acceptance criteria
+require the new behavior, update only the expectations in that test that pin the old behavior, keeping every check it
+makes; the controller allows that edit. Otherwise fix the source.` : ""}
 ${REVIEW_BAR}
 ${featureBlock("Slice", JSON.stringify(slice, null, 2), featureFile)}`
     : "";

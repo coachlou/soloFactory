@@ -2,6 +2,10 @@
 
 - The Guide interview moves from Sonnet to Opus at medium effort, with an Opus advisor (`SOLOFACTORY_CLAUDE_GUIDE_MODEL`, `_EFFORT`, `_ADVISOR`; empty advisor turns it off). Builders and repairs stay on Sonnet. Claude Code sets an advisor model only, not its effort.
 - Docs: manual Settings table gains the three Guide rows; README and SPEC model notes updated.
+- A later feature may update an earlier feature's proof test that its own change broke. Run 2026-11-09-bb64b19c (Habit Ledger, arm B): ADD-HABITS' `test/habits-html.test.js` pinned the `<li data-habit-id=…>Read</li>` row, MARK-DONE had to change it, and the rerun proof failed three times: the repair prompt forbade editing another feature's tests and the writes gate would have refused it, so each repair gave up in about 20s. Now, when an impacted earlier proof fails inside a feature's checks, its test files go on the feature cursor (`brokenProofs`); the writes gate widens into those files only (non-recovery features) (modified, not new; still never a file an unbuilt feature owns) and the repair prompt names them, allowing an expectation update to the new contract that keeps every check. Any other test edit still fails the writes gate.
+  - Rejected: checking proof ownership on first plans. With `ownership: true`, all six saved smoke plans fail, because nearly every feature shares `src/app.js` with FOUNDATION; the check would block plans, not this defect.
+  - Accepted risk: a repair can now weaken an earlier proof. Backstops: the feature review and the final-integration rerun of every proof.
+  - Follow-up: the same scan suggests the shipped recovery-plan ownership check (`feature-recovery.mjs`) rejects most fresh repair plans on apps with a shared entry file. Unverified on a real recovery.
 
 ## 0.10.17: docs gate in pre-release QA (2026-11-08)
 
