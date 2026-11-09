@@ -4,7 +4,7 @@
 Nothing here is implemented.** SPEC.md stays the source of truth; items move there as they ship.
 The 2026-10-06 version of this file predates planned features and is superseded. Audited the same
 day by an independent review against the code; its corrections are folded in and its ranking is the
-**Priority** table at the end.
+**Priority** table at the end. Implementation specs for the L-effort items: `docs/sdlc-hardening-impl.md`.
 
 **Goal.** Close the gaps that remain between SoloFactory and a mature AI-native SDLC (artifact
 chain intent → spec → plan → diff → review → incident → intent, with deterministic gates and human
@@ -49,7 +49,8 @@ detection, run worker and cost ceilings, the smoke set and ledger, and CI on Lin
 
 ## 1. Deploy: health-check before replace, keep the last good release
 
-**Effort L · Return H.** About a 30-line swap plus one fixture test.
+**Effort L · Return H.** The swap itself is small; the card's fallback field and the relaunch
+cleanup add a little (see `docs/sdlc-hardening-impl.md`).
 
 **Why.** `deployLocal` (`src/factory.mjs`) takes the project's live app out of `liveByProject`,
 marks it `replaced` and stops it before launching the new release. If the new release then fails
