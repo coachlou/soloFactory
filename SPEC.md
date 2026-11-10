@@ -280,6 +280,11 @@ Only one job may be active because the target user does not benefit from resourc
 - **Start over** is a separate explicit action and creates a new run. It is not the default
   response to a recoverable interruption.
 - Cancellation sends termination to the active child and records `cancelled`.
+- A run parks as `run_budget_reached` before starting a worker once it has started
+  `SOLOFACTORY_MAX_RUN_WORKERS` workers (150), its turns reported `SOLOFACTORY_MAX_RUN_COST_USD` of
+  cost ($30, Claude only) or `SOLOFACTORY_MAX_RUN_TOKENS` tokens (25M, both providers); cost and tokens
+  are lower bounds over turns that reported usage. Any owner continuation raises all three allowances
+  by one ceiling.
 - Process restart converts ambiguous in-flight state to `interrupted`. A run whose recorded
   worker pid still exists is parked as `worker_unconfirmed`; its next action is `stop-worker`
   (no endpoint) until that process has exited, so no second writer starts beside it.

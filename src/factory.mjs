@@ -240,6 +240,8 @@ export class SoloFactory {
       if (grant) {
         if (maxRunWorkers()) job.workerAllowance = job.error.details.workers + maxRunWorkers();
         if (maxRunCostUsd()) job.costAllowance = (job.error.details.costUsd ?? 0) + maxRunCostUsd();
+        // A run parked before tokens were recorded still has them in its spend line.
+        if (maxRunTokens()) job.tokenAllowance = (job.error.details.tokens ?? job.error.details.spend?.tokens ?? 0) + maxRunTokens();
       }
       if (grant || job?.watch?.incident || job?.watch?.observed) {
         delete job.watch?.incident; delete job.watch?.observed;
@@ -1218,24 +1220,29 @@ export class SoloFactory {
   }
 
   // Backstop for a whole run: every worker spawns through invoke(), so the ceilings are checked here once.
-  // Workers are the run's agent.started events; cost is the CLI's own figure (knownCostUsd). Resume after
-  // either stop raises both allowances by one ceiling.
+  // Workers are the run's agent.started events; cost and tokens are the CLI's own figures (knownCostUsd,
+  // knownTokens). Resume after any stop raises all three allowances by one ceiling.
   async assertWorkerBudget(job) {
     const ceiling = maxRunWorkers();
     const costCeiling = maxRunCostUsd();
-    if (!ceiling && !costCeiling) return;
+    const tokenCeiling = maxRunTokens();
+    if (!ceiling && !costCeiling && !tokenCeiling) return;
     const events = await this.store.events(job.id, Infinity);
     const workers = events.filter((event) => event.type === "agent.started").length;
     const costUsd = knownCostUsd(events);
     const overWorkers = ceiling && workers >= (job.workerAllowance ?? ceiling);
     const overCost = costCeiling && costUsd >= (job.costAllowance ?? costCeiling);
-    if (!overWorkers && !overCost) return;
+    const tokens = knownTokens(events);
+    const overTokens = tokenCeiling && tokens >= (job.tokenAllowance ?? tokenCeiling);
+    if (!overWorkers && !overCost && !overTokens) return;
     const spend = runSpend(job, events, this.maxRepairs);
     const [what, grant, title] = overWorkers
       ? [`started ${workers} workers, its limit of ${job.workerAllowance ?? ceiling} (SOLOFACTORY_MAX_RUN_WORKERS=${ceiling}, raised by each resume)`, `another ${ceiling} workers`, `Run worker ceiling reached (${workers} workers)`]
-      : [`spent about $${costUsd.toFixed(2)}, its limit of $${(job.costAllowance ?? costCeiling).toFixed(2)} (SOLOFACTORY_MAX_RUN_COST_USD=${costCeiling}, raised by each resume)`, `another $${costCeiling}`, `Run cost ceiling reached ($${costUsd.toFixed(2)})`];
+      : overCost
+      ? [`spent about $${costUsd.toFixed(2)}, its limit of $${(job.costAllowance ?? costCeiling).toFixed(2)} (SOLOFACTORY_MAX_RUN_COST_USD=${costCeiling}, raised by each resume)`, `another $${costCeiling}`, `Run cost ceiling reached ($${costUsd.toFixed(2)})`]
+      : [`used about ${tokenCount(tokens)} tokens, its limit of ${tokenCount(job.tokenAllowance ?? tokenCeiling)} (SOLOFACTORY_MAX_RUN_TOKENS=${tokenCeiling}, raised by each resume)`, `another ${tokenCount(tokenCeiling)} tokens`, `Run token ceiling reached (${tokenCount(tokens)} tokens)`];
     throw new FactoryError("run_budget_reached", `This run has ${what}. So far: ${spendLine(spend)}. Resume allows ${grant}.`, {
-      workers, ceiling, costUsd, costCeiling, spend,
+      workers, ceiling, costUsd, costCeiling, tokens, tokenCeiling, spend,
       diagnostics: [{ code: "run_budget_reached", title, action: `Review the spend so far (${spendLine(spend)}). Resume grants ${grant}; the preserved files and session are kept.` }],
     });
   }
@@ -2301,7 +2308,7 @@ export function usageTotals(events) {
 }
 
 // List-price dollars per run before it parks for the owner; 0 disables. Claude reports this figure even on a
-// subscription, so it tracks weekly-limit use; Codex reports none, so a Codex run is held by the worker ceiling.
+// subscription, so it tracks weekly-limit use; Codex reports none, so a Codex run is held by the token and worker ceilings.
 // Member run 2026-11-03 spent ~$64 across three usage windows before anyone was asked.
 export const maxRunCostUsd = () => /^\d+(\.\d+)?$/.test(process.env.SOLOFACTORY_MAX_RUN_COST_USD ?? "") ? Number(process.env.SOLOFACTORY_MAX_RUN_COST_USD) : 30;
 
@@ -2313,6 +2320,17 @@ export function knownCostUsd(events) {
 
 // Workers per run; 0 disables the ceiling. Read per call so tests and an owner restart can change it.
 export const maxRunWorkers = () => /^\d+$/.test(process.env.SOLOFACTORY_MAX_RUN_WORKERS ?? "") ? Number(process.env.SOLOFACTORY_MAX_RUN_WORKERS) : 150;
+
+// Tokens per run before it parks for the owner; 0 disables. Both CLIs report tokens, so unlike the cost ceiling this
+// binds on Codex. inputTokens includes cache reads; 25M is about the $30 cost ceiling at the 0.10.12 smoke's rate.
+export const maxRunTokens = () => /^\d+$/.test(process.env.SOLOFACTORY_MAX_RUN_TOKENS ?? "") ? Number(process.env.SOLOFACTORY_MAX_RUN_TOKENS) : 25_000_000;
+
+// Input plus output tokens every turn reported: the same figure as runSpend's tokens. A turn with no usage is skipped,
+// so like knownCostUsd this is a lower bound.
+export function knownTokens(events) {
+  const { total } = usageTotals(events);
+  return total ? total.inputTokens + total.outputTokens : 0;
+}
 
 // What the run has spent so far, shown before the owner approves more. costUsd is null when any worker reported none (Codex).
 // grantTurns mirrors the refill in runFeatureRecovery: maxRepairs * (features + 1) repair turns once a plan exists.
@@ -2327,7 +2345,7 @@ export function runSpend(job, events, maxRepairs = 2, now = Date.now()) {
   }
   return {
     workers: events.filter((event) => event.type === "agent.started").length,
-    tokens: total ? total.inputTokens + total.outputTokens : 0,
+    tokens: knownTokens(events),
     costUsd: total?.costUsd ?? null,
     elapsedMs: Math.max(0, now - Date.parse(job.startedAt ?? job.createdAt)),
     grantTurns: features == null ? null : maxRepairs * (features + 1),
@@ -2364,10 +2382,11 @@ export function resumeAdvice(job, events) {
   return { tone: "warn", features, checks, text: `Check first. It stopped on an error, not a limit. ${progress} If that is more than at the last stop, Resume; if nothing moved, choose Report this run.` };
 }
 
+const tokenCount = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
+
 export function spendLine({ workers, tokens, costUsd, elapsedMs }) {
-  const count = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
   const minutes = Math.round(elapsedMs / 60000);
-  return `${workers} worker${workers === 1 ? "" : "s"}, ${count(tokens)} tokens, cost ${costUsd == null ? "unknown" : `$${costUsd.toFixed(2)}`}, ${minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`} elapsed`;
+  return `${workers} worker${workers === 1 ? "" : "s"}, ${tokenCount(tokens)} tokens, cost ${costUsd == null ? "unknown" : `$${costUsd.toFixed(2)}`}, ${minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`} elapsed`;
 }
 
 // Time and usage per pipeline state, plus the current step alone, so the run screen leads with what is

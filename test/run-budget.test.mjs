@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { JobStore } from "../src/store.mjs";
-import { SoloFactory, runSpend, spendLine, continuationAction, resumeAdvice } from "../src/factory.mjs";
+import { SoloFactory, runSpend, spendLine, continuationAction, resumeAdvice, maxRunTokens } from "../src/factory.mjs";
 import { createFixtureProvider } from "../src/fixture-provider.mjs";
 
 const brief = { workingName: "Pocket Pulse", acceptanceScenarios: ["A user records a score."] };
@@ -123,4 +123,34 @@ test("the resume advice separates clean stops, progress since the last Resume, a
   assert.equal(resumeAdvice(limit("usage_limit"), ev("job.resumed")).tone, "ok", "an exhausted window is waiting, not a loop");
   assert.equal(resumeAdvice({ state: "paused" }, ev("job.resumed")).tone, "ok");
   assert.equal(resumeAdvice({ state: "failed", error: { code: "agent_timeout" } }, ev("gate.passed")).tone, "warn");
+});
+
+test("the token ceiling parks a run that reports no cost, and Resume grants another allotment", async (t) => {
+  process.env.SOLOFACTORY_MAX_RUN_TOKENS = "2000";
+  t.after(() => delete process.env.SOLOFACTORY_MAX_RUN_TOKENS);
+  const { store, job, factory, stages } = await setup(t);
+  const parked = await factory.start(job.id);
+  assert.equal(parked.error?.code, "run_budget_reached");
+  assert.equal(stages.length, 2, "2,200 tokens after two workers, so the third never started");
+  assert.match(parked.error.message, /used about 2K tokens, its limit of 2K \(SOLOFACTORY_MAX_RUN_TOKENS=2000, raised by each resume\).*Resume allows another 2K tokens/);
+  assert.match(parked.error.details.diagnostics[0].title, /Run token ceiling reached/);
+  assert.equal(parked.error.details.tokens, 2200);
+  await factory.resume(job.id);
+  assert.equal((await store.read(job.id)).tokenAllowance, 4200);
+  assert.ok(stages.length >= 3, "Resume allowed more workers");
+});
+
+test("a token ceiling of 0 disables the check", async (t) => {
+  process.env.SOLOFACTORY_MAX_RUN_TOKENS = "0";
+  t.after(() => delete process.env.SOLOFACTORY_MAX_RUN_TOKENS);
+  const { job, factory } = await setup(t);
+  assert.equal((await factory.start(job.id)).state, "completed");
+});
+
+test("a run parked before tokens were recorded gets its token allotment from the spend line", async (t) => {
+  const { job, factory } = await setup(t);
+  Object.assign(job, { state: "failed", error: { code: "run_budget_reached", message: "ceiling", details: { workers: 5, spend: { tokens: 9000 } } } });
+  await factory.store.writeState(job);
+  await factory.activate(job.id, async () => {});
+  assert.equal((await factory.store.read(job.id)).tokenAllowance, 9000 + maxRunTokens());
 });
