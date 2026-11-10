@@ -1095,15 +1095,18 @@ export class SoloFactory {
           : await this.deployLocal(job, manifest, signal);
         break;
       } catch (error) {
-        // A broken metrics contract or a crash on launch is usually a code defect the repair worker can fix
+        // A broken metrics contract, a failing home page or a crash on launch is usually a code defect the repair worker can fix
         // (e.g. a production-only env check); a port or timeout problem is not. Same bounded repair budget as the gates.
-        if (error.code !== "invalid_metrics" && error.code !== "deployment_exited") throw error;
+        if (!["invalid_metrics", "deployment_exited", "page_check_failed"].includes(error.code)) throw error;
         stopApp(this.deployments.get(job.id));
         await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "deploy", message: error.message });
         let output;
         if (error.code === "invalid_metrics") {
           const received = error.details?.received ? `\nReceived top-level keys: ${error.details.received.join(", ")}` : "";
           output = `GET ${manifest.metricsPath} failed the controller's metrics contract.\n${error.message}${received}`;
+        } else if (error.code === "page_check_failed") {
+          const log = await readFile(path.join(appDir, ".factory", "logs", "deployment.log"), "utf8").catch(() => "");
+          output = `GET / failed the controller's page check: ${error.message}${error.details?.body ? `\nResponse body:\n${error.details.body}` : ""}\nThe home page must answer without a 5xx and with a non-empty page when the app runs with only PORT and NODE_ENV=production set.\n${log.slice(-8_000)}`;
         } else {
           const log = await readFile(path.join(appDir, ".factory", "logs", "deployment.log"), "utf8").catch(() => "");
           output = `The app exited on launch. It runs with only PORT and NODE_ENV=production set; it must start without any other env vars.\n${error.message}\n${log.slice(-8_000)}`;
@@ -1756,6 +1759,7 @@ export class SoloFactory {
         throw new FactoryError("invalid_metrics", `The app metrics endpoint failed: ${error.message}.`, { missing: [], received: undefined });
       });
       validateMetrics(metrics);
+      await checkPage(url); // after the metrics contract, so a broken metrics route still reports as invalid_metrics
       if (child.exitCode !== null || child.signalCode !== null) throw new FactoryError("deployment_exited", `App exited with ${child.exitCode ?? child.signalCode} right after its health check.`);
     } catch (error) {
       stopApp(child); // a release that failed its checks never replaces the live one
@@ -2206,6 +2210,21 @@ async function depsDigest(appDir) {
 // The proof set an integration verify runs; a passing verify only stands for this exact set.
 function integrationSet(job) {
   return digest([featureProofs(job).map((item) => [item.id, item.proof.command]), integrationProofs(job).map((entry) => entry.key)]);
+}
+
+// The home page the owner opens must answer (docs/sdlc-hardening-spec.md 8a). Fails on a 5xx, no answer, or an empty
+// 2xx body; a 4xx with a body passes, so an API-only app still deploys. No browser: this does not prove it renders.
+async function checkPage(url) {
+  let response;
+  let body;
+  try {
+    response = await fetch(`${url}/`, { signal: AbortSignal.timeout(5_000) });
+    body = await response.text();
+  } catch (error) {
+    throw new FactoryError("page_check_failed", `GET / did not answer: ${error.message}.`, { status: null });
+  }
+  if (response.status >= 500) throw new FactoryError("page_check_failed", `GET / answered HTTP ${response.status}.`, { status: response.status, body: body.slice(0, 2_000) });
+  if (response.ok && !body.trim()) throw new FactoryError("page_check_failed", `GET / answered HTTP ${response.status} with an empty body.`, { status: response.status });
 }
 
 async function fetchJson(url) {

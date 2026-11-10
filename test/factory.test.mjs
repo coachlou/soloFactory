@@ -186,6 +186,30 @@ test("a crash on launch gets one repair turn with the deployment log", async () 
   assert.match(failure, /SESSION_SECRET must be set in production/);
 });
 
+test("a failing home page gets one deploy repair turn", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-page-repair-"));
+  const store = new JobStore(root);
+  await store.init();
+  const job = await store.create({ brief, transcript, provider: "fixture" });
+  let deploys = 0;
+  const factory = new SoloFactory({
+    store,
+    provider: createFixtureProvider(),
+    commandRunner: async () => ({ code: 0, output: "passed" }),
+    deployer: async () => {
+      deploys += 1;
+      if (deploys === 1) throw new FactoryError("page_check_failed", "GET / answered HTTP 500.", { status: 500, body: "TypeError: x is undefined" });
+      return { mode: "fixture", status: "live", url: "http://127.0.0.1:9972" };
+    },
+  });
+  const result = await factory.start(job.id);
+  assert.equal(result.state, "completed", result.error?.message);
+  assert.equal(deploys, 2);
+  const failure = await readFile(path.join(root, ".factory", "last-failure-1.txt"), "utf8");
+  assert.match(failure, /GET \/ failed the controller's page check/);
+  assert.match(failure, /TypeError: x is undefined/);
+});
+
 test("a failed gate triggers bounded repair and a complete gate rerun", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-repair-"));
   const store = new JobStore(root);
@@ -863,6 +887,44 @@ http.createServer((q, r) => { if (q.url === "/health") return r.end("ok"); r.sta
     await assert.rejects(factory.relaunch(job.id), (error) => error.code === "invalid_metrics");
     for (let waited = 0; factory.deployments.has(job.id) && waited < 2000; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(factory.deployments.has(job.id), false, "the failed app was stopped, not orphaned");
+  } finally {
+    await factory.shutdown();
+  }
+});
+
+// A minimal app whose health and metrics pass; `home` is the handler body for every other route.
+const pageApp = (home) => `import http from "node:http";
+http.createServer((q, r) => { if (q.url === "/health") return r.end("ok"); if (q.url === "/_factory/metrics") return r.end(${JSON.stringify(JSON.stringify({ uptimeSeconds: 1, requests: { total: 0, errors: 0 }, latencyMs: { average: 0 }, routes: [] }))}); ${home} }).listen(process.env.PORT);`;
+
+const deployPageApp = async (home) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "solo-factory-page-"));
+  const store = new JobStore(root);
+  await store.init();
+  await writeFile(path.join(root, "app.mjs"), pageApp(home));
+  await mkdir(path.join(root, ".factory", "logs"), { recursive: true });
+  const job = await store.create({ brief, transcript, provider: "fixture" });
+  const factory = new SoloFactory({ store, provider: createFixtureProvider() });
+  const manifest = { version: 1, healthPath: "/health", metricsPath: "/_factory/metrics", commands: { start: ["node", "app.mjs"] } };
+  return { job, factory, deploy: () => factory.deployLocal(job, manifest, new AbortController().signal) };
+};
+
+test("a home page that answers 5xx or an empty 200 fails the page check and stops the new app", async () => {
+  for (const [home, message] of [['r.statusCode = 503; r.end("down");', /HTTP 503/], ["r.end();", /empty body/]]) {
+    const { job, factory, deploy } = await deployPageApp(home);
+    try {
+      await assert.rejects(deploy(), (error) => error.code === "page_check_failed" && message.test(error.message));
+      for (let waited = 0; factory.deployments.has(job.id) && waited < 2000; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(factory.deployments.has(job.id), false, "the app that failed its page check was stopped");
+    } finally {
+      await factory.shutdown();
+    }
+  }
+});
+
+test("a 404 home page with a body passes the page check, so an API-only app still deploys", async () => {
+  const { factory, deploy } = await deployPageApp('r.statusCode = 404; r.end("Not found");');
+  try {
+    assert.equal((await deploy()).status, "live");
   } finally {
     await factory.shutdown();
   }

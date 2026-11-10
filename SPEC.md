@@ -110,7 +110,7 @@ reports the subscription/login problem; it never falls back to an API key.
 | Verify | local controller | install, lint (when `factory.json` declares it), test, and build each exit 0 within timeout |
 | Repair | subscription CLI | bounded attempt completes; controller reruns all gates |
 | Review | subscription CLI | review completes; controller reruns tests and build |
-| Deploy | local controller | process stays alive, `/health` returns HTTP 2xx, and `/_factory/metrics` matches the schema (repaired, bounded, on mismatch) |
+| Deploy | local controller | process stays alive, `/health` returns HTTP 2xx, `/_factory/metrics` matches the schema, and `GET /` answers without a 5xx and, on a 2xx, with a non-empty body (each repaired, bounded, on failure) |
 | Complete | controller only | deployment URL and evidence are persisted |
 
 ### Run queue
@@ -182,6 +182,7 @@ Every generated app must be a self-contained Node project with:
 - a start command that honors the injected `PORT` environment variable;
 - `GET /health` returning a 2xx response without authentication;
 - `GET /_factory/metrics` returning the local aggregate telemetry schema below;
+- `GET /` answering without a 5xx, and with a non-empty body when it answers 2xx (the controller's page check; a 4xx such as an API-only 404 passes);
 - a concise operator README;
 - `factory.json` in this form:
 
