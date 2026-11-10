@@ -28,6 +28,23 @@ export function smokeGateProblem({ version, latestTag, changed, eligibleCommits,
   return `smoke gate: ${version} changes ${touched.join(", ")} since ${latestTag}, but smoke/results.jsonl has no passing real-provider row since the last change to them for ${missing.join(", ")}. Run node scripts/smoke.mjs, or add "- Smoke: waived, <reason>" under "## ${version}" in PROGRESS.md.`;
 }
 
+// The highest Node major a smoke brief's text requires ("Node 24", "Node.js 24+"), or null when it names none.
+export function briefNodeMajor(body) {
+  const majors = [...JSON.stringify(body.brief ?? {}).matchAll(/\bNode(?:\.js)?\s+v?(\d{2})\b/gi)].map((match) => Number(match[1]));
+  return majors.length ? Math.max(...majors) : null;
+}
+
+// A brief that requires a newer Node than the one running the controller stops at planning: the plan reviewer
+// rightly refuses a runtime the controller lacks (plan-request.json toolchain is process.version). Checked before
+// any real run spends anything. Fixture runs cost nothing and never reach a plan review, so they are not checked.
+export function smokeNodeProblem(name, body, provider, nodeVersion) {
+  if (provider === "fixture") return null;
+  const required = briefNodeMajor(body);
+  const running = Number(String(nodeVersion).replace(/^v/, "").split(".")[0]);
+  if (required === null || running >= required) return null;
+  return `${name} requires Node ${required}, but the controller runs Node ${running} (${nodeVersion}). Put a Node ${required}+ first on PATH (e.g. PATH=/opt/node${required}/bin:$PATH), then rerun.`;
+}
+
 function main(repo) {
   const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
   let latestTag = null;

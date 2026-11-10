@@ -20,7 +20,8 @@ real-provider smoke set first. Once `package.json` carries a version that has no
 fails until `smoke/results.jsonl` has a passing real-provider row for every brief at or after the last
 commit that touched one of those files, or the version's own PROGRESS heading has
 `- Smoke: waived, <reason>`. Fixture rows never count, and CI (a checkout with no tags) skips the gate
-(`scripts/smoke-gate.mjs`). Run the smoke set by hand (about $10 and 35 minutes for the two small briefs; `household-inventory.json` is a mid-size brief of about 12-15 features that shows per-feature overhead and costs more):
+(`scripts/smoke-gate.mjs`). Run it on the Node major the briefs name (Node 24 today): a real run on an older
+Node is refused before it starts, because the plan reviewer would reject every plan for the missing runtime. Run the smoke set by hand (about $10 and 35 minutes for the two small briefs; `household-inventory.json` is a mid-size brief of about 12-15 features that shows per-feature overhead and costs more):
 
 ```bash
 node scripts/smoke.mjs

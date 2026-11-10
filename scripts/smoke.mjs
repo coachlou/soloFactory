@@ -18,6 +18,7 @@ import { appendFile, mkdir, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { formatSmokeTable, summarizeRun } from "../src/measure.mjs";
+import { smokeNodeProblem } from "./smoke-gate.mjs";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ledger = process.env.SMOKE_LEDGER ?? path.join(repo, "smoke", "results.jsonl");
@@ -74,6 +75,17 @@ if (command === "--help") {
   console.log(formatSmokeTable(rows));
 } else {
   const briefs = command ? [command, ...rest] : (await readdir(path.join(repo, "smoke", "briefs"))).filter((f) => f.endsWith(".json")).sort().map((f) => path.join(repo, "smoke", "briefs", f));
+  // Every brief is checked before the first run starts, so a runtime mismatch spends nothing.
+  const problems = [];
+  for (const brief of briefs) {
+    const body = JSON.parse(await readFile(brief, "utf8"));
+    const problem = smokeNodeProblem(path.basename(brief, ".json"), body, process.env.SMOKE_PROVIDER ?? body.provider, process.version);
+    if (problem) problems.push(problem);
+  }
+  if (problems.length) {
+    for (const problem of problems) console.error(`smoke: ${problem}`);
+    process.exit(1);
+  }
   const rows = [];
   for (const brief of briefs) rows.push(await run(brief));
   console.log(formatSmokeTable(rows));
