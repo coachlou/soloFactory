@@ -170,6 +170,18 @@ export async function createSoloFactoryServer(options = {}) {
     await jobStore.appendEvent(job.id, { type: "job.rolled_back", state: job.state, message: `App restored to the release before this run (${job.baseCommit.slice(0, 7)})` });
   };
   const busyJobId = () => runs.get(active.id)?.jobId ?? null;
+  // A run persists its parked state before the scheduler releases its writer slot (the settlement reads the
+  // final state and logs a failure first). An owner acting on the parked card in that window must not get a
+  // "worker is still running" refusal, so wait, bounded, for this job's own run to settle.
+  async function settleParked(projectId, id, timeoutMs = 10_000) {
+    const run = runs.get(projectId);
+    if (run?.jobId !== id || !run.promise) return;
+    const job = await storeFor(projectId).read(id).catch(() => null);
+    if (!job || !PARKED.has(job.state)) return;
+    let timer;
+    await Promise.race([run.promise, new Promise((resolve) => { timer = setTimeout(resolve, timeoutMs); })]);
+    clearTimeout(timer);
+  }
   const schedulerStatus = () => ({ busyJobId: busyJobId(), maxActiveRuns, activeRuns: [...runs].map(([projectId, run]) => ({ projectId, jobId: run.jobId })) });
 
   async function annotateJobs(projectId, jobs) {
@@ -464,6 +476,7 @@ export async function createSoloFactoryServer(options = {}) {
         const id = dismissMatch[1];
         const projectId = jobProject.get(id) ?? active.id;
         const jobStore = storeOfJob(id);
+        await settleParked(projectId, id);
         const outcome = await exclusive(async () => {
           const job = await jobStore.read(id);
           if (!PARKED.has(job.state)) return { status: 409, body: { error: "Only a parked run can be dismissed." } };
@@ -482,6 +495,7 @@ export async function createSoloFactoryServer(options = {}) {
         const [ , id, action] = featureRecoveryMatch;
         const projectId = jobProject.get(id) ?? active.id;
         const jobStore = storeOfJob(id);
+        await settleParked(projectId, id);
         const job = await jobStore.read(id);
         const next = continuationAction(job, { maxRepairs, busy: runs.has(projectId) || queue.some(entry => entry.jobId === id) });
         if (!PARKED.has(job.state) || job.dismissed || runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start")) return json(response, 409, { error: "Feature recovery requires an idle, unresolved parked run. Pause an active run first.", nextAction: next });
@@ -507,6 +521,7 @@ export async function createSoloFactoryServer(options = {}) {
         const [ , id] = amendMatch;
         const projectId = jobProject.get(id) ?? active.id;
         const jobStore = storeOfJob(id);
+        await settleParked(projectId, id);
         const job = await jobStore.read(id);
         const busy = runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start");
         // Bounded, never truncated: the plan plus a small envelope; the controller repeats every check under ownership.
@@ -525,6 +540,7 @@ export async function createSoloFactoryServer(options = {}) {
         const [ , id] = inputMatch;
         const projectId = jobProject.get(id) ?? active.id;
         const jobStore = storeOfJob(id);
+        await settleParked(projectId, id);
         const busy = () => runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start");
         const parked = (job) => !busy() && continuationAction(job, { maxRepairs }).action !== "none";
         if (!parked(await jobStore.read(id))) return json(response, 409, { error: "Inputs can be added only to an idle, unresolved parked run. Pause an active run first." });
@@ -549,6 +565,7 @@ export async function createSoloFactoryServer(options = {}) {
       const waiveMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/waive-proof$/);
       if (request.method === "POST" && waiveMatch) {
         const projectId = jobProject.get(waiveMatch[1]) ?? active.id;
+        await settleParked(projectId, waiveMatch[1]);
         if (runs.has(projectId) || queue.some(entry => entry.projectId === projectId && entry.mode !== "start")) return json(response, 409, { error: "Pause the active run before waiving a test." });
         const jobStore = storeFor(projectId);
         const job = await jobStore.read(waiveMatch[1]);
@@ -570,6 +587,7 @@ export async function createSoloFactoryServer(options = {}) {
       const resumeMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/resume$/);
       if (request.method === "POST" && resumeMatch) {
         const projectId = jobProject.get(resumeMatch[1]) ?? active.id;
+        await settleParked(projectId, resumeMatch[1]);
         const jobStore = storeFor(projectId);
         const job = await ensureRecovery(await jobStore.read(resumeMatch[1]), jobStore);
         const next = continuationAction(job, { maxRepairs, busy: queue.some((entry) => entry.jobId === job.id) || runs.get(projectId)?.jobId === job.id });
@@ -598,6 +616,7 @@ export async function createSoloFactoryServer(options = {}) {
       const restartMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/restart$/);
       if (request.method === "POST" && restartMatch) {
         const projectId = jobProject.get(restartMatch[1]) ?? active.id;
+        await settleParked(projectId, restartMatch[1]);
         const job = await storeFor(projectId).read(restartMatch[1]);
         const { fromSlice } = await readJson(request);
         if (!PARKED.has(job.state) || queue.some((entry) => entry.jobId === job.id)) return json(response, 409, { error: "Only a parked run can be restarted from a slice." });
@@ -621,6 +640,7 @@ export async function createSoloFactoryServer(options = {}) {
       const retryMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/retry$/);
       if (request.method === "POST" && retryMatch) {
         const projectId = jobProject.get(retryMatch[1]) ?? active.id;
+        await settleParked(projectId, retryMatch[1]);
         const jobStore = storeFor(projectId);
         const original = await jobStore.read(retryMatch[1]);
         if (runs.get(projectId)?.jobId === original.id) return json(response, 409, { error: "That run is still active." });
