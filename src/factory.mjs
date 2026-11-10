@@ -1799,7 +1799,14 @@ export class SoloFactory {
         // A missing old run record must not block the new release from deploying.
       }
     }
-    stopApp(previous.child);
+    // Wait (bounded) for the old app to exit, so a completed deploy has exactly one app running and the old port is free.
+    // Its own exit handler, registered at spawn, runs before this listener and drops it from that factory's deployments.
+    const { child } = previous;
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise((resolve) => child.once("exit", resolve));
+      stopApp(child);
+      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000).unref())]);
+    }
   }
 
   // The exit handler only corrects a stored "live", so an app that exited before that write landed is
