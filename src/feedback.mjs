@@ -1,6 +1,7 @@
 // Feedback reporting: pure report/fingerprint builders. The allowlist in
 // buildDiagnostics is the privacy boundary; scrub() is defense in depth only.
 import { FactoryError } from "./factory.mjs";
+import { CREDENTIAL_PATTERNS } from "./credentials.mjs";
 
 export const ALLOWED_EVENTS = Object.freeze([
   "job.created", "job.failed", "job.interrupted", "job.cancelled", "job.resumed", "job.completed",
@@ -60,8 +61,7 @@ export function buildDiagnostics({ job, events = [], summary = {}, version }) {
 const SCRUB = [
   /(?:\/(?:Users|home|Volumes|private|tmp)\/[^\s|`)]+)/g,
   /\b[A-Za-z]:\\[^\s|`)]+/g,
-  /\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|xox[abp]-[A-Za-z0-9-]+|AKIA[A-Z0-9]{12,})\b/g,
-  /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/g,
+  ...CREDENTIAL_PATTERNS,
 ];
 
 export function scrub(text) {

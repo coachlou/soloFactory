@@ -45,7 +45,7 @@ A **project** is the workspace the factory builds into. Projects are discovered 
 or a `<root>/<name>/` that contains `.git/`. The header selector switches projects or creates
 one; a folder you make by hand under `projects/` shows up too. Selecting a project makes it
 the current workspace: it is `git init`ed if needed, gets a project-owned `.aai/` (identity,
-context, instructions — scaffolded once, yours to edit) plus `CLAUDE.md`/`AGENTS.md` anchors,
+context, instructions, review rules — scaffolded once, yours to edit) plus `CLAUDE.md`/`AGENTS.md` anchors,
 and both the Factory Guide and the build agents run inside it. Switching projects never
 cancels a run. The app lives at the repo root; the factory commits after
 the specification and after every passed gate set; the guide transcript

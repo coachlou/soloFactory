@@ -238,7 +238,7 @@ history; `.aai/*.md` and the anchors are committed with it.
 ```text
 <project>/                 git repo; generated application at the root
   CLAUDE.md, AGENTS.md     discovery anchors → .aai/ (appended, never replaced)
-  .aai/                    project context, written once: identity.md, context.md, instructions.md
+  .aai/                    project context, written once: identity.md, context.md, instructions.md, review.md
     memory/interviews/     gitignored; guide.log = this project's Factory Guide transcript
   .factory/
     requirements.json
@@ -327,6 +327,11 @@ Only one job may be active because the target user does not benefit from resourc
   (`SOLOFACTORY_CLAUDE_MODEL`); planning, plan review, correction and reviews default to Opus at low
   effort (`SOLOFACTORY_CLAUDE_REASONING_MODEL`); the Guide interview defaults to Opus at medium effort
   with an Opus advisor (`SOLOFACTORY_CLAUDE_GUIDE_*`).
+- A controller `secrets` gate fails verification when a file the run added or changed (outside
+  `.factory/`, `.aai/`, `data/` and `node_modules/`) matches an API key or bearer-token pattern. It
+  reports only `file:line`, never the value, and shares the repair budget.
+- The final and feature reviewers check input validation at trust boundaries, path handling under
+  `data/`, committed secrets, and unsafe auth or session defaults.
 - Generated code executes with the owner's local OS permissions. v0.1 does not claim hostile
   code isolation; users should run it only in a trusted local account/workspace.
 
@@ -620,7 +625,7 @@ runs show the gated slices are not being delivered end-to-end.
 
 ## Completion review gate
 
-A completed worker turn is not review approval. After build/tests, the controller writes a fresh `.factory/review-request.json` covering every intake must-have (MH-n) and acceptance scenario (SC-n), bound to the run and frozen contract digest. The reviewer writes `.factory/review-result.json` and a human-readable REVIEW.md. Every check must pass with existing project-relative evidence files, verdict must be pass, and blockers must be empty. Missing, stale, malformed, partial, blocked or unevidenced reports fail the gate even if npm test passes. Reviewers must report missing capabilities and required browser/visual evidence instead of waiving scope.
+A completed worker turn is not review approval. When the owner-edited `.aai/review.md` exists, the review request names it as `reviewPolicy` (a field of its own, not one of the verified `sources`); reviewers check its rules and quote them in blockers. After build/tests, the controller writes a fresh `.factory/review-request.json` covering every intake must-have (MH-n) and acceptance scenario (SC-n), bound to the run and frozen contract digest. The reviewer writes `.factory/review-result.json` and a human-readable REVIEW.md. Every check must pass with existing project-relative evidence files, verdict must be pass, and blockers must be empty. Missing, stale, malformed, partial, blocked or unevidenced reports fail the gate even if npm test passes. Reviewers must report missing capabilities and required browser/visual evidence instead of waiving scope.
 
 Review failures use the existing bounded repair budget, then park the run. Once that budget is exhausted, Resume is refused: it would only repeat the same review. The card offers **Prepare repair plan** instead (below). When the parked failure is a reviewer-written BUG test (a `bugProofs` entry) that is itself wrong, the card also offers **Waive BUG-n (faulty test)** (`POST /api/jobs/:id/waive-proof`, body `{proof, reason}`). The reason is required. The waiver deletes that `qa/` test, records the proof, reason and time in `waivedProofs`, adds an `ownerDecisions` entry the reviewer reads ("do not require it again"), allows one more final pass, and shows the repairer's last note beside the button. Only a proof still in `bugProofs` with the repair budget exhausted can be waived; the completed run's header and event show the waiver. Reviewer repro tests must sanity-check their own harness, and a spec naming a Node major at or below the controller's is satisfied by it. The planner must not let an earlier feature's test pin behavior a later feature changes. Attempt numbers remain monotonic so earlier failure files are retained. Neither Resume nor automatic retries renew this budget. Repairs after review (including deployment repairs) require re-review. The frozen contract cannot be narrowed during repair. Existing completed runs are historical and are not retroactively reclassified. A structured review still depends on honest behavioral assessment; the controller validates coverage, evidence presence and verdict consistency rather than proving arbitrary application semantics.
 

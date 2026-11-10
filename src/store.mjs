@@ -52,7 +52,7 @@ export class JobStore {
   async scaffoldContext() {
     await mkdir(path.join(this.project, ".aai", "memory", "interviews"), { recursive: true });
     const name = path.basename(this.project);
-    for (const file of ["identity.md", "context.md", "instructions.md"]) {
+    for (const file of ["identity.md", "context.md", "instructions.md", "review.md"]) {
       const target = path.join(this.project, ".aai", file);
       if (await stat(target).catch(() => null)) continue;
       const body = await readFile(path.join(templatesRoot, file), "utf8");

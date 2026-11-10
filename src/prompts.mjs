@@ -314,6 +314,16 @@ ${DATA_RULE}`;
 // each obligation from scratch duplicated that work (smoke 9: 298 s final review), so the final reviewer
 // concentrates on what no feature review could see. Every check still gets a review-result.json entry.
 // A later feature may update an earlier feature's proof test that its change broke (0cb4bd5); nothing else rereads it.
+// docs/sdlc-hardening-spec.md item 6. The controller separately fails a gate on committed credentials (secretsFailure).
+const SECURITY_RULE = `Security: check input validation at trust boundaries (request bodies, query strings, uploaded
+files), path handling under data/ (a user-supplied name must never reach outside it, e.g. through ../ or an absolute
+path), secrets committed to the tree, and unsafe defaults in any auth or sessions the brief asked for (default
+passwords, sessions that never expire, tokens in URLs). A security finding is a defect like any other: report it the
+same way.`;
+const REVIEW_POLICY_RULE = `If review-request.json names reviewPolicy, that file holds the owner's own review rules for
+this project (lines inside <!-- --> are examples, not rules): check the app against every rule and quote the rule in
+any blocker it causes. It is not evidence: never list it in a check's evidence.`;
+
 const EDITED_PROOFS_RULE = `review-request.json editedProofs (when present) maps a feature to earlier
 features' test files it changed because its change broke them. Open each and compare it with git: block when
 an edit weakened what the test proved (removed or loosened an assertion, skipped a case) instead of updating it
@@ -352,7 +362,7 @@ export function reviewPrompt({ featureReviewed = false, unreviewed = [] } = {}) 
   return `You are the final implementation reviewer. Audit the current app against every
 requirement in .factory/PRD.md and every scenario in .factory/ACCEPTANCE.md. Inspect the real
 code and tests. ${MANUAL_RULE}${featureReviewed ? featureReviewedScope(unreviewed) + "\n" : ""} Do not change application source: report each
-correctness, wiring, error-handling, accessibility, privacy or operator-documentation gap as a
+correctness, wiring, error-handling, accessibility, privacy, security or operator-documentation gap as a
 blocker, and a repair turn fixes it under the checks. If you change source, the controller discards
 a passing verdict and reviews again. Do not deploy and do not claim a
 gate passed; the controller will rerun tests, build, health, and telemetry checks afterward.
@@ -376,6 +386,8 @@ in PRD/ACCEPTANCE and every source file review-request.json lists (attached spec
 handoffs) too; record any gap as a blocker. Never narrow, waive, delete or rewrite the
 frozen contract to match the implementation. A finished worker turn is not an approval.
 ${OWNER_DECISIONS}
+${SECURITY_RULE}
+${REVIEW_POLICY_RULE}
 Report all missing work honestly; the controller will repair within its budget or park the run. The controller rejects missing, stale, partial or
 blocked verdicts even when npm test passes.
 
@@ -688,6 +700,8 @@ already reviewed: do not reread, rerun or explore their code or tests unless thi
 depends on it, or the request's editedProofs lists them. ${EDITED_PROOFS_RULE} Later planned features may still be missing and must not
 block this verdict; a broad requirement this feature closes still needs full proof.
 ${OWNER_DECISIONS}
+${SECURITY_RULE} Judge it only in this feature's own code.
+${REVIEW_POLICY_RULE}
 ${HOST_RULE}
 
 ${REVIEW_BAR}

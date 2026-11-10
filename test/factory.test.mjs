@@ -556,6 +556,17 @@ test("a project is a git repo: app at the root, evidence gitignored, commits at 
   assert.equal(await store.git("ls-files", ".solofactory"), "");
 });
 
+test("both reviewers check security and the owner's review policy", () => {
+  for (const prompt of [reviewPrompt(), reviewPrompt({ featureReviewed: true }), featureReviewPrompt({ id: "F1", acceptance: [] })]) {
+    assert.match(prompt, /input validation at trust boundaries/);
+    assert.match(prompt, /path handling under data\//);
+    assert.match(prompt, /reviewPolicy/);
+    assert.match(prompt, /never list it in a check's evidence/);
+  }
+  assert.match(reviewPrompt(), /privacy, security or operator-documentation/);
+  assert.match(featureReviewPrompt({ id: "F1", acceptance: [] }), /Judge it only in this feature's own code/);
+});
+
 test("init scaffolds project context once and never overwrites it", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "solofactory-context-"));
   const store = new JobStore(root);
@@ -564,10 +575,14 @@ test("init scaffolds project context once and never overwrites it", async () => 
   assert.match(await readFile(identity, "utf8"), new RegExp(`\\*\\*Name:\\*\\* ${path.basename(root)}`));
   assert.match(await readFile(path.join(root, "CLAUDE.md"), "utf8"), /Read `\.aai\/instructions\.md`/);
   assert.match(await readFile(path.join(root, ".gitignore"), "utf8"), /^\.aai\/memory\/$/m);
+  const review = path.join(root, ".aai", "review.md");
+  assert.match(await readFile(review, "utf8"), new RegExp(`# Review rules — ${path.basename(root)}`));
   await writeFile(identity, "# mine\n");
+  await writeFile(review, "# mine\n");
   await writeFile(path.join(root, "AGENTS.md"), "# theirs\n");
   await store.init();
   assert.equal(await readFile(identity, "utf8"), "# mine\n");
+  assert.equal(await readFile(review, "utf8"), "# mine\n", "the owner's review rules are never overwritten");
   const agents = await readFile(path.join(root, "AGENTS.md"), "utf8");
   assert.ok(agents.startsWith("# theirs\n") && agents.includes("ambient folder"));
   assert.equal(agents.split("ambient folder").length, 2, "anchor appended exactly once");

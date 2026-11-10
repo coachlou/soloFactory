@@ -12,6 +12,7 @@ import { PLAN_SCHEMA_FIXES, assertConsolidation, caseResults, featureProofs, imp
 export { pendingProofFailure };
 import { contractDigest, originalChecks, preparePlanReview, prepareReview, runInputs, featureNeedsReview, sourceSet, unreviewedFeatures, validatePlanReview, validateReview } from "./review.mjs";
 import { addUsage } from "./providers.mjs";
+import { CREDENTIAL_PATTERNS } from "./credentials.mjs";
 import { measureRun } from "./measure.mjs";
 import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, watchConfig, workerAlive } from "./watchdog.mjs";
 import { amendRepairPlan, archiveReview, assertBatch, consolidationBase, keepCorrecting, assertPlanningCurrent, digest, exhaustedPreparations, planFeatureRecovery, planKey, resumeAmendedReview, reviewedPlanKeys, runFeatureRecovery, sourceBaseline, validateRecoveryApproval, validateRecoveryPlan } from "./feature-recovery.mjs";
@@ -1387,7 +1388,7 @@ export class SoloFactory {
       // on Node 26) otherwise surfaced only at integration and cost a repair in every 2026-11-08 smoke arm.
       const firstFeature = !current.sliceDone?.length;
       const earlier = slice ? new Set(proofs.filter((proof) => !ownProof(slice, proof)).map((proof) => JSON.stringify(proof.proof.command))) : null;
-      const failure = (slice?.writes && await this.writesFailure(current, slice)) || await this.verify(current, manifest, signal, { includeInstall, proofs, first, earlier, skipTest: Boolean(slice && proofs.length && !firstFeature) });
+      const failure = (slice?.writes && await this.writesFailure(current, slice)) || await this.secretsFailure(current) || await this.verify(current, manifest, signal, { includeInstall, proofs, first, earlier, skipTest: Boolean(slice && proofs.length && !firstFeature) });
       if (!failure) {
         if (!slice) {
           const candidate = await sourceBaseline(this.store, { head: false });
@@ -1464,6 +1465,30 @@ export class SoloFactory {
     const message = `Feature ${slice.id} changed files outside its declared writes: ${outside.join(", ")}.`;
     await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "writes", feature: slice.id, message });
     return new FactoryError("quality_gate_failed", message, { gate: "writes", output: `${message}\nDeclared writes: ${writes.join(", ")}\nAn existing source file outside the writes is allowed when the fix needs it, but not another feature's tests (unless this feature broke that test's proof), a new file outside the writes, a deletion, or a file an unbuilt feature owns. Move the change into an allowed file or revert it.` });
+  }
+
+  // Committed credentials (docs/sdlc-hardening-spec.md item 6): the token shapes feedback.mjs scrubs, in any file this run
+  // added or changed. A follow-on's shipped tree is not rescanned: a match there is no repair's to fix. .factory/ (frozen
+  // inputs, owner uploads) and .aai/ (owner text) are skipped; the reviewers' security line covers them.
+  async secretsFailure(job) {
+    const appDir = this.store.appDir(job.id);
+    const list = async (...args) => (await this.store.git(...args)).split("\0").filter(Boolean);
+    const files = job.baseCommit
+      ? [...new Set([...await list("diff", "--name-only", "-z", "--diff-filter=d", job.baseCommit), ...await list("ls-files", "-z", "-o", "--exclude-standard")])]
+      : await list("ls-files", "-z", "-c", "-o", "--exclude-standard");
+    const patterns = CREDENTIAL_PATTERNS.map((pattern) => new RegExp(pattern.source)); // no g flag: .test() must not keep lastIndex
+    const hits = [];
+    for (const file of files) {
+      if (/^(\.factory|\.aai|node_modules|data)\//.test(file)) continue;
+      const body = await readFile(path.join(appDir, file)).catch(() => null);
+      if (!body || body.length > 1_000_000 || body.includes(0)) continue; // missing, large or binary
+      body.toString("utf8").split("\n").forEach((line, index) => { if (patterns.some((pattern) => pattern.test(line))) hits.push(`${file}:${index + 1}`); });
+    }
+    if (!hits.length) return null;
+    // Only file:line, never the value: the message reaches events, failure files and repair prompts.
+    const message = `Credentials in the tree: ${hits.slice(0, 10).join(", ")}${hits.length > 10 ? ` and ${hits.length - 10} more` : ""} match an API key or token pattern.`;
+    await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "secrets", message });
+    return new FactoryError("quality_gate_failed", message, { gate: "secrets", output: `${message}\nRemove each value from the tree: read it from an environment variable or a gitignored file under data/. A fake value in a test must not look like a real key: build it at runtime (for example "sk-" + "x".repeat(20)) or use a placeholder such as "test-key".` });
   }
 
   // Merge check: proofs of built features whose files (or whose dependencies' files) this feature changed

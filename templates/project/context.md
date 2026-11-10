@@ -4,6 +4,7 @@
 |------|-----------|-----------|
 | `.aai/instructions.md` | how agents behave in this project | always, first |
 | `.aai/identity.md` | what this project is | always |
+| `.aai/review.md` | the owner's review rules | reviewing, or deciding what "done" means |
 | `.factory/PRD.md`, `PLAN.md`, `ACCEPTANCE.md` | the frozen contract the factory builds against | any question about scope or acceptance |
 | `.aai/memory/interviews/guide.log` | the Factory Guide transcript | recovering intent behind the brief |
 | `.solofactory/runs/<id>/{state.json,events.jsonl}` | run evidence | what happened in a build |

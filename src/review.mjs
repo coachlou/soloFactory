@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const contractFiles = ["requirements.json", "PRD.md", "PLAN.md", "ACCEPTANCE.md"];
@@ -53,6 +53,9 @@ export function featureNeedsReview({ runnable, owned = [], brokenProofs = [] }) 
 }
 
 export async function prepareReview(appDir, job, { checks = originalChecks(job.brief), candidate, caseResults, editedProofs, unreviewed } = {}) {
+  // The owner's review rules: a field of its own, not a source. request.sources is re-verified from .factory/uploads
+  // only (uploadsOf), and widening sourceSet would flag every existing run inputs_changed.
+  const policy = await stat(path.join(appDir, ".aai", "review.md")).then((info) => info.isFile(), () => false);
   const request = {
     version: 1, jobId: job.id, token: randomUUID(), contractDigest: await contractDigest(appDir), checks,
     sources: await sourceSet(appDir, runInputs(job)),
@@ -62,6 +65,7 @@ export async function prepareReview(appDir, job, { checks = originalChecks(job.b
     ...(editedProofs && Object.keys(editedProofs).length ? { editedProofs } : {}),
     ...(job.ownerDecisions?.length ? { ownerDecisions: job.ownerDecisions } : {}),
     ...(unreviewed?.length ? { unreviewed } : {}),
+    ...(policy ? { reviewPolicy: ".aai/review.md" } : {}),
   };
   if (!request.checks.length) throw new Error("Review requires at least one intake requirement or acceptance scenario.");
   await rm(path.join(appDir, ".factory", "review-result.json"), { force: true });

@@ -36,6 +36,22 @@ async function changeReport(args, change) {
   await writeFile(file, JSON.stringify(report));
 }
 
+test("the review request names the owner's review policy, outside its sources", async t => {
+  const env = await setup(t);
+  const result = await env.factory.start(env.job.id);
+  assert.equal(result.state, 'completed', result.error?.message);
+  assert.equal(result.reviewRequest.reviewPolicy, '.aai/review.md');
+  assert.ok(!result.reviewRequest.sources.some((source) => source.path.startsWith('.aai/')), 'the policy is not a verified input');
+});
+
+test("a project without .aai/review.md gets no reviewPolicy", async t => {
+  const env = await setup(t);
+  await rm(path.join(env.root, '.aai', 'review.md'));
+  const result = await env.factory.start(env.job.id);
+  assert.equal(result.state, 'completed', result.error?.message);
+  assert.equal(result.reviewRequest.reviewPolicy, undefined);
+});
+
 for (const sdlc of ['single', 'slices']) test(`${sdlc}: green tests cannot override missing smart-album functionality`, async t => {
   const env = await setup(t, args => changeReport(args, r => { r.verdict = 'blocked'; r.blockers = ['Live membership is missing']; r.checks[0].status = 'missing'; }), { sdlc });
   const result = await env.factory.start(env.job.id);
