@@ -5,8 +5,8 @@
 //   node scripts/smoke.mjs summarize <run dir>... print rows for runs that already happened (no spend)
 //   node scripts/smoke.mjs table                  print the ledger, smoke/results.jsonl, as Markdown
 //
-// Real runs cost about $4-15 and 15-50 min each: run by hand before a release that changes prompts,
-// models or the controller, never on a schedule. One run per brief is noisy; read it as a tripwire.
+// Real runs cost about $4-15 and 15-50 min each: required before a release that changes prompts, adapters,
+// the Guide skill or the controller (scripts/smoke-gate.mjs checks it at the version bump); never on a schedule. One run per brief is noisy; read it as a tripwire.
 // Each run gets a fresh home under .solofactory/smoke-runs/ and an in-process server on an ephemeral
 // port (never :4173). Model and effort come from the usual SOLOFACTORY_* env, e.g.
 //   SMOKE_ARM="opus medium" SOLOFACTORY_CLAUDE_REASONING_EFFORT=medium node scripts/smoke.mjs

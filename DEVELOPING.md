@@ -14,8 +14,13 @@ failure repair, the complete HTTP workflow, a real generated Node app, health ch
 live metrics. It runs the distro check first, and GitHub Actions runs it on Linux for every
 push and pull request.
 
-Before a release that changes prompts, models or the controller, run the real-provider
-smoke set by hand (about $10 and 35 minutes for the two small briefs; `household-inventory.json` is a mid-size brief of about 12-15 features that shows per-feature overhead and costs more):
+A release that changes prompts, adapters (models included), the Guide skill or the controller
+(`src/prompts.mjs`, `src/providers.mjs`, `skills/factory-guide.md`, `src/factory.mjs`) must run the
+real-provider smoke set first. Once `package.json` carries a version that has no tag yet, `npm test`
+fails until `smoke/results.jsonl` has a passing real-provider row for every brief at or after the last
+commit that touched one of those files, or the version's own PROGRESS heading has
+`- Smoke: waived, <reason>`. Fixture rows never count, and CI (a checkout with no tags) skips the gate
+(`scripts/smoke-gate.mjs`). Run the smoke set by hand (about $10 and 35 minutes for the two small briefs; `household-inventory.json` is a mid-size brief of about 12-15 features that shows per-feature overhead and costs more):
 
 ```bash
 node scripts/smoke.mjs

@@ -6,7 +6,8 @@
 #
 # Verifies that (1) every distro file the installer/skill relies on exists, (2) every path in
 # APP_FILES exists, (3) every directory src/ reads relative to the app root is listed in
-# APP_FILES — a new runtime asset that isn't shipped fails here instead of on a member's machine.
+# APP_FILES — a new runtime asset that isn't shipped fails here instead of on a member's machine,
+# and (4) the release smoke gate.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CHECK=0; [ "${1:-}" = "--check" ] && CHECK=1
@@ -40,6 +41,10 @@ done
 ver=$(node -p 'require("./package.json").version')
 awk -v v="$ver" '$0 ~ "^## "v"[: ]" {on=1; next} /^## / {on=0} on && /^- Docs:/ {ok=1} END {exit !ok}' PROGRESS.md \
   || miss "PROGRESS.md has no '- Docs:' bullet under '## $ver' — review the owner docs, then say what changed"
+# 3. Release smoke gate: while package.json's version is untagged, a release touching prompts, adapters, the Guide skill or
+#    the controller needs a passing real-provider smoke row per brief since the last change to them, or
+#    "- Smoke: waived, <reason>" under the version's PROGRESS heading (scripts/smoke-gate.mjs). Quiet without tags (CI).
+node scripts/smoke-gate.mjs || fail=1
 
 [ $fail = 0 ] && echo "distro: ok ($(wc -l < distro/APP_FILES | tr -d ' ') app paths, INSTALL.md in sync)"
 exit $fail

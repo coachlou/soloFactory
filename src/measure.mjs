@@ -147,7 +147,7 @@ export function summarizeRun(state, events, { brief = state.brief?.workingName, 
   const findings = events.filter((e) => e.type === "review.finding");
   const reviewsRun = [state.sliceStats, state.recoveryPhase?.stats].flatMap((stats) => Object.values(stats ?? {})).reduce((sum, entry) => sum + (entry.reviews ?? 0), 0);
   return {
-    at: state.completedAt ?? state.updatedAt ?? null, commit, brief, arm, run: state.id,
+    at: state.completedAt ?? state.updatedAt ?? null, commit, brief, arm, provider: state.provider ?? null, run: state.id,
     result: state.state === "completed" ? "passed" : `${state.state}${state.error?.code ? ` (${state.error.code})` : ""}`,
     features: done.length, planned: state.slicePlanIds?.length ?? 0,
     firstPass: done.filter((id) => !state.sliceStats?.[id]?.repairs).length,
