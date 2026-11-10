@@ -180,7 +180,7 @@ file never leaves your machine; `GET /api/errors?limit=50` returns the latest en
 - A whole run is capped at `SOLOFACTORY_MAX_RUN_WORKERS` workers (default 150, `0` turns it
   off), at `SOLOFACTORY_MAX_RUN_COST_USD` dollars of reported cost (default 30, `0` turns
   it off; Claude reports this list-price figure even on a subscription, Codex reports none),
-  and at `SOLOFACTORY_MAX_RUN_TOKENS` reported tokens (default 25M, cached input included,
+  and at `SOLOFACTORY_MAX_RUN_TOKENS` reported tokens (default 40M, cached input included,
   `0` turns it off; both CLIs report tokens, so this one holds on Codex).
   The next worker is not started: the run parks with `run_budget_reached`, naming what
   it has spent, and Resume allows another allotment of the same size. Every recovery approval

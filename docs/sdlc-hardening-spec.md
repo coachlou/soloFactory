@@ -118,8 +118,10 @@ ceiling skips turns without a reported cost, which is every Codex turn.
   Settings table (the docs gate already enforces this).
 - **Token ceiling (2a).** `SOLOFACTORY_MAX_RUN_TOKENS` alongside the cost ceiling, summed from usage
   every adapter reports, with the same park code (`run_budget_reached`), Resume allotment and card
-  text, modelled on the existing worker ceiling check. Default 25,000,000: the 0.10.12 smoke spent
-  3.05M tokens for $4.08, so the $30 cost ceiling is about 22M (counts are mostly cache reads). A run
+  text, modelled on the existing worker ceiling check. Default 40,000,000 (shipped). It was first
+  set at 25M from the 0.10.12 smoke (3.05M tokens for $4.08), but the 2026-11-10 real smoke ran up to
+  1.14M tokens per dollar, where 25M is only about $22; 40M keeps the $30 cost ceiling firing first on
+  Claude (counts are mostly cache reads). A run
   that parked before tokens were recorded takes its Resume allotment from `details.spend.tokens`.
   The cost ceiling stays for Claude, where it means something. SPEC.md does not yet document the
   worker or cost ceilings; 2a adds a §7 bullet covering all three.

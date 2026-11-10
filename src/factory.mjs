@@ -2322,8 +2322,9 @@ export function knownCostUsd(events) {
 export const maxRunWorkers = () => /^\d+$/.test(process.env.SOLOFACTORY_MAX_RUN_WORKERS ?? "") ? Number(process.env.SOLOFACTORY_MAX_RUN_WORKERS) : 150;
 
 // Tokens per run before it parks for the owner; 0 disables. Both CLIs report tokens, so unlike the cost ceiling this
-// binds on Codex. inputTokens includes cache reads; 25M is about the $30 cost ceiling at the 0.10.12 smoke's rate.
-export const maxRunTokens = () => /^\d+$/.test(process.env.SOLOFACTORY_MAX_RUN_TOKENS ?? "") ? Number(process.env.SOLOFACTORY_MAX_RUN_TOKENS) : 25_000_000;
+// binds on Codex. inputTokens includes cache reads. Real smokes ran 0.75M-1.14M tokens per reported dollar (0.10.12;
+// 2026-11-10 Habit Ledger and Voice Notes), so 40M stays above the $30 cost ceiling and that ceiling fires first on Claude.
+export const maxRunTokens = () => /^\d+$/.test(process.env.SOLOFACTORY_MAX_RUN_TOKENS ?? "") ? Number(process.env.SOLOFACTORY_MAX_RUN_TOKENS) : 40_000_000;
 
 // Input plus output tokens every turn reported: the same figure as runSpend's tokens. A turn with no usage is skipped,
 // so like knownCostUsd this is a lower bound.
