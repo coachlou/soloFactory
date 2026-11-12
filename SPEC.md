@@ -750,6 +750,11 @@ owner-submitted repair plan must be a version 2 feature plan with `writes` on ev
 repair plans saved by earlier releases still load. Not yet implemented: set-aside of a blocked
 recovery feature, and the per-feature rerun of earlier features' proofs on a reached file
 (recovery reruns them only at final integration, above).
+A repair plan scoped to the feature whose gate failed carries the remaining approved features
+unchanged (`request.keep`), with their original writes. The planner cannot edit them, so when a
+new feature writes a file an independent kept feature also writes, the controller adds that
+kept feature's `dependsOn` on the new feature (new features come first and recovery builds in
+order) instead of rejecting the plan with a remedy only the kept feature could apply.
 
 A replacement plan (an owner amendment or a consolidation of a reviewed plan) must keep every
 reviewed obligation. A kept obligation id may not change its behavior, expected result or proof

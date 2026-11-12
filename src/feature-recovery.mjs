@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { contractDigest, originalChecks, preparePlanReview, runInputs, sourceSet, validatePlanReview, validateReview } from './review.mjs';
 import { ALL_BLOCKERS, CONSOLIDATION_RULES, CONTROLLER_FACTS, PLAN_CHECKLIST, REREVIEW } from './prompts.mjs';
-import { PLAN_SCHEMA_FIXES, assertConsolidation, failedIntegrationProofs, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from './wbs.mjs';
+import { PLAN_SCHEMA_FIXES, assertConsolidation, failedIntegrationProofs, overlaps, pendingProofFailure, recordPendingProofs, validateFeaturePlan, validateSlicePlan } from './wbs.mjs';
 
 export const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 // v2 repair features close checks; v1 recovery slices (older ready phases) listed them as checks.
@@ -37,7 +37,11 @@ export function validateRecoveryPlan(raw, request, { fresh = false } = {}) {
   const keepIds = new Set(keep.map(slice => slice.id));
   // Kept copies win if the planner restates an approved feature.
   const own = Array.isArray(raw?.slices) ? raw.slices.filter(slice => !keepIds.has(slice?.id)) : raw?.slices;
-  if (request.keep && Array.isArray(own)) raw = { ...raw, slices: [...own, ...keep] };
+  // A kept copy cannot be edited by the planner, so a new feature that writes a file an independent kept feature
+  // also writes would fail the disjoint-writes check with a remedy nobody can apply. New features come first and
+  // recovery builds in order, so the controller adds that dependsOn itself.
+  const sharing = (slice) => (Array.isArray(own) ? own : []).filter(mine => Array.isArray(mine?.writes) && Array.isArray(slice.writes) && !slice.dependsOn?.includes(mine.id) && mine.writes.some(x => slice.writes.some(y => overlaps(x, y)))).map(mine => mine.id);
+  if (request.keep && Array.isArray(own)) raw = { ...raw, slices: [...own, ...keep.map(slice => sharing(slice).length ? { ...slice, dependsOn: [...(slice.dependsOn ?? []), ...sharing(slice)] } : slice)] };
   if (raw?.version === 2) {
     if (fresh) {
       const bare = (Array.isArray(own) ? own : []).filter(slice => slice?.writes === undefined).map(slice => slice?.id);

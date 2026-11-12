@@ -82,6 +82,26 @@ test('an approved kept copy replaces a planner slice with the same id', () => {
   assert.deepEqual(merged.slices[1], keep[0]);
 });
 
+// Member report on 0.10.17: kept copies carry their original writes, which the planner cannot change, so plan-time
+// checks across features made scoped repair plans unsatisfiable (assertProofOwnership, then disjoint writes).
+test('kept copies with their original writes never make a scoped repair plan unsatisfiable', () => {
+  const p = v2Plan(); const keep = p.slices.splice(1);
+  p.slices[0].writes = ['src/app.js', 'test/browse.test.mjs'];
+  p.slices[0].acceptance[0].proof.command = ['node', '--test', 'test/browse.test.mjs'];
+  // RESTART edits BROWSE's code without BROWSE's test; EXPORT is independent and shares a file the replacement widens into.
+  keep[0].writes = ['src/app.js', 'test/restart.test.mjs'];
+  keep.push({ id: 'EXPORT', title: 'Export', objective: 'Export the records', demo: 'Click export', dependsOn: [], closes: ['SC-4'], acceptance: [obligation('EXPORT-1', ['SC-4'])], writes: ['src/export.js', 'test/export.test.mjs'] });
+  const before = structuredClone(keep);
+  const scoped = { ...v2Request, checks: [...v2Request.checks, { id: 'SC-4', text: 'Export' }], keep };
+  assert.deepEqual(validateRecoveryPlan(p, scoped, { fresh: true }).slices.map(s => s.dependsOn), [[], ['BROWSE'], []]);
+  p.slices[0].writes.push('src/export.js');
+  const merged = validateRecoveryPlan(p, scoped, { fresh: true });
+  assert.deepEqual(merged.slices.map(s => s.dependsOn), [[], ['BROWSE'], ['BROWSE']], 'the controller orders the independent kept feature after the one sharing its file');
+  assert.deepEqual(merged.slices.map(s => s.writes), [p.slices[0].writes, before[0].writes, before[1].writes], 'kept writes stay as approved');
+  assert.deepEqual(validateRecoveryPlan(merged, scoped, { fresh: true }), merged, 'merging is idempotent');
+  assert.deepEqual(keep, before, 'approved copies are not mutated');
+});
+
 test('a kept feature may cite a check that built features already closed, but a new plan may not close it', () => {
   const p = v2Plan(); const keep = p.slices.splice(1);
   p.slices[0].writes = ['src/browse.js'];
