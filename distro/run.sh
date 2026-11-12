@@ -19,5 +19,7 @@ command -v node >/dev/null || { echo "node 22+ is required" >&2; exit 1; }
 mkdir -p "$FOLDER/projects" "$FOLDER/.aai/memory/solofactory"
 export SOLOFACTORY_HOME="${SOLOFACTORY_HOME:-$FOLDER/.aai/memory/solofactory}"
 export SOLOFACTORY_ROOT="${SOLOFACTORY_ROOT:-$FOLDER}"
+# Feedback reports offer GitHub issue links as well as email. Set it empty to hide the links.
+export SOLOFACTORY_ISSUES_URL="${SOLOFACTORY_ISSUES_URL-https://github.com/coachlou/soloFactory/issues}"
 echo "SoloFactory → http://127.0.0.1:${PORT:-4173}   projects: $SOLOFACTORY_ROOT/{*,projects/*}"
 exec node "$HERE/app/src/server.mjs"

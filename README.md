@@ -114,8 +114,10 @@ nothing is sent anywhere until you send it yourself. **Copy & open email** copie
 opens a message to support@coachlou.com with the subject "SoloFactory Feedback"; paste the
 report into the body.
 
-To enable the **Search existing issues** and **Open GitHub** buttons, point SoloFactory at
-your issue tracker:
+Started with `run.sh` (the member install), SoloFactory points these buttons at
+`https://github.com/coachlou/soloFactory/issues`; set `SOLOFACTORY_ISSUES_URL=` (empty) to hide them.
+From a checkout, point SoloFactory at your issue tracker to enable the **Search existing issues** and
+**Open GitHub** buttons:
 
 ```bash
 SOLOFACTORY_ISSUES_URL=https://github.com/coachlou/soloFactory/issues npm start
