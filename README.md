@@ -23,17 +23,18 @@ npm start
 ```
 
 Open <http://127.0.0.1:4173>. If that port is taken, the server says whether it is another SoloFactory (open that one) or another app (start with `PORT=5000 npm start`). The **Manual** button in the header opens the illustrated user
-manual (`docs/manual/index.html`, also served at `/manual`). Answer the Factory Guide one turn at a time, review the
-compiled brief, and choose **Queue for the factory**. Every check in the brief must be provable offline on
+manual (`docs/manual/index.html`, also served at `/manual`). Answer the Factory Guide one turn at a time in the sidebar of the
+**Brief** page, read or edit the brief beside it (View and Edit), and choose **Queue for the factory**:
+the Guide gives the brief a final review first and asks if anything is missing. Everything saves as you go. Every check in the brief must be provable offline on
 this machine, so the Guide rewrites checks that need a live account, an operating-system change,
 the real time of day or a fixed drive path, and moves the live part to a **Checked by hand after
 install** list that no build or review chases. A keyword scan sends a ready brief back to the
 Guide once if it still finds such a check; anything left, and a brief above 12 checks, shows as
-a note on the review screen. **Attach files** drops an existing spec
+a note at the top of the brief. **Attach** drops an existing spec
 (markdown, text, JSON, YAML, CSV) straight into the conversation and lets the Guide open a
 mockup or screenshot (png, jpg, gif, webp); images are saved under the project's
 `.factory/uploads/`. The brief joins that project's run
-queue and you land back in a fresh interview, so the next release can be shaped while this
+queue and you land back on a fresh brief, so the next release can be shaped while this
 one builds. Runs in one project go one after another, each building on the last; runs in
 different projects can overlap when `SOLOFACTORY_MAX_ACTIVE_RUNS` is above 1 (default 1).
 A brief for a project that already shipped is specified as a follow-on release. The previous

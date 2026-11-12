@@ -15,7 +15,7 @@ const labels = {
 };
 
 const stageOrder = ["specifying", "building", "verifying", "reviewing", "deploying", "completed"];
-const state = { config: null, provider: null, messages: [], guide: null, revises: null, job: null, events: [], telemetry: null, poller: null, jobs: [], busyJobId: null, projects: [], project: null };
+const state = { config: null, provider: null, messages: [], guide: null, revises: null, mode: "view", edited: new Set(), editing: null, job: null, events: [], telemetry: null, poller: null, jobs: [], busyJobId: null, projects: [], project: null };
 const $ = (selector) => document.querySelector(selector);
 const NO_PROVIDER = "No subscription is signed in yet. Follow the note under Claude Code above, then reload this page.";
 
@@ -30,8 +30,7 @@ async function boot() {
   state.messages = [{ role: "assistant", content: state.guide.message }];
   renderProviders();
   if (!first) showError(new Error(NO_PROVIDER));
-  renderMessages();
-  renderCoverage();
+  renderWorkspace();
   checkUpdate().catch(() => {}); // never holds up the page
   await refreshProjects();
   const savedId = localStorage.getItem("solofactory.currentJob");
@@ -69,7 +68,8 @@ $("#board-button").addEventListener("click", () => {
 async function showBoard() {
   clearError();
   stopPolling();
-  for (const id of ["interview-view", "review-view", "run-view"]) $(`#${id}`).classList.add("hidden");
+  for (const id of ["brief-view", "run-view"]) $(`#${id}`).classList.add("hidden");
+  document.body.classList.remove("brief-mode");
   $("#board-view").classList.remove("hidden");
   $("#board-button").setAttribute("aria-pressed", "true");
   renderBoard(await api("/api/board"));
@@ -144,6 +144,7 @@ function renderProjects() {
     return option(project.id, `${marker}${project.name} · ${last}${queued}`);
   }));
   select.value = state.project;
+  $("#brief-project").textContent = state.projects.find((entry) => entry.id === state.project)?.name ?? "Project";
   renderQueueHint();
 }
 
@@ -253,6 +254,36 @@ async function selectRun(id) {
   else startPolling();
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// Brief workspace. One page shapes a new brief and revises a past run's: the brief reads as a document,
+// and the Guide sits in a sidebar beside it. View mode reads; Edit mode lets the owner rewrite a section,
+// and the Guide checks that edit against the rest of the brief when the owner leaves the section.
+// ---------------------------------------------------------------------------------------------------------
+
+// Each brief section, the coverage topic it answers (null: not a topic), and whether it is a list.
+const BRIEF_SECTIONS = [
+  ["promise", "Promise", "promise"],
+  ["primaryUser", "Primary user", "user"],
+  ["problem", "Problem", "problem"],
+  ["coreWorkflow", "Core workflow", "workflow", true],
+  ["mustHaves", "Must-haves", "mustHaves", true],
+  ["nonGoals", "Non-goals", "nonGoals", true],
+  ["dataAndAccess", "Data & access", "dataAndAccess", true],
+  ["integrations", "Integrations", "integrations", true],
+  ["businessModel", "Business model", "business"],
+  ["acceptanceScenarios", "Acceptance scenarios", "acceptance", true],
+  ["visualDirection", "Visual direction", "visual"],
+  ["deployment", "Deployment", "deployment"],
+  ["constraints", "Constraints", "constraints", true],
+  ["manualChecks", "Checked by hand after install", null, true],
+];
+const EARLIER_SHOWN = 4;
+const STAGE_NAMES = { queued: "the queue", specifying: "Specify", building: "Build", repairing: "Repair", verifying: "Verify", reviewing: "Review", deploying: "Deploy" };
+const hasValue = (value) => (Array.isArray(value) ? value.some((entry) => String(entry).trim()) : Boolean(String(value ?? "").trim()));
+const sameValue = (a, b) => JSON.stringify(a ?? (Array.isArray(b) ? [] : "")) === JSON.stringify(b ?? (Array.isArray(a) ? [] : ""));
+const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
+
 function showInterview() {
   stopPolling();
   state.job = null;
@@ -262,27 +293,33 @@ function showInterview() {
   state.messages = [{ role: "assistant", content: state.guide.message }];
   state.revises = null;
   state.replaces = null;
+  state.revisedJob = null;
+  state.baseBrief = null;
   state.savedNotes = "";
   state.savedAt = null;
-  $("#change-input").value = "";
+  state.edited = new Set();
+  state.editing = null;
+  state.showEarlier = false;
+  state.mode = "view";
+  $("#message-input").value = "";
   localStorage.removeItem("solofactory.currentJob");
   hideBoard();
   $("#run-view").classList.add("hidden");
-  $("#review-view").classList.add("hidden");
-  $("#interview-view").classList.remove("hidden");
+  $("#brief-view").classList.remove("hidden");
+  document.body.classList.add("brief-mode");
   document.querySelectorAll(".stages li").forEach((item) => item.classList.remove("active", "done"));
   document.querySelector('[data-stage="interview"]').classList.add("active");
-  $("#start-button").disabled = false;
   renderProviders();
-  renderMessages();
-  renderCoverage();
+  renderWorkspace();
   renderRuns();
   renderBackgroundBanner();
   restoreDraft().catch(showError);
 }
+// The old split pages are one page now; kept so other callers read the same.
+const showReview = () => renderWorkspace();
 
-// The server saves the Guide conversation per project after every turn, so leaving the interview
-// (board, a run, another project, a reload) no longer loses it. Start or Start over clears it.
+// The server saves the Guide conversation per project after every turn, so leaving the brief page
+// (board, a run, another project, a reload) no longer loses it. Queue or Start over clears it.
 async function restoreDraft() {
   const { draft } = await api("/api/interview/draft");
   if (!draft || state.job || state.messages.length > 1) return;
@@ -292,12 +329,17 @@ async function restoreDraft() {
   state.replaces = draft.replaces ?? null;
   state.savedNotes = draft.notes ?? "";
   state.savedAt = draft.savedAt ?? null;
-  $("#change-input").value = state.savedNotes;
+  $("#message-input").value = state.savedNotes;
   if (state.config.providers.some((provider) => provider.id === draft.provider && provider.authenticated)) state.provider = draft.provider;
+  // A revision compares against the brief its run was queued with, so changes show where they are.
+  if (state.revises) {
+    const revised = await api(`/api/jobs/${state.revises}`).catch(() => null);
+    state.revisedJob = revised?.job ?? null;
+    state.baseBrief = state.revisedJob?.brief ?? null;
+    if (state.revisedJob) state.mode = "edit";
+  }
   renderProviders();
-  renderMessages();
-  renderCoverage();
-  if (state.guide.status === "ready") showReview();
+  renderWorkspace();
 }
 
 $("#discard-draft").addEventListener("click", async () => {
@@ -317,9 +359,13 @@ function resetRunPanels() {
   $("#artifacts").replaceChildren(Object.assign(document.createElement("p"), { textContent: "Artifacts appear after specification." }));
 }
 
+// The subscription is chosen before the first answer and fixed after it, so the picker only shows until then.
 function renderProviders() {
-  $("#provider-picker").replaceChildren(...state.config.providers.map((provider) => {
+  const picker = $("#provider-picker");
+  picker.classList.toggle("hidden", state.messages.length > 1);
+  picker.replaceChildren(...state.config.providers.map((provider) => {
     const button = document.createElement("button");
+    button.type = "button";
     button.className = `provider ${state.provider === provider.id ? "selected" : ""}`;
     button.disabled = !provider.authenticated || state.messages.length > 1;
     const strong = document.createElement("strong");
@@ -332,13 +378,257 @@ function renderProviders() {
   }));
 }
 
+function renderWorkspace(busy = false) {
+  renderBar(busy);
+  renderDoc();
+  renderGuideHead();
+  renderRunContext();
+  renderMessages(busy);
+  renderQueueHint();
+}
+
+function coverageCounts() {
+  const values = Object.values(state.guide.coverage ?? {});
+  return { done: values.filter((value) => value === "complete").length, total: values.length };
+}
+
+function changedKeys() {
+  if (!state.baseBrief) return [];
+  return BRIEF_SECTIONS.map(([key]) => key).filter((key) => !sameValue(state.baseBrief[key], state.guide.brief?.[key]));
+}
+
+// The queue button names what queuing does; the notices block in the document says it in full.
+function queueLabel() {
+  const { revises, replaces } = state;
+  if (!revises) return { long: "Queue for the factory", short: "Queue" };
+  if (replaces === revises) return { long: `Queue and replace run ${revises}`, short: "Queue" };
+  if (replaces) return { long: `Queue and set aside run ${replaces}`, short: "Queue" };
+  return { long: "Queue as a new run", short: "Queue" };
+}
+
+function renderBar(busy = false) {
+  const project = state.projects.find((entry) => entry.id === state.project);
+  $("#brief-project").textContent = project?.name ?? "Project";
+  const pill = $("#revising-pill");
+  pill.classList.toggle("hidden", !state.revises);
+  if (state.revises) {
+    const stopped = state.revisedJob?.state;
+    pill.replaceChildren(el("span", { className: "lg", textContent: "Revising run " }), state.revises, ...(stopped ? [el("span", { className: "lg", textContent: ` · ${stopped}` })] : []));
+  }
+  renderBriefStatus(busy);
+  const changes = changedKeys().length;
+  $("#change-count").classList.toggle("hidden", !changes);
+  $("#change-count").textContent = `${changes} change${changes === 1 ? "" : "s"}`;
+  $("#mode-view").setAttribute("aria-pressed", String(state.mode !== "edit"));
+  $("#mode-edit").setAttribute("aria-pressed", String(state.mode === "edit"));
+  const ready = state.guide.status === "ready";
+  const button = $("#start-button");
+  button.disabled = busy || !ready;
+  if (!ready) {
+    const { done, total } = coverageCounts();
+    button.replaceChildren(el("span", { className: "lg", textContent: "Brief not ready · " }), `${done} of ${total}`);
+    button.title = "The Guide marks the brief ready once every topic is covered.";
+  } else {
+    const label = state.queueAnyway === JSON.stringify(state.guide.brief) && !state.guide.reviewed ? { long: "Queue anyway", short: "Queue anyway" } : queueLabel();
+    button.replaceChildren(el("span", { className: "lg", textContent: label.long }), el("span", { className: "sm", textContent: label.short }));
+    button.title = state.guide.reviewed ? "The Guide has reviewed this brief as it stands; queuing starts the factory." : "The Guide reviews the brief against the interview checklist first, then queues it if nothing is missing.";
+  }
+}
+
+// One status line: typed but unsaved, saved (the draft is on disk after every Guide turn), with the Guide,
+// or ready to queue. Submitted shows on the run itself once the brief is queued.
+function renderBriefStatus(busy = false) {
+  const line = $("#brief-status");
+  const typed = $("#message-input").value.trim();
+  const when = state.savedAt ? ` ${clock(state.savedAt)}` : "";
+  const started = state.messages.length > 1 || state.revises;
+  line.classList.add("lg");
+  const status = busy ? ["busy", state.reviewing ? "With the Guide · reviewing the brief before it queues" : "With the Guide · revising the brief"]
+    : typed && typed !== (state.savedNotes ?? "").trim() ? ["unsaved", "Saving…"]
+    : typed ? ["saved", `Saved${when} · message not sent yet`]
+    : state.guide.status === "ready" ? ["ready", state.guide.reviewed ? `Reviewed · ready to queue${when ? ` · saved${when}` : ""}` : `Ready · the Guide reviews it when you queue${when ? ` · saved${when}` : ""}`]
+    : started ? ["saved", `Saved${when} · not submitted`]
+    : ["new", "New idea · nothing is queued until you press Queue"];
+  line.dataset.state = status[0];
+  line.textContent = status[1];
+}
+$("#message-input").addEventListener("input", () => renderBriefStatus());
+
+function briefNoticesShown() {
+  const { revises, replaces } = state;
+  const replacing = !revises ? []
+    : replaces === revises ? [`Revising run ${revises}. Queuing this brief replaces that run: its files go back to the release before it, like Start over, and this brief goes first in line.`]
+    : replaces ? [`Revising run ${revises}. Queuing this brief also sets aside stopped run ${replaces}, which is holding this project's queue: its files go back to the release before it, like Start over.`]
+    : [`Revising run ${revises}. Queuing this brief starts a new run on the app as it is now; run ${revises} stays in the history.`];
+  return [...replacing, ...(state.guide.notices ?? [])];
+}
+
+// The topic the Guide is asking about: the first one it has started but not finished.
+function focusKey() {
+  if (state.guide.status === "ready") return null;
+  const coverage = state.guide.coverage ?? {};
+  const topic = Object.keys(coverage).find((key) => coverage[key] === "partial");
+  return BRIEF_SECTIONS.find(([, , cover]) => cover === topic)?.[0] ?? null;
+}
+
+function renderDoc() {
+  const brief = state.guide.brief ?? {};
+  const ready = state.guide.status === "ready";
+  $("#doc-eyebrow").textContent = state.revises ? `Product brief · revision of run ${state.revises}` : ready ? "Product brief · ready" : "Product brief · draft";
+  $("#doc-title").textContent = brief.workingName?.trim() || "Untitled idea";
+  const notices = briefNoticesShown();
+  $("#brief-notices").classList.toggle("hidden", !notices.length);
+  $("#brief-notices").replaceChildren(el("h2", { textContent: "Before you queue" }), el("ul", {}, ...notices.map((text) => el("li", { textContent: text }))));
+  renderBrief(brief, notices, $("#brief"));
+  $("#doc-foot").classList.toggle("hidden", !ready);
+  $("#brief").classList.toggle("editing-mode", state.mode === "edit");
+}
+
+// The brief as a document. Sections not covered yet are listed at the end; a section the Guide is asking
+// about, one that changed against the run being revised, and one the owner is editing are each marked.
+function renderBrief(brief, _notices, target) {
+  const ready = state.guide.status === "ready";
+  const coverage = state.guide.coverage ?? {};
+  const focus = focusKey();
+  const changed = new Set(changedKeys());
+  const editable = state.mode === "edit";
+  const later = [];
+  const nodes = [];
+  for (const [key, label, cover, list] of BRIEF_SECTIONS) {
+    const value = brief[key];
+    const shown = hasValue(value) || (state.baseBrief && hasValue(state.baseBrief[key]));
+    // Not written yet: listed under Still to cover while the interview runs, editable in Edit mode.
+    if (!shown && !editable) {
+      if (cover && !ready) later.push(label);
+      if (!cover || !ready) continue;
+    }
+    if (!shown && editable && !cover) continue;
+    const section = el("section", { className: "doc-section" });
+    section.dataset.key = key;
+    let tag = "";
+    if (state.editing === key) { section.classList.add("is-editing"); tag = "you are editing"; }
+    else if (changed.has(key)) { section.classList.add("is-changed"); tag = state.edited.has(key) ? "edited by you" : "changed by the Guide"; }
+    else if (key === focus) { section.classList.add("is-focus"); tag = "being discussed"; }
+    else if (cover && coverage[cover] === "partial" && !ready) tag = "partly covered";
+    section.append(el("h2", { textContent: tag ? `${label} · ${tag}` : label }));
+    if (editable && state.editing === key) section.append(sectionEditor(key, label, value, list));
+    else section.append(sectionBody(key, value, list, key === "promise"));
+    // Edit mode: a section reads as normal until the owner clicks it (or presses Enter on it) to rewrite it.
+    if (editable && state.editing !== key) {
+      section.classList.add("editable");
+      section.tabIndex = state.guideBusy ? -1 : 0;
+      section.setAttribute("role", "button");
+      section.setAttribute("aria-label", `Edit ${label}`);
+      const open = () => { if (state.guideBusy) return; state.editing = key; renderDoc(); renderMessages(); };
+      section.addEventListener("click", open);
+      section.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
+    }
+    nodes.push(section);
+  }
+  if (later.length) nodes.push(el("section", { className: "doc-later" }, el("h2", { textContent: "Still to cover" }), el("p", { textContent: later.join(" · ") })));
+  target.replaceChildren(...nodes);
+}
+
+function sectionBody(key, value, list, lead) {
+  const base = state.baseBrief?.[key];
+  const diff = state.baseBrief && !sameValue(base, value);
+  if (list) {
+    const items = Array.isArray(value) ? value : [];
+    const before = Array.isArray(base) ? base : [];
+    const ul = el("ul");
+    for (const entry of items) ul.append(el("li", {}, diff && !before.includes(entry) ? el("ins", { textContent: entry }) : entry));
+    if (diff) for (const entry of before.filter((item) => !items.includes(item))) ul.append(el("li", {}, el("del", { textContent: entry })));
+    if (!ul.children.length) ul.append(el("li", { className: "empty", textContent: "Not specified" }));
+    return ul;
+  }
+  const p = el("p", { className: lead ? "lead" : "" });
+  if (diff && hasValue(base)) p.append(el("del", { textContent: base }), " ");
+  if (hasValue(value)) p.append(diff ? el("ins", { textContent: value }) : value);
+  else if (!p.childNodes.length) p.append(el("span", { className: "empty", textContent: "Not specified" }));
+  return p;
+}
+
+// Edit mode: each section is a plain text box, one line per item for a list. Leaving a changed section
+// applies the edit and sends it to the Guide, which keeps the owner's wording unless it conflicts.
+function sectionEditor(key, label, value, list) {
+  const text = list ? (value ?? []).join("\n") : value ?? "";
+  const box = el("textarea", { value: text, rows: Math.max(list ? (value?.length || 1) : 2, 2), className: "section-editor", disabled: state.guideBusy });
+  box.setAttribute("aria-label", `${label}${list ? ", one item per line" : ""}`);
+  queueMicrotask(() => { box.focus(); box.setSelectionRange(box.value.length, box.value.length); });
+  // Escape cancels the edit; Cmd/Ctrl+Enter keeps it, like leaving the section.
+  box.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { box.value = text; box.blur(); }
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); box.blur(); }
+  });
+  box.addEventListener("blur", () => {
+    if (state.editing !== key) return;
+    state.editing = null;
+    const next = list ? box.value.split("\n").map((line) => line.trim()).filter(Boolean) : box.value.trim();
+    if (sameValue(next, state.guide.brief?.[key])) { renderDoc(); renderMessages(state.guideBusy); return; }
+    state.guide = { ...state.guide, brief: { ...state.guide.brief, [key]: next }, reviewed: false };
+    state.edited.add(key);
+    renderDoc();
+    renderMessages(state.guideBusy);
+    const shown = list ? next.map((line) => `- ${line}`).join("\n") : next;
+    // Saved at once, so the edit survives a reload or a failed Guide turn; the turn then checks it.
+    saveEdits({ [key]: next })
+      .then(() => guideTurn(`I edited the brief directly. ${label} now reads:\n${shown}\n\nKeep my wording unless it conflicts with the rest of the brief. If it does, say what conflicts and ask me.`))
+      .catch(showError);
+  });
+  return box;
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  state.editing = null;
+  renderWorkspace(state.guideBusy);
+}
+$("#mode-view").addEventListener("click", () => setMode("view"));
+$("#mode-edit").addEventListener("click", () => setMode("edit"));
+
+function renderGuideHead() {
+  const hidden = Math.max(0, state.messages.length - EARLIER_SHOWN);
+  const collapse = Boolean(state.revises) && hidden > 0;
+  $("#earlier-button").classList.toggle("hidden", !collapse);
+  $("#earlier-button").textContent = state.showEarlier ? "Hide earlier messages" : `${hidden} earlier message${hidden === 1 ? "" : "s"}`;
+  const turns = state.messages.length;
+  $("#guide-meta").textContent = collapse ? "" : state.revises ? `Revision · ${turns} messages` : turns > 1 ? `New idea · ${turns} messages` : "New idea";
+  $("#discard-draft").classList.toggle("hidden", state.messages.length < 2 && !state.revises);
+}
+$("#earlier-button").addEventListener("click", () => { state.showEarlier = !state.showEarlier; renderGuideHead(); renderMessages(state.guideBusy); });
+
+// What the revised run was doing when it stopped, so the owner knows what the change is for.
+function renderRunContext() {
+  const box = $("#run-context");
+  const job = state.revisedJob;
+  box.classList.toggle("hidden", !state.revises);
+  if (!state.revises) return;
+  const stoppedIn = job?.failedState ? ` during ${STAGE_NAMES[job.failedState] ?? job.failedState}` : "";
+  const why = job?.error?.message ? ` ${job.error.message}` : "";
+  const holds = state.replaces === state.revises ? " It holds this project's queue." : "";
+  const line = !job ? "Its brief is open here for changes."
+    : job.state === "completed" ? "This run finished. The app stays live; queuing builds on it as it is now."
+    : `This run ${job.state === "paused" ? "paused" : `was ${job.state}`}${stoppedIn}.${why}${holds}`;
+  const open = el("button", { type: "button", className: "link-button", textContent: "Open the run" });
+  open.addEventListener("click", () => selectRun(state.revises).catch(showError));
+  box.replaceChildren(el("p", { className: "run-context-title", textContent: `Run ${state.revises}` }), el("p", { textContent: line }), open);
+}
+
 function renderMessages(thinking = false) {
-  $("#discard-draft").classList.toggle("hidden", state.messages.length < 2);
   const container = $("#messages");
-  container.replaceChildren(...state.messages.map((message) => {
+  const collapse = Boolean(state.revises) && !state.showEarlier;
+  const shown = collapse ? state.messages.slice(-EARLIER_SHOWN) : state.messages;
+  const focus = focusKey();
+  container.replaceChildren(...shown.map((message, index) => {
     const item = document.createElement("div");
     item.className = `message ${message.role}`;
-    item.textContent = message.content;
+    const last = index === shown.length - 1 && message.role === "assistant";
+    if (message.role === "assistant") {
+      const about = last && focus ? ` · ${BRIEF_SECTIONS.find(([key]) => key === focus)[1]}` : "";
+      item.append(el("p", { className: "who", textContent: `Guide${about}` }));
+      if (last) item.classList.add("current");
+    }
+    item.append(el("div", { className: "text", textContent: message.content }));
     for (const src of message.images ?? []) {
       const img = document.createElement("img");
       img.src = src; img.alt = "Attached image"; img.className = "attachment-image";
@@ -358,6 +648,11 @@ function renderMessages(thinking = false) {
     }
     return item;
   }));
+  if (state.mode === "edit" && state.editing) {
+    const label = BRIEF_SECTIONS.find(([key]) => key === state.editing)[1];
+    container.append(el("div", { className: "edit-note" }, "You are editing ", el("strong", { textContent: label }), ". The Guide checks your edit against the rest of the brief when you leave the section."));
+  }
+  if (state.reviewNote && !thinking) container.append(el("div", { className: "edit-note review-note", textContent: state.reviewNote }));
   if (thinking) {
     const item = document.createElement("div");
     item.className = "message assistant thinking";
@@ -370,31 +665,6 @@ function renderMessages(thinking = false) {
 function sdlcOption(id) {
   const options = state.config?.sdlcOptions ?? [];
   return options.find((option) => option.id === id) ?? { id: id ?? "single", label: "Single build" };
-}
-
-// The brief as it stands sits beside the chat, so the owner can see what to change while answering.
-function renderInterviewBrief() {
-  const brief = state.guide.brief ?? {};
-  const shown = state.revises || Object.values(brief).some((value) => Array.isArray(value) ? value.length : value);
-  $("#interview-brief").classList.toggle("hidden", !shown);
-  if (shown) renderBrief(brief, briefNoticesShown(), $("#interview-brief-body"));
-}
-
-function renderCoverage() {
-  renderInterviewBrief();
-  const coverage = state.guide.coverage;
-  const values = Object.values(coverage);
-  const score = Math.round(values.reduce((sum, value) => sum + (value === "complete" ? 1 : value === "partial" ? .5 : 0), 0) / values.length * 100);
-  $("#coverage-score").textContent = `${score}%`;
-  $("#coverage-ring").style.setProperty("--value", score);
-  $("#coverage-list").replaceChildren(...Object.entries(coverage).map(([key, value]) => {
-    const row = document.createElement("div");
-    row.className = `coverage-item ${value}`;
-    const text = document.createElement("span"); text.textContent = labels[key] ?? key;
-    const dot = document.createElement("i"); dot.title = value;
-    row.append(text, dot);
-    return row;
-  }));
 }
 
 // Attached documents ride inside the user turn: the Guide reads inline text
@@ -443,184 +713,170 @@ function composeMessage(typed) {
   return parts.join("\n\n");
 }
 
+// Every answer, change request and direct edit is one Guide turn. The server saves the draft after it,
+// so a turn also clears any notes saved for later.
+// A direct edit is saved before its Guide turn; the server keeps it in the brief the turn returns.
+async function guideTurn(content, images = [], { review = false } = {}) {
+  if (!state.provider) throw new Error(NO_PROVIDER);
+  clearError();
+  // A final review adds no owner message: the server hands the Guide the saved brief to check.
+  if (!review) state.messages.push({ role: "user", content, images });
+  state.reviewing = review;
+  state.reviewNote = null;
+  setInterviewBusy(true);
+  try {
+    const guide = await api("/api/interview/turn", { method: "POST", body: { provider: state.provider, messages: state.messages, ...(review && { review: true }) } });
+    state.guide = guide;
+    state.messages.push({ role: "assistant", content: guide.message });
+    state.savedNotes = "";
+    state.savedAt = new Date().toISOString();
+  } catch (error) {
+    if (!review) state.messages.pop();
+    throw error;
+  } finally {
+    state.reviewing = false;
+    setInterviewBusy(false);
+    renderProviders();
+  }
+}
+
 $("#message-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = $("#message-input");
-  const content = composeMessage(input.value.trim());
+  const typed = input.value.trim();
+  const content = composeMessage(typed);
   if (!content) return;
   if (!state.provider) return showError(new Error(NO_PROVIDER));
-  clearError();
-  state.messages.push({ role: "user", content, images: pending.filter((file) => file.url).map((file) => file.url) });
+  const images = pending.filter((file) => file.url).map((file) => file.url);
+  clearTimeout(notesTimer);
+  notesTimer = null;
   input.value = "";
   pending.length = 0;
   renderAttachments();
-  renderMessages(true);
-  setInterviewBusy(true);
   try {
-    const guide = await api("/api/interview/turn", { method: "POST", body: { provider: state.provider, messages: state.messages } });
-    state.guide = guide;
-    state.messages.push({ role: "assistant", content: guide.message });
-    renderMessages();
-    renderCoverage();
-    renderProviders();
-    if (guide.status === "ready") showReview();
+    await guideTurn(content, images);
   } catch (error) {
-    renderMessages();
+    input.value = typed;
     showError(error);
-  } finally {
-    setInterviewBusy(false);
   }
+});
+// Enter sends, Shift+Enter adds a line, as in most chat boxes.
+$("#message-input").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); $("#message-form").requestSubmit(); }
 });
 
 function setInterviewBusy(value) {
+  state.guideBusy = value;
   $("#send-button").disabled = value;
   $("#message-input").disabled = value;
-  $("#send-button").firstChild.textContent = value ? "Guide is thinking " : "Send answer ";
+  $("#send-button").textContent = value ? "Thinking…" : "Send";
+  renderWorkspace(value);
 }
 
-function showReview() {
-  $("#interview-view").classList.add("hidden");
-  $("#review-view").classList.remove("hidden");
-  // Revising a past run's brief is its own page: same checks as the interview, focused on the brief.
-  $("#review-eyebrow").textContent = state.revises ? `Revising the brief of run ${state.revises}` : "Frozen brief";
-  $("#review-title").textContent = state.revises ? "Say what to change. The Guide checks it like the interview." : "Small enough to ship. Precise enough to test.";
-  renderBrief(state.guide.brief, briefNoticesShown(), $("#brief"));
-  renderBriefStatus();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+async function saveEdits(edits) {
+  const { draft } = await api("/api/interview/draft", { method: "PATCH", body: { edits, provider: state.provider } });
+  state.savedAt = draft.savedAt;
+  renderBriefStatus(state.guideBusy);
 }
 
-$("#back-button").addEventListener("click", () => {
-  $("#review-view").classList.add("hidden");
-  $("#interview-view").classList.remove("hidden");
-});
-
-function briefNoticesShown() {
-  const { revises, replaces } = state;
-  const replacing = !revises ? []
-    : replaces === revises ? [`Revising run ${revises}. Queuing this brief replaces that run: its files go back to the release before it, like Start over.`]
-    : replaces ? [`Revising run ${revises}. Queuing this brief also sets aside stopped run ${replaces}, which is holding this project's queue: its files go back to the release before it, like Start over.`]
-    : [`Revising run ${revises}. Queuing this brief starts a new run on the app as it is now; run ${revises} stays in the history.`];
-  return [...replacing, ...(state.guide.notices ?? [])];
-}
-
-// Front matter status: typed but unsaved, saved (the draft is on disk after every Guide turn), or with the Guide.
-// Submitted shows on the run itself once the brief is queued.
-function renderBriefStatus(busy = false) {
-  const line = $("#brief-status");
-  const typed = $("#change-input").value.trim();
-  const when = state.savedAt ? ` at ${new Date(state.savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "";
-  const status = busy ? ["busy", "With the Guide: revising the brief…"]
-    : typed !== (state.savedNotes ?? "").trim() ? ["unsaved", "In progress · change notes not saved"]
-    : ["saved", `Saved${when} · ${typed ? "change notes waiting to send · " : ""}not submitted`];
-  line.dataset.state = status[0];
-  line.textContent = status[1];
-}
-$("#change-input").addEventListener("input", () => renderBriefStatus());
-
-$("#save-notes-button").addEventListener("click", async () => {
-  clearError();
+// The Guide box saves itself: unsent text is written to the draft a moment after typing stops and when
+// the box loses focus, so a reload or a closed tab keeps it. Sending clears it.
+let notesTimer = null;
+async function saveNotes() {
+  clearTimeout(notesTimer);
+  notesTimer = null;
+  const notes = $("#message-input").value;
+  if (state.guideBusy || notes.trim() === (state.savedNotes ?? "").trim()) return;
   try {
-    const { draft } = await api("/api/interview/draft", { method: "PATCH", body: { notes: $("#change-input").value } });
+    const { draft } = await api("/api/interview/draft", { method: "PATCH", body: { notes, provider: state.provider } });
     state.savedNotes = draft.notes;
     state.savedAt = draft.savedAt;
-    renderBriefStatus();
   } catch (error) {
     showError(error);
   }
-});
-
-// Changes asked on the brief page are one more Guide turn. A ready answer redraws the brief here;
-// a question sends the owner back to the interview with their request already in the conversation.
-$("#change-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const input = $("#change-input");
-  const content = input.value.trim();
-  if (!content) return;
-  if (!state.provider) return showError(new Error(NO_PROVIDER));
-  clearError();
-  const button = $("#change-button");
-  input.disabled = button.disabled = $("#start-button").disabled = $("#save-notes-button").disabled = true;
-  button.textContent = "Guide is revising…";
-  renderBriefStatus(true);
-  state.messages.push({ role: "user", content });
-  try {
-    const guide = await api("/api/interview/turn", { method: "POST", body: { provider: state.provider, messages: state.messages } });
-    state.guide = guide;
-    state.messages.push({ role: "assistant", content: guide.message });
-    input.value = "";
-    state.savedNotes = "";
-    state.savedAt = new Date().toISOString();
-    renderMessages();
-    renderCoverage();
-    if (guide.status === "ready") showReview();
-    else { $("#review-view").classList.add("hidden"); $("#interview-view").classList.remove("hidden"); }
-  } catch (error) {
-    state.messages.pop();
-    showError(error);
-  } finally {
-    input.disabled = button.disabled = $("#start-button").disabled = $("#save-notes-button").disabled = false;
-    button.textContent = "Revise brief";
-    renderBriefStatus();
-  }
-});
-
-function renderBrief(brief, notices, target) {
-  const sections = [
-    ...(notices.length ? [["Before you start", notices, true]] : []),
-    ["Promise", brief.promise, true],
-    ["Primary user", brief.primaryUser],
-    ["Problem", brief.problem],
-    ["Core workflow", brief.coreWorkflow],
-    ["Must-haves", brief.mustHaves],
-    ["Non-goals", brief.nonGoals],
-    ["Data & access", brief.dataAndAccess],
-    ["Acceptance scenarios", brief.acceptanceScenarios, true],
-    ["Visual direction", brief.visualDirection],
-    ["Deployment", brief.deployment],
-    ["Constraints", brief.constraints, true],
-    ...(brief.manualChecks?.length ? [["Checked by hand after install", brief.manualChecks, true]] : []),
-  ];
-  target.replaceChildren(...sections.map(([title, value, wide]) => {
-    const section = document.createElement("section");
-    if (wide) section.className = "wide";
-    const heading = document.createElement("h3"); heading.textContent = title;
-    section.append(heading);
-    if (Array.isArray(value)) {
-      const list = document.createElement("ul");
-      for (const entry of value) { const item = document.createElement("li"); item.textContent = entry; list.append(item); }
-      section.append(list);
-    } else {
-      const paragraph = document.createElement("p"); paragraph.textContent = value || "Not specified"; section.append(paragraph);
-    }
-    return section;
-  }));
+  renderBriefStatus(state.guideBusy);
 }
+$("#message-input").addEventListener("input", () => { clearTimeout(notesTimer); notesTimer = setTimeout(saveNotes, 1200); });
+$("#message-input").addEventListener("blur", () => { if (notesTimer) saveNotes(); });
 
+// Phone width: the Guide collapses to a rail at the edge and opens over the brief.
+function setGuideOpen(open) {
+  $("#guide-side").classList.toggle("open", open);
+  $("#guide-rail").setAttribute("aria-expanded", String(open));
+  if (open) $("#message-input").focus();
+}
+$("#guide-rail").addEventListener("click", () => setGuideOpen(true));
+$("#guide-hide").addEventListener("click", () => { setGuideOpen(false); $("#guide-rail").focus(); });
+$("#guide-side").addEventListener("keydown", (event) => { if (event.key === "Escape" && $("#guide-side").classList.contains("open")) { setGuideOpen(false); $("#guide-rail").focus(); } });
+
+// Queue is a final review first: the Guide checks the exact brief that would freeze against the interview
+// checklist, sizing the change for a revision. Only a ready answer on an unchanged brief queues it; a question,
+// or a brief the review adjusted, stays here for the owner. A brief already reviewed as it stands queues at once.
 $("#start-button").addEventListener("click", async () => {
   clearError();
   // Queuing ignores notes the Guide has not seen; send them or clear the box first.
-  if ($("#change-input").value.trim()) return showError(new Error("You have change notes the Guide has not applied yet. Press Revise brief to apply them, or clear the box, then queue."));
+  if ($("#message-input").value.trim()) return showError(new Error("You have notes the Guide has not seen yet. Send them so the Guide can apply them, or clear the box, then queue."));
+  const anyway = state.queueAnyway === JSON.stringify(state.guide.brief);
+  if (!state.guide.reviewed && !anyway) {
+    const before = state.guide.brief;
+    try {
+      await guideTurn("", [], { review: true });
+    } catch (error) {
+      return showError(error);
+    }
+    if (state.guide.status !== "ready") {
+      reviewOutcome("The Guide has a question before this brief can queue. Answer it in the Guide.");
+      return;
+    }
+    if (!state.guide.reviewed) {
+      // The review kept dropping one of the owner's direct edits; the owner decides, with one more click.
+      state.queueAnyway = JSON.stringify(state.guide.brief);
+      renderBar();
+      reviewOutcome("The Guide's review did not carry one of your direct edits, so this brief is not fully reviewed. Read its reply, then press Queue anyway to queue the brief as shown, or change it.");
+      return;
+    }
+    if (!sameValue(before, state.guide.brief)) {
+      if (!state.revises) state.baseBrief = before;
+      renderWorkspace();
+      reviewOutcome("The Guide adjusted the brief in its review. Check the marked sections, then press Queue.");
+      return;
+    }
+  }
   $("#start-button").disabled = true;
   try {
     const { job } = await api("/api/jobs", {
       method: "POST",
       body: { provider: state.provider, transcript: state.messages, coverage: state.guide.coverage, brief: state.guide.brief, ...(state.revises && { revises: state.revises, replaces: state.replaces }) },
     });
+    state.queueAnyway = null;
+    state.reviewNote = null;
     // Submitted briefs queue; the owner goes straight back to shaping the next release.
     showInterview();
     await refreshProjects();
     renderBackgroundBanner();
-    if (job.queuePosition) $("#system-status").textContent = `Brief queued #${job.queuePosition}`;
+    $("#system-status").textContent = job.queuePosition ? `Brief queued #${job.queuePosition} as run ${job.id}` : `Queued as run ${job.id}`;
   } catch (error) {
     showError(error);
     $("#start-button").disabled = false;
   }
 });
 
+// Why Queue stopped after a review: a short status line in the bar, the reason under the Guide's reply,
+// and at phone width the Guide opens so the owner sees it. The next turn, edit or queue clears it.
+function reviewOutcome(text) {
+  state.reviewNote = text;
+  renderMessages();
+  const line = $("#brief-status");
+  line.dataset.state = "unsaved";
+  line.textContent = "Not queued yet · see the Guide";
+  line.classList.remove("lg");
+  if (matchMedia("(max-width: 700px)").matches) setGuideOpen(true);
+}
+
 function showRun() {
   hideBoard();
-  $("#review-view").classList.add("hidden");
-  $("#interview-view").classList.add("hidden");
+  $("#brief-view").classList.add("hidden");
+  document.body.classList.remove("brief-mode");
   $("#run-view").classList.remove("hidden");
   document.querySelector('[data-stage="interview"]').classList.add("done");
   $("#run-id").textContent = state.job.id;

@@ -105,6 +105,24 @@ check needs its own build, test and review turns, so a large first release runs 
 hours, spends several weekly limits, and one stuck check holds up the rest. Respect the
 owner's answer and do not ask again.
 
+## Final review before queuing
+
+When the prompt has a "Final review before queuing" section, the owner has pressed Queue. Getting
+the brief clear and complete now is cheaper than any repair later, so review the exact brief given
+there, not your memory of the conversation:
+
+- Check every coverage key, the acceptance scenarios, "What the factory can prove" and "Size of v1"
+  against that brief. Keep the owner's wording; change text only to fix a real gap or conflict.
+- Size the change first. For a revision of an earlier run (its brief is given) or a small follow-on,
+  a narrow change touches one rule, screen, field or message, adds no new data, account,
+  integration, page structure or architecture, and leaves the other checks as they were. Confirm a
+  narrow change in one or two sentences and return `ready` with the brief unchanged.
+- A wide change (new data or access, a new integration, a new screen or flow, a changed
+  architecture or deployment, or checks that now overlap or contradict) gets the full review. If
+  anything an engineer would have to guess is missing or thin, return `question` and ask the single
+  most important question. Ask the rest one at a time on later turns.
+- Never return `ready` just because the owner pressed Queue.
+
 ## Ready rule
 
 Return `status: "ready"` only when every coverage value is `complete`. In that response,

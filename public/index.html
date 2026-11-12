@@ -7,7 +7,7 @@
     <title>SoloFactory</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body>
+  <body class="brief-mode">
     <div class="shell">
       <div id="update-pop" class="update-pop" popover>
         <strong id="update-text"></strong>
@@ -69,76 +69,71 @@
             <div id="board-columns" class="board"></div>
           </section>
 
-          <section id="interview-view" class="view">
-            <div class="view-heading">
-              <div>
-                <p class="eyebrow">Factory Guide</p>
-                <h1>Let’s make the idea buildable.</h1>
+          <!-- Brief workspace: the brief as a document, the Guide in a sidebar beside it. One page for a new idea,
+               an unfinished interview, a ready brief, and a revision of a past run. -->
+          <section id="brief-view" class="brief-view">
+            <div class="brief-bar">
+              <div class="brief-crumb">
+                <span id="brief-project" class="lg"></span><span class="lg" aria-hidden="true">/</span><strong>Brief</strong>
+                <span id="revising-pill" class="revising-pill hidden"></span>
+                <span id="brief-status" class="brief-status lg" role="status"></span>
               </div>
-              <div id="provider-picker" class="provider-picker"></div>
-            </div>
-
-            <div class="interview-grid">
-              <div class="chat-card">
-                <div id="messages" class="messages" aria-live="polite"></div>
-                <form id="message-form" class="composer">
-                  <label class="sr-only" for="message-input">Your answer</label>
-                  <textarea id="message-input" rows="3" placeholder="Answer in your own words…" required></textarea>
-                  <div id="attachments" class="attachments"></div>
-                  <div class="composer-row">
-                    <small>Do not paste passwords, tokens, or private customer data.</small>
-                    <div class="composer-actions">
-                      <button id="discard-draft" class="button ghost hidden" type="button">Start over</button>
-                      <label class="button ghost attach-button" for="attach-input">Attach files<input id="attach-input" type="file" multiple accept=".md,.markdown,.txt,.json,.yaml,.yml,.csv,.html,.xml,text/*,image/png,image/jpeg,image/gif,image/webp" class="sr-only"></label>
-                      <button id="send-button" class="button primary" type="submit">Send answer <span>↗</span></button>
-                    </div>
-                  </div>
-                </form>
-              </div>
-
-              <aside class="coverage-card">
-                <div class="coverage-head">
-                  <div><p class="eyebrow">Brief coverage</p><strong id="coverage-score">0%</strong></div>
-                  <div class="ring" id="coverage-ring" style="--value:0"><span></span></div>
+              <div class="brief-bar-actions">
+                <span id="change-count" class="change-count lg hidden"></span>
+                <div class="mode-toggle" role="group" aria-label="Mode">
+                  <button id="mode-view" type="button" aria-pressed="true">View</button>
+                  <button id="mode-edit" type="button" aria-pressed="false">Edit</button>
                 </div>
-                <div id="coverage-list" class="coverage-list"></div>
-                <p class="coverage-foot">The Guide can ask. The controller decides when the brief is actually complete.</p>
-                <details id="interview-brief" class="interview-brief hidden" open>
-                  <summary>Current brief</summary>
-                  <p class="coverage-foot">Tell the Guide what to change and where, for example “change the second must-have to …”.</p>
-                  <article id="interview-brief-body" class="brief compact"></article>
-                </details>
-              </aside>
-            </div>
-          </section>
-
-          <section id="review-view" class="view hidden">
-            <div class="view-heading">
-              <div><p id="review-eyebrow" class="eyebrow">Frozen brief</p><h1 id="review-title">Small enough to ship. Precise enough to test.</h1><p id="brief-status" class="brief-status" role="status"></p></div>
-              <button id="back-button" class="button ghost">Continue interview</button>
-            </div>
-            <div class="review-layout">
-              <div class="review-main">
-                <form id="change-form" class="change-form">
-                  <label for="change-input"><strong>Anything you'd like to change?</strong> Say everything at once; the Guide revises the brief here.</label>
-                  <textarea id="change-input" rows="3" placeholder="e.g. Drop the export feature, and make the list sort newest first." required></textarea>
-                  <div class="change-actions"><button id="save-notes-button" class="button ghost" type="button">Save for later</button><button id="change-button" class="button" type="submit">Revise brief</button></div>
-                </form>
-                <article id="brief" class="brief"></article>
+                <button id="start-button" class="button primary queue-button" type="button" disabled>Brief not ready</button>
               </div>
-              <aside class="launch-card">
-                <p class="eyebrow">Ready to run</p>
-                <h2>The factory takes it from here.</h2>
-                <p>It will write the PRD and plan, build, test, review, launch, and verify the app. You can close this tab and return later.</p>
-                <ul>
-                  <li>Subscription-backed agent</li>
-                  <li>Two bounded repair attempts</li>
-                  <li>Local health-checked deployment</li>
-                  <li>Private aggregate telemetry</li>
-                </ul>
-                <p class="field-hint">Every run plans its features and gets the plan reviewed before any code is written.</p>
-                <button id="start-button" class="button primary wide">Queue for the factory <span>→</span></button>
-                <small id="queue-hint" class="field-hint hidden"></small>
+            </div>
+
+            <div class="brief-ws">
+              <div class="doc">
+                <div class="doc-in">
+                  <p id="doc-eyebrow" class="doc-eyebrow">Product brief · draft</p>
+                  <h1 id="doc-title" class="doc-title">Untitled idea</h1>
+                  <div id="brief-notices" class="doc-notices hidden"></div>
+                  <article id="brief" class="doc-body" aria-live="polite"></article>
+                  <div id="doc-foot" class="doc-foot hidden">
+                    <p><strong>Ready to run.</strong> The factory writes the PRD and plan, builds, tests, reviews, launches and checks the app. Every run gets its feature plan reviewed before any code is written. You can close this tab and come back later.</p>
+                    <small id="queue-hint" class="queue-hint hidden"></small>
+                  </div>
+                </div>
+              </div>
+
+              <aside id="guide-side" class="guide-side" aria-label="Guide">
+                <button id="guide-rail" class="guide-rail" type="button" aria-expanded="false" aria-controls="guide-panel"><span>Guide</span><i aria-hidden="true"></i></button>
+                <div id="guide-panel" class="guide-panel">
+                  <div class="guide-head">
+                    <p>Guide</p>
+                    <span class="guide-head-right">
+                      <button id="earlier-button" class="link-button hidden" type="button"></button>
+                      <span id="guide-meta" class="guide-meta"></span>
+                      <button id="guide-hide" class="link-button guide-hide" type="button">Hide</button>
+                    </span>
+                  </div>
+                  <div id="provider-picker" class="provider-picker"></div>
+                  <div id="run-context" class="run-context hidden"></div>
+                  <div id="messages" class="messages" aria-live="polite"></div>
+                  <form id="message-form" class="composer">
+                    <label class="sr-only" for="message-input">Message the Guide</label>
+                    <div class="composer-box">
+                      <div id="attachments" class="attachments"></div>
+                      <textarea id="message-input" rows="2" placeholder="Answer, or tell the Guide what to change" required></textarea>
+                      <div class="composer-row">
+                        <span class="composer-left">
+                          <label class="link-button attach-button" for="attach-input">Attach<input id="attach-input" type="file" multiple accept=".md,.markdown,.txt,.json,.yaml,.yml,.csv,.html,.xml,text/*,image/png,image/jpeg,image/gif,image/webp" class="sr-only"></label>
+                        </span>
+                        <button id="send-button" class="button primary small" type="submit">Send</button>
+                      </div>
+                    </div>
+                    <div class="composer-foot">
+                      <small>Do not paste passwords, tokens, or private customer data.</small>
+                      <button id="discard-draft" class="link-button hidden" type="button">Start over</button>
+                    </div>
+                  </form>
+                </div>
               </aside>
             </div>
           </section>

@@ -336,6 +336,14 @@ export async function createSoloFactoryServer(options = {}) {
         const provider = requireProvider(body.provider, fixtureMode);
         const messages = validateMessages(body.messages);
         const dir = active.dir; // the project this turn belongs to, even if the owner switches mid-turn
+        // Queue asks for a final review of the saved draft's brief (owner edits included) before anything freezes.
+        let review = null;
+        if (body.review) {
+          const draft = await readFile(draftFile(dir), "utf8").then(JSON.parse).catch(() => null);
+          if (!draft?.guide?.brief) return json(response, 409, { error: "There is no brief in progress to review.", code: "draft_missing" });
+          const previous = draft.revises ? (await store.read(draft.revises).catch(() => null))?.brief ?? null : null;
+          review = { brief: draft.guide.brief, previous };
+        }
         const latest = (await store.list())[0];
         const current = latest ? await withReviewDiagnostics(latest, active.dir) : null;
         const runContext = current ? {
@@ -356,20 +364,57 @@ export async function createSoloFactoryServer(options = {}) {
           mode: "read",
           logPath: path.join(active.dir, ".aai", "memory", "interviews", "guide.log"),
           context: { stage: "interview" },
-        }), { skill, messages, runContext });
+        }), { skill, messages, runContext, review });
         await mkdir(path.dirname(draftFile(dir)), { recursive: true });
         // A revision keeps naming the run it revises (and the stopped run it sets aside) until it is queued or discarded.
-        const { revises, replaces = null } = await readFile(draftFile(dir), "utf8").then(JSON.parse).catch(() => ({}));
-        await writeFile(draftFile(dir), JSON.stringify({ provider, messages: [...messages, { role: "assistant", content: result.message }], guide: result, ...(revises && { revises, replaces }), savedAt: new Date().toISOString() }, null, 2));
+        const { revises, replaces = null, ownerEdits = {} } = await readFile(draftFile(dir), "utf8").then(JSON.parse).catch(() => ({}));
+        // Sections the owner rewrote in Edit mode stay as written while the Guide's brief still carries the text
+        // they replaced (it rebuilds the brief from the conversation and can lose them). Once the Guide writes
+        // something new for a section, that is a deliberate change and the owner's edit stops being held.
+        const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+        const held = {};
+        let overridden = false;
+        result.brief = { ...result.brief }; // never write into the provider's own object
+        // The turn right after an edit is the Guide's check of it: the edit stands (a conflict is the Guide's message
+        // to make), and whatever stale text the Guide wrote there counts as what the edit replaced.
+        for (const [key, edit] of Object.entries(ownerEdits)) {
+          const before = edit.fresh && !same(result.brief?.[key], edit.value) ? result.brief?.[key] ?? null : edit.before;
+          if (edit.fresh || same(result.brief?.[key], before)) {
+            if (!same(result.brief?.[key], edit.value)) overridden = true;
+            result.brief[key] = edit.value;
+          }
+          if (same(result.brief?.[key], edit.value)) held[key] = { value: edit.value, before };
+        }
+        // Reviewed: a final review returned ready for this exact brief. Any later turn or edit replaces the
+        // guide and so clears it. If an owner edit had to be put back over the Guide's text, the Guide did
+        // not review the brief as it stands, so it is not marked reviewed.
+        if (review && result.status === "ready" && !overridden) result.reviewed = true;
+        await writeFile(draftFile(dir), JSON.stringify({ provider, messages: [...messages, { role: "assistant", content: result.message }], guide: result, ...(revises && { revises, replaces }), ...(Object.keys(held).length && { ownerEdits: held }), savedAt: new Date().toISOString() }, null, 2));
         return json(response, 200, result);
       }
       // Change notes typed on the brief page but not yet sent to the Guide, saved so a revision can wait.
+      // Save on the brief page without a Guide turn: change notes typed but not sent, and sections the owner
+      // rewrote in Edit mode (the owner's wording is the brief; the Guide only checks it afterwards).
       if (url.pathname === "/api/interview/draft" && request.method === "PATCH") {
-        const { notes } = await readJson(request);
-        if (typeof notes !== "string" || notes.length > 20_000) return json(response, 400, { error: "notes must be text under 20,000 characters.", code: "draft_notes_invalid" });
-        const draft = await readFile(draftFile(active.dir), "utf8").then(JSON.parse).catch(() => null);
-        if (!draft) return json(response, 409, { error: "There is no brief in progress to save notes on.", code: "draft_missing" });
-        const saved = { ...draft, notes, savedAt: new Date().toISOString() };
+        const body = await readJson(request);
+        const { notes, edits } = body;
+        if (notes !== undefined && (typeof notes !== "string" || notes.length > 20_000)) return json(response, 400, { error: "notes must be text under 20,000 characters.", code: "draft_notes_invalid" });
+        const fields = INTERVIEW_RESPONSE_SCHEMA.properties.brief.properties;
+        const editsValid = edits === undefined || (edits && typeof edits === "object" && !Array.isArray(edits) && Object.entries(edits).every(([key, value]) =>
+          fields[key] && (fields[key].type === "array" ? Array.isArray(value) && value.every((item) => typeof item === "string") : typeof value === "string")));
+        if (!editsValid || JSON.stringify(edits ?? {}).length > 200_000) return json(response, 400, { error: "edits must map brief sections to text, or to lists of text for list sections.", code: "draft_edits_invalid" });
+        if (notes === undefined && edits === undefined) return json(response, 400, { error: "Send notes, edits, or both.", code: "draft_patch_empty" });
+        // Notes or an edit before the first answer start the draft from the opening turn.
+        const opening = makeOpeningTurn();
+        const draft = await readFile(draftFile(active.dir), "utf8").then(JSON.parse).catch(() => null)
+          ?? { provider: body.provider ?? null, messages: [{ role: "assistant", content: opening.message }], guide: opening };
+        if (!draft) return json(response, 409, { error: "There is no brief in progress to save on.", code: "draft_missing" });
+        const brief = draft.guide?.brief ?? {};
+        const ownerEdits = { ...draft.ownerEdits };
+        // Remember what each edit replaced, so a later Guide turn that still carries the old text keeps the edit.
+        for (const [key, value] of Object.entries(edits ?? {})) ownerEdits[key] = { value, before: ownerEdits[key]?.before ?? brief[key] ?? null, fresh: true };
+        const saved = { ...draft, ...(notes !== undefined && { notes }), ...(edits && { guide: { ...draft.guide, brief: { ...brief, ...edits }, reviewed: false }, ownerEdits }), savedAt: new Date().toISOString() };
+        await mkdir(path.dirname(draftFile(active.dir)), { recursive: true });
         await writeFile(draftFile(active.dir), JSON.stringify(saved, null, 2));
         return json(response, 200, { draft: saved });
       }
