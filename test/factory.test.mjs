@@ -1035,7 +1035,7 @@ test("agent usage sums into run telemetry and each run segment lands in runs.jso
   assert.equal(last.state, "completed");
   assert.equal(last.variant, "test-variant");
   assert.equal(last.tokens.total.inputTokens, 1000 * turns);
-  assert.match(last.harness.version, /^\d+\.\d+\.\d+$/);
+  assert.match(last.harness.version, /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
   assert.ok(last.wallMs > 0 && last.stageMs.specifying >= 0);
 });
 

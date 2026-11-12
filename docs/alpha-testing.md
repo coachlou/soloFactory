@@ -22,7 +22,7 @@ Thank you for testing. This build is an alpha. It has a new Brief page and is no
 1. Each Queue uses one extra Guide turn, unless that exact brief was already reviewed.
 2. The "being discussed" marker is an estimate.
 3. After you queue, the page does not yet show a "Queued as run X" state.
-4. The *Update available* pill does not show on an alpha build. We will tell you when the next build is ready.
+4. The *Update available* pill shows only once 0.11.0 or later is out. We will tell you about new alpha builds.
 5. Windows has been tested only on WSL2, not on a real Windows machine.
 6. A typical build uses about $4 to $8 of your subscription capacity. Runs stop at the cost, token and worker ceilings and ask you before they continue.
 

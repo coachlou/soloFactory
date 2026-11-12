@@ -887,7 +887,7 @@ could change or remove them:
 
 - The interview and review screens are one **Brief** page: the brief on the left, the Guide on the right, a View/Edit switch and a queue button. Edit mode changes a section in place; everything saves on its own. **Queue** asks the Guide for one final review first, which uses one extra Guide turn.
 - Feedback: *Report a problem* shows **Open GitHub** (coachlou/soloFactory issues) and **Copy & open email** (support@coachlou.com). Ask them to start the title with `[alpha]`.
-- The update pill never appears on an alpha build. To go back to the stable release, or to move to the next one, run the normal online update (U2). Projects and runs stay in place.
+- The update pill appears once 0.11.0 or later is released. To go back to the stable release before that, run the normal online update (U2). Projects and runs stay in place.
 - Their tester guide is `docs/alpha-testing.md` in the zip and, after install, `.ailib/solofactory/app/docs/alpha-testing.md`.
 
 **If they were below 0.10.2 before the update**, a run on Linux or WSL that parked as *Repair budget exhausted* even though its tests passed (the log ends in `EINVAL: invalid argument, fsync`) will pass its checks now. If the card offers **Resume** (it says *SoloFactory changed since this gate failed*), choose it: the check reruns for free and the run carries on. Otherwise choose **Prepare repair plan**. The repair feature normally runs its checks before building anything, so a feature that passes them goes on to review without a rebuild. If the test runner ever crashes after every test passed, the run now stops with an infrastructure error instead of spending its repairs.

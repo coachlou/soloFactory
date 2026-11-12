@@ -3,18 +3,21 @@
 export const LATEST_URL = "https://raw.githubusercontent.com/coachlou/soloFactory/main/package.json";
 const CACHE_MS = 10 * 60_000; // a page reload within this window reuses the last answer
 
-// Release versions only: a prerelease or anything malformed never counts as newer.
-function parse(version) {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(version ?? "").trim());
-  return match ? match.slice(1).map(Number) : null;
+// main only carries releases, so a prerelease or malformed LATEST never counts as newer.
+// The CURRENT version may be a prerelease (0.11.0-alpha.1): its X.Y.Z is compared, and on a tie
+// the release wins (0.11.0 is newer than 0.11.0-alpha.1; 0.10.18 is not).
+function parse(version, allowPrerelease = false) {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?$/.exec(String(version ?? "").trim());
+  if (!match || (match[4] && !allowPrerelease)) return null;
+  return { parts: match.slice(1, 4).map(Number), prerelease: Boolean(match[4]) };
 }
 
 export function isNewer(latest, current) {
   const a = parse(latest);
-  const b = parse(current);
+  const b = parse(current, true);
   if (!a || !b) return false;
-  for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] > b[i];
-  return false;
+  for (let i = 0; i < 3; i += 1) if (a.parts[i] !== b.parts[i]) return a.parts[i] > b.parts[i];
+  return b.prerelease;
 }
 
 export function updatePrompt(latest) {

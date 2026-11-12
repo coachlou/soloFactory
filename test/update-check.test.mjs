@@ -18,6 +18,15 @@ test("version comparison is numeric and ignores prereleases or junk", () => {
   assert.equal(isNewer(undefined, "0.10.13"), false);
 });
 
+test("an alpha install compares its release part: the release is newer, an older stable is not", () => {
+  assert.equal(isNewer("0.11.0", "0.11.0-alpha.1"), true);
+  assert.equal(isNewer("0.11.1", "0.11.0-alpha.1"), true);
+  assert.equal(isNewer("0.10.18", "0.11.0-alpha.1"), false);
+  assert.equal(isNewer("0.11.0-alpha.2", "0.11.0-alpha.1"), false);
+  assert.equal(isNewer("0.12.0-rc1", "0.11.0-alpha.1"), false);
+  assert.equal(isNewer("0.11.0", "0.11.0-junk!"), false);
+});
+
 test("a newer release yields a notice with the runbook prompt; the same version does not", async () => {
   const newer = await createUpdateChecker({ current: "0.10.9", fetch: reply("0.10.13") })();
   assert.equal(newer.newer, true);
