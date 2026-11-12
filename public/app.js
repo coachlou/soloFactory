@@ -15,7 +15,7 @@ const labels = {
 };
 
 const stageOrder = ["specifying", "building", "verifying", "reviewing", "deploying", "completed"];
-const state = { config: null, provider: null, messages: [], guide: null, job: null, events: [], telemetry: null, poller: null, jobs: [], busyJobId: null, projects: [], project: null };
+const state = { config: null, provider: null, messages: [], guide: null, revises: null, job: null, events: [], telemetry: null, poller: null, jobs: [], busyJobId: null, projects: [], project: null };
 const $ = (selector) => document.querySelector(selector);
 const NO_PROVIDER = "No subscription is signed in yet. Follow the note under Claude Code above, then reload this page.";
 
@@ -237,6 +237,8 @@ async function selectRun(id) {
   clearError();
   if (id === "new") return showInterview();
   const result = await api(`/api/jobs/${id}`);
+  // A saved, unsubmitted revision of this run turns its Revise button into "Continue saved revision".
+  state.draftRevises = (await api("/api/interview/draft").catch(() => ({}))).draft?.revises ?? null;
   state.job = result.job;
   state.events = result.events;
   state.telemetry = null;
@@ -258,6 +260,11 @@ function showInterview() {
   state.telemetry = null;
   state.guide = state.config.opening;
   state.messages = [{ role: "assistant", content: state.guide.message }];
+  state.revises = null;
+  state.replaces = null;
+  state.savedNotes = "";
+  state.savedAt = null;
+  $("#change-input").value = "";
   localStorage.removeItem("solofactory.currentJob");
   hideBoard();
   $("#run-view").classList.add("hidden");
@@ -281,6 +288,11 @@ async function restoreDraft() {
   if (!draft || state.job || state.messages.length > 1) return;
   state.guide = draft.guide;
   state.messages = draft.messages;
+  state.revises = draft.revises ?? null;
+  state.replaces = draft.replaces ?? null;
+  state.savedNotes = draft.notes ?? "";
+  state.savedAt = draft.savedAt ?? null;
+  $("#change-input").value = state.savedNotes;
   if (state.config.providers.some((provider) => provider.id === draft.provider && provider.authenticated)) state.provider = draft.provider;
   renderProviders();
   renderMessages();
@@ -360,7 +372,16 @@ function sdlcOption(id) {
   return options.find((option) => option.id === id) ?? { id: id ?? "single", label: "Single build" };
 }
 
+// The brief as it stands sits beside the chat, so the owner can see what to change while answering.
+function renderInterviewBrief() {
+  const brief = state.guide.brief ?? {};
+  const shown = state.revises || Object.values(brief).some((value) => Array.isArray(value) ? value.length : value);
+  $("#interview-brief").classList.toggle("hidden", !shown);
+  if (shown) renderBrief(brief, briefNoticesShown(), $("#interview-brief-body"));
+}
+
 function renderCoverage() {
+  renderInterviewBrief();
   const coverage = state.guide.coverage;
   const values = Object.values(coverage);
   const score = Math.round(values.reduce((sum, value) => sum + (value === "complete" ? 1 : value === "partial" ? .5 : 0), 0) / values.length * 100);
@@ -460,7 +481,11 @@ function setInterviewBusy(value) {
 function showReview() {
   $("#interview-view").classList.add("hidden");
   $("#review-view").classList.remove("hidden");
-  renderBrief(state.guide.brief, state.guide.notices);
+  // Revising a past run's brief is its own page: same checks as the interview, focused on the brief.
+  $("#review-eyebrow").textContent = state.revises ? `Revising the brief of run ${state.revises}` : "Frozen brief";
+  $("#review-title").textContent = state.revises ? "Say what to change. The Guide checks it like the interview." : "Small enough to ship. Precise enough to test.";
+  renderBrief(state.guide.brief, briefNoticesShown(), $("#brief"));
+  renderBriefStatus();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -469,7 +494,77 @@ $("#back-button").addEventListener("click", () => {
   $("#interview-view").classList.remove("hidden");
 });
 
-function renderBrief(brief, notices = []) {
+function briefNoticesShown() {
+  const { revises, replaces } = state;
+  const replacing = !revises ? []
+    : replaces === revises ? [`Revising run ${revises}. Queuing this brief replaces that run: its files go back to the release before it, like Start over.`]
+    : replaces ? [`Revising run ${revises}. Queuing this brief also sets aside stopped run ${replaces}, which is holding this project's queue: its files go back to the release before it, like Start over.`]
+    : [`Revising run ${revises}. Queuing this brief starts a new run on the app as it is now; run ${revises} stays in the history.`];
+  return [...replacing, ...(state.guide.notices ?? [])];
+}
+
+// Front matter status: typed but unsaved, saved (the draft is on disk after every Guide turn), or with the Guide.
+// Submitted shows on the run itself once the brief is queued.
+function renderBriefStatus(busy = false) {
+  const line = $("#brief-status");
+  const typed = $("#change-input").value.trim();
+  const when = state.savedAt ? ` at ${new Date(state.savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "";
+  const status = busy ? ["busy", "With the Guide: revising the brief…"]
+    : typed !== (state.savedNotes ?? "").trim() ? ["unsaved", "In progress · change notes not saved"]
+    : ["saved", `Saved${when} · ${typed ? "change notes waiting to send · " : ""}not submitted`];
+  line.dataset.state = status[0];
+  line.textContent = status[1];
+}
+$("#change-input").addEventListener("input", () => renderBriefStatus());
+
+$("#save-notes-button").addEventListener("click", async () => {
+  clearError();
+  try {
+    const { draft } = await api("/api/interview/draft", { method: "PATCH", body: { notes: $("#change-input").value } });
+    state.savedNotes = draft.notes;
+    state.savedAt = draft.savedAt;
+    renderBriefStatus();
+  } catch (error) {
+    showError(error);
+  }
+});
+
+// Changes asked on the brief page are one more Guide turn. A ready answer redraws the brief here;
+// a question sends the owner back to the interview with their request already in the conversation.
+$("#change-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = $("#change-input");
+  const content = input.value.trim();
+  if (!content) return;
+  if (!state.provider) return showError(new Error(NO_PROVIDER));
+  clearError();
+  const button = $("#change-button");
+  input.disabled = button.disabled = $("#start-button").disabled = $("#save-notes-button").disabled = true;
+  button.textContent = "Guide is revising…";
+  renderBriefStatus(true);
+  state.messages.push({ role: "user", content });
+  try {
+    const guide = await api("/api/interview/turn", { method: "POST", body: { provider: state.provider, messages: state.messages } });
+    state.guide = guide;
+    state.messages.push({ role: "assistant", content: guide.message });
+    input.value = "";
+    state.savedNotes = "";
+    state.savedAt = new Date().toISOString();
+    renderMessages();
+    renderCoverage();
+    if (guide.status === "ready") showReview();
+    else { $("#review-view").classList.add("hidden"); $("#interview-view").classList.remove("hidden"); }
+  } catch (error) {
+    state.messages.pop();
+    showError(error);
+  } finally {
+    input.disabled = button.disabled = $("#start-button").disabled = $("#save-notes-button").disabled = false;
+    button.textContent = "Revise brief";
+    renderBriefStatus();
+  }
+});
+
+function renderBrief(brief, notices, target) {
   const sections = [
     ...(notices.length ? [["Before you start", notices, true]] : []),
     ["Promise", brief.promise, true],
@@ -485,7 +580,7 @@ function renderBrief(brief, notices = []) {
     ["Constraints", brief.constraints, true],
     ...(brief.manualChecks?.length ? [["Checked by hand after install", brief.manualChecks, true]] : []),
   ];
-  $("#brief").replaceChildren(...sections.map(([title, value, wide]) => {
+  target.replaceChildren(...sections.map(([title, value, wide]) => {
     const section = document.createElement("section");
     if (wide) section.className = "wide";
     const heading = document.createElement("h3"); heading.textContent = title;
@@ -503,11 +598,13 @@ function renderBrief(brief, notices = []) {
 
 $("#start-button").addEventListener("click", async () => {
   clearError();
+  // Queuing ignores notes the Guide has not seen; send them or clear the box first.
+  if ($("#change-input").value.trim()) return showError(new Error("You have change notes the Guide has not applied yet. Press Revise brief to apply them, or clear the box, then queue."));
   $("#start-button").disabled = true;
   try {
     const { job } = await api("/api/jobs", {
       method: "POST",
-      body: { provider: state.provider, transcript: state.messages, coverage: state.guide.coverage, brief: state.guide.brief },
+      body: { provider: state.provider, transcript: state.messages, coverage: state.guide.coverage, brief: state.guide.brief, ...(state.revises && { revises: state.revises, replaces: state.replaces }) },
     });
     // Submitted briefs queue; the owner goes straight back to shaping the next release.
     showInterview();
@@ -592,6 +689,8 @@ function renderJob() {
   $("#resume-button").classList.toggle("hidden", job.nextAction?.action !== "resume" || !terminalFailure);
   $("#copy-recovery-button").classList.toggle("hidden", !job.recovery || !terminalFailure);
   $("#start-over-button").classList.toggle("hidden", !terminalFailure);
+  $("#revise-brief-button").classList.toggle("hidden", !terminalFailure && job.state !== "completed");
+  if (state.reviseArmed !== job.id) $("#revise-brief-button").textContent = state.draftRevises === job.id ? "Continue saved revision" : "Revise brief";
   $("#report-run-button").classList.toggle("hidden", !terminalFailure);
   const url = $("#app-url");
   url.classList.toggle("hidden", !job.deployment?.url);
@@ -1252,6 +1351,30 @@ $("#start-over-button").addEventListener("click", async () => {
     poll();
     startPolling();
     refreshProjects();
+  } catch (error) {
+    showError(error);
+  }
+});
+
+// Reopen this stopped run's brief and conversation in the interview. The run stays parked until the
+// revised brief is queued, which replaces it.
+$("#revise-brief-button").addEventListener("click", async () => {
+  clearError();
+  try {
+    const { draft } = await api("/api/interview/draft");
+    const id = state.job.id;
+    // Already revising this run: reopen that draft with its edits. Another unfinished interview needs a second
+    // click to replace (an inline step: confirm() dialogs are silently declined in some embedded browsers).
+    if (draft?.revises !== id) {
+      if (draft?.messages?.length > 1 && state.reviseArmed !== id) {
+        state.reviseArmed = id;
+        $("#revise-brief-button").textContent = "Replace unfinished interview? Click again";
+        return;
+      }
+      await api(`/api/jobs/${id}/revise`, { method: "POST", body: {} });
+    }
+    state.reviseArmed = null;
+    showInterview();
   } catch (error) {
     showError(error);
   }

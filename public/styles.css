@@ -94,6 +94,10 @@ h2 { font: 500 27px/1.08 var(--serif); margin: 0 0 14px; }
 .button.danger { color: var(--red); background: rgba(255,125,119,.07); border-color: rgba(255,125,119,.25); }
 .button.wide { width: 100%; padding: 14px 18px; }
 .coverage-card { padding: 22px; }
+.interview-brief { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 14px; }
+.interview-brief summary { cursor: pointer; color: var(--green); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; }
+.brief.compact { grid-template-columns: 1fr; gap: 14px; padding: 12px 0 0; border: 0; box-shadow: none; background: none; max-height: 60vh; overflow: auto; }
+.brief.compact section.wide { grid-column: auto; }
 .coverage-head { display: flex; justify-content: space-between; align-items: center; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 .coverage-head strong { font: 500 30px var(--serif); }
 .ring { --value: 0; width: 48px; height: 48px; border-radius: 50%; background: conic-gradient(var(--green) calc(var(--value) * 1%), var(--line) 0); display: grid; place-items: center; }
@@ -104,6 +108,13 @@ h2 { font: 500 27px/1.08 var(--serif); margin: 0 0 14px; }
 .coverage-item.partial i { background: var(--orange); }.coverage-item.complete i { background: var(--green); }
 .coverage-foot { border-top: 1px solid var(--line); padding-top: 14px; color: var(--dim); font-size: 10px; line-height: 1.5; margin-bottom: 0; }
 .review-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+.review-main { display: grid; gap: 16px; min-width: 0; }
+.change-form { display: grid; gap: 10px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel-2); }
+.change-form textarea { width: 100%; resize: vertical; min-height: 70px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; outline: 0; background: transparent; color: var(--ink); line-height: 1.5; }
+.change-form textarea::placeholder { color: #6e736f; }
+.change-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.brief-status { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+.brief-status[data-state="unsaved"] { color: #d9a441; }
 .brief { padding: 32px; display: grid; grid-template-columns: 1fr 1fr; gap: 26px; }
 .brief section.wide { grid-column: 1 / -1; }
 .brief h3 { margin: 0 0 8px; font-size: 11px; color: var(--green); text-transform: uppercase; letter-spacing: .1em; }
@@ -271,3 +282,4 @@ h2 { font: 500 27px/1.08 var(--serif); margin: 0 0 14px; }
 .update-pop { inset: 64px 16px auto auto; margin: 0; width: min(440px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); color: inherit; font-size: 13px; }
 .update-pop p { margin: 8px 0; color: var(--muted); }
 .update-pop pre { white-space: pre-wrap; margin: 0 0 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
+.interview-grid:has(.interview-brief:not(.hidden)) { grid-template-columns: minmax(0, 1fr) 360px; }

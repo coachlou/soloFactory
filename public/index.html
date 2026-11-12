@@ -103,17 +103,29 @@
                 </div>
                 <div id="coverage-list" class="coverage-list"></div>
                 <p class="coverage-foot">The Guide can ask. The controller decides when the brief is actually complete.</p>
+                <details id="interview-brief" class="interview-brief hidden" open>
+                  <summary>Current brief</summary>
+                  <p class="coverage-foot">Tell the Guide what to change and where, for example “change the second must-have to …”.</p>
+                  <article id="interview-brief-body" class="brief compact"></article>
+                </details>
               </aside>
             </div>
           </section>
 
           <section id="review-view" class="view hidden">
             <div class="view-heading">
-              <div><p class="eyebrow">Frozen brief</p><h1>Small enough to ship. Precise enough to test.</h1></div>
+              <div><p id="review-eyebrow" class="eyebrow">Frozen brief</p><h1 id="review-title">Small enough to ship. Precise enough to test.</h1><p id="brief-status" class="brief-status" role="status"></p></div>
               <button id="back-button" class="button ghost">Continue interview</button>
             </div>
             <div class="review-layout">
-              <article id="brief" class="brief"></article>
+              <div class="review-main">
+                <form id="change-form" class="change-form">
+                  <label for="change-input"><strong>Anything you'd like to change?</strong> Say everything at once; the Guide revises the brief here.</label>
+                  <textarea id="change-input" rows="3" placeholder="e.g. Drop the export feature, and make the list sort newest first." required></textarea>
+                  <div class="change-actions"><button id="save-notes-button" class="button ghost" type="button">Save for later</button><button id="change-button" class="button" type="submit">Revise brief</button></div>
+                </form>
+                <article id="brief" class="brief"></article>
+              </div>
               <aside class="launch-card">
                 <p class="eyebrow">Ready to run</p>
                 <h2>The factory takes it from here.</h2>
@@ -140,6 +152,7 @@
                 <button id="resume-button" class="button primary hidden">Resume current run <span>→</span></button>
                 <button id="copy-recovery-button" class="button ghost hidden">Copy recovery packet</button>
                 <button id="start-over-button" class="button ghost hidden">Start over</button>
+                <button id="revise-brief-button" class="button ghost hidden" title="Open a page for revising this run's brief; save changes for later or queue the revised brief as a new run">Revise brief</button>
                 <button id="dismiss-button" class="button ghost hidden" title="Set this run aside so queued briefs can proceed; an app that shipped before goes back to that release">Dismiss</button>
                 <button id="report-run-button" class="button ghost hidden">Report this run</button>
               </div>

@@ -952,3 +952,81 @@ test("start over keeps the original run's feature-review mode, not the server's 
   const { job } = await response.json();
   assert.equal(job.featureReview, "risky");
 });
+
+test("revise brief reopens a stopped run's brief in the interview, and queuing it replaces that run", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-revise-"));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true });
+  const base = await listen(app, t);
+  const config = await getJson(`${base}/api/config`);
+  const transcript = [{ role: "assistant", content: config.opening.message }, { role: "user", content: "A daily tracker." }];
+  const guide = await postJson(`${base}/api/interview/turn`, { provider: "fixture", messages: transcript });
+  await fetch(`${base}/api/interview/draft`, { method: "DELETE" });
+  const running = await app.store.create({ brief: guide.brief, transcript: [...transcript, { role: "assistant", content: guide.message }], provider: "fixture" });
+  assert.equal((await post(`${base}/api/jobs/${running.id}/revise`)).status, 409, "a run that is not stopped cannot be revised");
+  running.state = "cancelled";
+  running.startedAt = new Date().toISOString();
+  await app.store.writeState(running);
+
+  assert.equal((await post(`${base}/api/jobs/${running.id}/revise`)).status, 200);
+  const { draft } = await getJson(`${base}/api/interview/draft`);
+  assert.equal(draft.revises, running.id);
+  assert.equal(draft.replaces, running.id, "the latest stopped run is the one queuing sets aside");
+  assert.equal(draft.guide.status, "ready");
+  assert.deepEqual(draft.guide.brief, guide.brief);
+  assert.deepEqual(draft.messages, running.transcript);
+
+  // A further Guide turn keeps the link to the run being revised.
+  const turned = await postJson(`${base}/api/interview/turn`, { provider: "fixture", messages: [...draft.messages, { role: "user", content: "Rename it." }] });
+  assert.equal((await getJson(`${base}/api/interview/draft`)).draft.revises, running.id);
+  assert.equal((await getJson(`${base}/api/interview/draft`)).draft.replaces, running.id);
+
+  // Change notes can be saved on the draft without a Guide turn, and survive until sent or queued.
+  const saved = await fetch(`${base}/api/interview/draft`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ notes: "Also sort newest first." }) });
+  assert.equal(saved.status, 200);
+  const withNotes = (await getJson(`${base}/api/interview/draft`)).draft;
+  assert.equal(withNotes.notes, "Also sort newest first.");
+  assert.equal(withNotes.revises, running.id);
+  assert.ok(withNotes.savedAt);
+
+  const { job } = await postJson(`${base}/api/jobs`, { provider: "fixture", transcript, coverage: turned.coverage, brief: turned.brief, revises: running.id, replaces: running.id });
+  assert.equal((await getJson(`${base}/api/interview/draft`)).draft, null, "queuing clears the draft and its notes");
+  assert.notEqual(job.id, running.id);
+  assert.equal(JSON.parse(await stateFile(app, running.id)).dismissed, true, "the revised run stops holding the queue");
+  assert.equal((await post(`${base}/api/jobs`, { provider: "fixture", transcript, coverage: turned.coverage, brief: turned.brief, revises: job.id })).status, 409, "only a stopped run can be replaced");
+});
+
+test("revise brief works on a finished run and an older set-aside run, and sets aside only the run holding the queue", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-revise-old-"));
+  const app = await createSoloFactoryServer({ home, fixtureMode: true });
+  const base = await listen(app, t);
+  const config = await getJson(`${base}/api/config`);
+  const transcript = [{ role: "assistant", content: config.opening.message }, { role: "user", content: "A daily tracker." }];
+  const guide = await postJson(`${base}/api/interview/turn`, { provider: "fixture", messages: transcript });
+  await fetch(`${base}/api/interview/draft`, { method: "DELETE" });
+  const past = async (state, minutesAgo, extra = {}) => {
+    const job = await app.store.create({ brief: guide.brief, transcript: [...transcript, { role: "assistant", content: guide.message }], provider: "fixture" });
+    Object.assign(job, { state, startedAt: new Date(Date.now() - minutesAgo * 60_000).toISOString(), ...extra });
+    await app.store.writeState(job);
+    return job;
+  };
+  const finished = await past("completed", 30);
+  const setAside = await past("cancelled", 20, { dismissed: true });
+  const latest = await past("cancelled", 10);
+
+  assert.equal((await post(`${base}/api/jobs/${setAside.id}/revise`)).status, 200, "an older, set-aside run can be revised");
+  assert.equal((await getJson(`${base}/api/interview/draft`)).draft.replaces, latest.id);
+  assert.equal((await post(`${base}/api/jobs/${finished.id}/revise`)).status, 200, "a finished run can be revised");
+  const { draft } = await getJson(`${base}/api/interview/draft`);
+  assert.deepEqual([draft.revises, draft.replaces], [finished.id, latest.id]);
+
+  const body = { provider: "fixture", transcript: draft.messages, coverage: draft.guide.coverage, brief: draft.guide.brief, revises: finished.id };
+  const stale = await post(`${base}/api/jobs`, { ...body, replaces: null });
+  assert.equal(stale.status, 409, "queuing never sets aside a run the owner was not shown");
+  assert.equal((await stale.json()).code, "revise_blocker_changed");
+  assert.equal((await post(`${base}/api/jobs`, { ...body, replaces: latest.id })).status, 202);
+  assert.equal(JSON.parse(await stateFile(app, latest.id)).dismissed, true, "the run holding the queue is set aside");
+  const kept = JSON.parse(await stateFile(app, finished.id));
+  assert.equal(kept.state, "completed");
+  assert.equal(kept.dismissed, undefined, "a finished run is never dismissed");
+  assert.ok(!(await app.store.events(finished.id)).some((event) => event.type === "job.rolled_back"), "a finished run is never rolled back");
+});

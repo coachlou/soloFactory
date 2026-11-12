@@ -8,6 +8,7 @@ import { amendmentPacket, assertBatch, validateRecoveryApproval } from "./featur
 import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, admitsPlanning, assertPlanInputsRevised, assertPlanReviewable, buildRecovery, buildRecoveryPacket, continuationAction, previousRelease, SoloFactory, withContinuation } from "./factory.mjs";
 import { watchConfig } from "./watchdog.mjs";
 import {
+  COVERAGE_KEYS,
   INTERVIEW_RESPONSE_SCHEMA,
   briefNotices,
   runGuideTurn,
@@ -169,6 +170,15 @@ export async function createSoloFactoryServer(options = {}) {
     await jobStore.reset(job.baseCommit);
     await jobStore.appendEvent(job.id, { type: "job.rolled_back", state: job.state, message: `App restored to the release before this run (${job.baseCommit.slice(0, 7)})` });
   };
+  // Start over and a revised brief both replace a parked run: its files go back and it stops holding the queue.
+  const supersede = async (original, jobStore) => {
+    if (!PARKED.has(original.state)) return;
+    await rollBack(original, jobStore);
+    original.dismissed = true;
+    await jobStore.writeState(original);
+  };
+  // A past run's brief can be reopened once the run has stopped or finished and nothing is running it again.
+  const revisable = (job) => (PARKED.has(job.state) || job.state === "completed") && !queue.some((entry) => entry.jobId === job.id) && ![...runs.values()].some((run) => run.jobId === job.id && !PARKED.has(job.state));
   const busyJobId = () => runs.get(active.id)?.jobId ?? null;
   // A run persists its parked state before the scheduler releases its writer slot (the settlement reads the
   // final state and logs a failure first). An owner acting on the parked card in that window must not get a
@@ -348,8 +358,20 @@ export async function createSoloFactoryServer(options = {}) {
           context: { stage: "interview" },
         }), { skill, messages, runContext });
         await mkdir(path.dirname(draftFile(dir)), { recursive: true });
-        await writeFile(draftFile(dir), JSON.stringify({ provider, messages: [...messages, { role: "assistant", content: result.message }], guide: result }, null, 2));
+        // A revision keeps naming the run it revises (and the stopped run it sets aside) until it is queued or discarded.
+        const { revises, replaces = null } = await readFile(draftFile(dir), "utf8").then(JSON.parse).catch(() => ({}));
+        await writeFile(draftFile(dir), JSON.stringify({ provider, messages: [...messages, { role: "assistant", content: result.message }], guide: result, ...(revises && { revises, replaces }), savedAt: new Date().toISOString() }, null, 2));
         return json(response, 200, result);
+      }
+      // Change notes typed on the brief page but not yet sent to the Guide, saved so a revision can wait.
+      if (url.pathname === "/api/interview/draft" && request.method === "PATCH") {
+        const { notes } = await readJson(request);
+        if (typeof notes !== "string" || notes.length > 20_000) return json(response, 400, { error: "notes must be text under 20,000 characters.", code: "draft_notes_invalid" });
+        const draft = await readFile(draftFile(active.dir), "utf8").then(JSON.parse).catch(() => null);
+        if (!draft) return json(response, 409, { error: "There is no brief in progress to save notes on.", code: "draft_missing" });
+        const saved = { ...draft, notes, savedAt: new Date().toISOString() };
+        await writeFile(draftFile(active.dir), JSON.stringify(saved, null, 2));
+        return json(response, 200, { draft: saved });
       }
       if (url.pathname === "/api/interview/draft" && ["GET", "DELETE"].includes(request.method)) {
         if (request.method === "DELETE") { await rm(draftFile(active.dir), { force: true }); return json(response, 200, { draft: null }); }
@@ -410,8 +432,23 @@ export async function createSoloFactoryServer(options = {}) {
         // Same scan the Guide's review screen shows. A brief posted straight here (e.g. from chat) has
         // no Guide turn to send it back to, so like the Guide's second pass it queues with notices, never a block.
         const notices = briefNotices(validated.brief);
+        // A brief reopened from a past run sets aside the stopped run holding the project's queue, like Start over.
+        // The draft names that run (replaces) when it was opened; if another run holds the queue now, the owner
+        // must see that before its files are rolled back. A completed run is never rolled back or dismissed.
+        let blocker = null;
+        if (body.revises !== undefined) {
+          if (typeof body.revises !== "string" || !/^[a-z0-9-]+$/.test(body.revises)) return json(response, 400, { error: "revises must be a run id.", code: "revise_invalid" });
+          const current = runs.get(active.id)?.jobId;
+          if (current) await settleParked(active.id, current);
+          const revised = await store.read(body.revises);
+          if (!revisable(revised)) return json(response, 409, { error: "The run this brief revises is running or queued again, so this brief cannot replace it. Start over in the interview to queue this brief on its own.", code: "revise_not_parked" });
+          const holder = await blockerFor(active.id);
+          if (holder !== (body.replaces ?? null)) return json(response, 409, { error: `The stopped run holding this project changed since this brief was opened${holder ? ` (now ${holder})` : ""}. Open Revise brief on the run again to see what queuing sets aside.`, code: "revise_blocker_changed" });
+          blocker = holder && (await store.read(holder));
+        }
         const job = await store.create({ brief: validated.brief, transcript: body.transcript, provider, sdlc, notices, featureReview });
-        await enqueue(active.id, job.id);
+        if (blocker) await supersede(blocker, store);
+        await enqueue(active.id, job.id, "start", { front: Boolean(blocker) });
         await rm(draftFile(active.dir), { force: true });
         const [annotated] = await annotateJobs(active.id, [await store.read(job.id)]);
         return json(response, 202, { job: annotated, notices });
@@ -461,6 +498,31 @@ export async function createSoloFactoryServer(options = {}) {
         if (!run) return json(response, 409, { error: "That run is not active." });
         await run.factory.cancel(id);
         return json(response, 202, { ok: true });
+      }
+      // Reopen a past run's brief and conversation as the project's interview draft. Nothing changes on any
+      // run until the revised brief is queued; discarding the draft leaves everything as it was.
+      const reviseMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/revise$/);
+      if (request.method === "POST" && reviseMatch) {
+        const id = reviseMatch[1];
+        if ((jobProject.get(id) ?? active.id) !== active.id) return json(response, 409, { error: "Open that run's project first; a revised brief belongs to its project's interview.", code: "revise_other_project" });
+        const current = runs.get(active.id)?.jobId;
+        if (current) await settleParked(active.id, current);
+        const job = await store.read(id);
+        if (!revisable(job)) return json(response, 409, { error: "Only a stopped or finished run's brief can be revised.", code: "revise_not_parked" });
+        const ready = [...(job.transcript ?? [])].reverse().find((message) => message.role === "assistant")?.content || "Here is the brief this run was queued with. Tell me what to change.";
+        const draft = {
+          provider: job.provider,
+          messages: job.transcript?.length ? job.transcript : [{ role: "assistant", content: ready }],
+          revises: id,
+          savedAt: new Date().toISOString(),
+          // The stopped run that queuing this brief sets aside, so the review page can name it first.
+          replaces: await blockerFor(active.id),
+          // A queued brief passed the ready check, which requires every coverage area complete.
+          guide: { message: ready, status: "ready", coverage: Object.fromEntries(COVERAGE_KEYS.map((key) => [key, "complete"])), brief: job.brief, notices: job.notices ?? [] },
+        };
+        await mkdir(path.dirname(draftFile(active.dir)), { recursive: true });
+        await writeFile(draftFile(active.dir), JSON.stringify(draft, null, 2));
+        return json(response, 200, { draft });
       }
       const pauseMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/pause$/);
       if (request.method === "POST" && pauseMatch) {
@@ -646,11 +708,7 @@ export async function createSoloFactoryServer(options = {}) {
         if (runs.get(projectId)?.jobId === original.id) return json(response, 409, { error: "That run is still active." });
         const job = await jobStore.create({ brief: original.brief, transcript: original.transcript, provider: original.provider, notices: briefNotices(original.brief), featureReview: original.featureReview ?? featureReview });
         // Starting over replaces the original, so it no longer holds the queue, and the new run goes first.
-        if (PARKED.has(original.state)) {
-          await rollBack(original, jobStore);
-          original.dismissed = true;
-          await jobStore.writeState(original);
-        }
+        await supersede(original, jobStore);
         await enqueue(projectId, job.id, "start", { front: true });
         return json(response, 202, { job, retriedFrom: original.id });
       }
