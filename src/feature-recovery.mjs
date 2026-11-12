@@ -578,7 +578,7 @@ export async function runFeatureRecovery(factory, id, signal, approval = null, {
         continue;
       }
       phase.done.push(slice.id); phase.index = i + 1;
-      phase.stats[slice.id] = { commit: phase.cursor.commit, reviews: phase.cursor.reviews, repairs: job.attempt - phase.cursor.attemptBefore, verifiedAt: new Date().toISOString() };
+      phase.stats[slice.id] = { commit: phase.cursor.commit, reviews: phase.cursor.reviews, repairs: job.attempt - phase.cursor.attemptBefore, verifiedAt: new Date().toISOString(), ...(phase.cursor.shared && { shared: phase.cursor.shared }) };
       phase.cursor = null;
       await factory.store.writeState(job);
       await factory.emit(id, { type: 'recovery.slice.completed', state: job.state, message: `Verified recovery feature ${slice.id}`, slice: slice.id });

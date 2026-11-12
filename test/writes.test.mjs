@@ -58,10 +58,14 @@ const transcript = [{ role: "user", content: "A daily tracker with clear accepta
 async function declaredRun(stray) {
   const store = new JobStore(await mkdtemp(path.join(os.tmpdir(), "solo-factory-writes-")));
   await store.init();
-  const job = await store.create({ brief, transcript, provider: "fixture" });
+  // Owner modes add SLICE-LATER, independent of SLICE-UI and built after it, owning server.mjs (and one more file); it
+  // closes the brief's second scenario.
+  const owner = { owned: "later.test.mjs", ownedTest: "server.test.mjs", ownedNew: "later.mjs", ownedSetAside: "later.test.mjs", setAsideOwner: "later.test.mjs" }[stray];
+  const job = await store.create({ brief: owner ? { ...brief, acceptanceScenarios: [...brief.acceptanceScenarios, "A user sees a later view."] } : brief, transcript, provider: "fixture" });
   const fixture = createFixtureProvider();
   let uiBuilt = false;
-  const prompts = [], failures = [];
+  const prompts = [], failures = [], laterPrompts = [];
+  const uiStuck = ["ownedSetAside", "setAsideOwner"].includes(stray);
   const provider = { id: "fixture", async run(options) {
     const result = await fixture.run(options);
     const { stage } = options.context;
@@ -71,7 +75,14 @@ async function declaredRun(stray) {
       for (const slice of value.slices) slice.writes = slice.dependsOn.length ? ["index.html", "ui.test.mjs"] : ["*"];
       // A distinct command, so the skeleton's proof is its own gate rather than deduplicated into npm test.
       value.slices[0].acceptance[0].proof.command = ["node", "--test", "server.test.mjs"];
-      if (stray === "own") value.slices[1].acceptance[0].proof.command = ["node", "--test", "ui.test.mjs"];
+      if (stray === "own" || uiStuck) value.slices[1].acceptance[0].proof.command = ["node", "--test", "ui.test.mjs"];
+      if (owner) {
+        const moved = value.slices[1].closes.slice(-1);
+        value.slices[1].closes = value.slices[1].closes.slice(0, -1);
+        value.slices[1].acceptance[0].refs = value.slices[1].acceptance[0].refs.filter((ref) => !moved.includes(ref));
+        value.slices.push({ ...value.slices[1], id: "SLICE-LATER", title: "Later feature", closes: moved, writes: ["server.mjs", owner],
+        acceptance: [{ ...value.slices[1].acceptance[0], id: "LATER-1", behavior: "A later behavior works end to end", refs: moved, proof: { command: ["node", "--test", "later.test.mjs"], expect: "later.test.mjs passes" } }] });
+      }
       if (stray === "broken2") value.slices[0].acceptance.push({ ...value.slices[0].acceptance[0], id: "SKELETON-2", behavior: "GET /health answers ok", proof: { command: ["node", "--test", "metrics.test.mjs"], expect: "metrics.test.mjs passes" } });
       await writeFile(file, JSON.stringify(value, null, 2));
     }
@@ -84,6 +95,11 @@ async function declaredRun(stray) {
     const broken = { broken: ["server.test.mjs"], broken2: ["server.test.mjs", "metrics.test.mjs"], own: ["ui.test.mjs"] }[stray];
     if (broken && stage === "build-slice-SLICE-UI") { uiBuilt = true; await appendFile(path.join(options.cwd, "server.mjs"), "\n// new contract\n"); }
     if (broken && stage.startsWith("repair-")) { prompts.push(options.prompt); failures.push(await readFile(path.join(options.cwd, options.prompt.match(/\.factory\/last-failure-\d+\.txt/)[0]), "utf8")); for (const file of broken) await appendFile(path.join(options.cwd, file), "\n// expectation updated\n"); }
+    if (owner && stage.includes("SLICE-LATER")) laterPrompts.push({ stage, prompt: options.prompt });
+    if (owner && stray !== "setAsideOwner" && stage === "build-slice-SLICE-UI") {
+      if (stray === "ownedNew") await writeFile(path.join(options.cwd, "later.mjs"), "export {};\n");
+      else await appendFile(path.join(options.cwd, stray === "ownedTest" ? "server.test.mjs" : "server.mjs"), "\n// wiring\n");
+    }
     // An existing file another (built) feature owns: source widens the writes, a test never does.
     if (["source", "test"].includes(stray) && stage === "build-slice-SLICE-UI") await appendFile(path.join(options.cwd, stray === "source" ? "server.mjs" : "server.test.mjs"), "\n// touched\n");
     return result;
@@ -91,13 +107,14 @@ async function declaredRun(stray) {
   const logs = [];
   const factory = new SoloFactory({ store, provider, commandRunner: async ({ logPath, args }) => {
     logs.push(path.basename(logPath));
+    if (uiStuck && args.includes("ui.test.mjs")) return { code: 1, output: "ui.test.mjs: still failing" };
     // "own": SLICE-UI's own proof fails until repaired; the other modes fail the skeleton's proofs.
     const file = args.find((arg) => (stray === "own" ? ["ui.test.mjs"] : ["server.test.mjs", "metrics.test.mjs"]).includes(arg));
     if (uiBuilt && file && !(await readFile(path.join(store.appDir(job.id), file), "utf8")).includes("expectation updated")) return { code: 1, output: `${file}: expected the old row` };
     return { code: 0, output: "passed" };
   }, deployer: async () => ({ mode: "fixture", status: "live", url: "http://127.0.0.1:9982" }) });
   const result = await factory.start(job.id);
-  return { result, events: await store.events(job.id, 1000), logs, prompts, failures };
+  return { result, events: await store.events(job.id, 1000), logs, prompts, failures, laterPrompts };
 }
 
 test("a feature that stays inside its declared writes completes", async () => {
@@ -203,4 +220,40 @@ test("a feature that breaks several earlier proofs gets them all in one repair",
   assert.match(failures[0], /server\.test\.mjs: expected the old row[\s\S]*metrics\.test\.mjs: expected the old row/);
   assert.match(prompts[0], /broke an earlier feature's proof \(server\.test\.mjs, metrics\.test\.mjs\)/);
   assert.equal(events.filter((event) => event.gate === "writes").length, 0);
+});
+
+test("a feature may edit an existing source file an unbuilt feature owns; the owner is told", async () => {
+  const { result, events, laterPrompts } = await declaredRun("owned");
+  assert.equal(result.state, "completed", result.error?.message);
+  const widened = events.find((event) => event.type === "slice.writes_widened");
+  assert.deepEqual(widened?.files, ["server.mjs"]);
+  assert.match(widened.message, /server\.mjs \(owned by SLICE-LATER, not built yet\)/);
+  assert.deepEqual(result.sliceStats["SLICE-UI"].shared, [{ file: "server.mjs", owner: "SLICE-LATER" }]);
+  const build = laterPrompts.find((entry) => entry.stage === "build-slice-SLICE-LATER");
+  assert.match(build?.prompt ?? "", /Feature SLICE-UI changed server\.mjs \(yours\) before you were built; keep its change working/);
+  assert.ok(laterPrompts.some((entry) => entry.stage !== build.stage && /Feature SLICE-UI changed server\.mjs \(this feature's\)/.test(entry.prompt)), "the owner's scoped review is told");
+  assert.equal(events.filter((event) => event.gate === "writes").length, 0);
+});
+
+test("an unbuilt owner's test file, or a new file in its writes, still fails the writes gate", async () => {
+  for (const [mode, file] of [["ownedTest", "server.test.mjs"], ["ownedNew", "later.mjs"]]) {
+    const { result, events } = await declaredRun(mode);
+    assert.match(events.find((event) => event.gate === "writes")?.message ?? "", new RegExp(`SLICE-UI changed files outside its declared writes: ${file.replace(".", "\\.")}`), mode);
+    assert.equal(result.state, "failed", mode);
+  }
+});
+
+test("a feature that changed an unbuilt feature's file is not set aside when it runs out of repairs", async () => {
+  const { result, events } = await declaredRun("ownedSetAside");
+  assert.ok(events.some((event) => event.type === "slice.writes_widened" && event.shared?.length));
+  assert.equal(events.filter((event) => event.type === "slice.set_aside").length, 0);
+  assert.equal(result.state, "failed");
+  assert.ok(!(result.sliceDone ?? []).includes("SLICE-LATER"), "the run stopped on SLICE-UI");
+});
+
+test("a later feature that edits a set-aside feature's file still fails the writes gate", async () => {
+  const { events } = await declaredRun("setAsideOwner");
+  assert.ok(events.some((event) => event.type === "slice.set_aside" && event.slice === "SLICE-UI"), "SLICE-UI was set aside");
+  const failed = events.find((event) => event.gate === "writes" && event.feature === "SLICE-LATER");
+  assert.match(failed?.message ?? "", /SLICE-LATER changed files outside its declared writes: .*index\.html/);
 });

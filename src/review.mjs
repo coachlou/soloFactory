@@ -52,7 +52,7 @@ export function featureNeedsReview({ runnable, owned = [], brokenProofs = [] }) 
     || runnable.some((item) => !item.cases?.length || item.cases.some((entry) => entry.surface === "browser"));
 }
 
-export async function prepareReview(appDir, job, { checks = originalChecks(job.brief), candidate, caseResults, editedProofs, unreviewed } = {}) {
+export async function prepareReview(appDir, job, { checks = originalChecks(job.brief), candidate, caseResults, editedProofs, unreviewed, flakyGates } = {}) {
   // The owner's review rules: a field of its own, not a source. request.sources is re-verified from .factory/uploads
   // only (uploadsOf), and widening sourceSet would flag every existing run inputs_changed.
   const policy = await stat(path.join(appDir, ".aai", "review.md")).then((info) => info.isFile(), () => false);
@@ -65,6 +65,8 @@ export async function prepareReview(appDir, job, { checks = originalChecks(job.b
     ...(editedProofs && Object.keys(editedProofs).length ? { editedProofs } : {}),
     ...(job.ownerDecisions?.length ? { ownerDecisions: job.ownerDecisions } : {}),
     ...(unreviewed?.length ? { unreviewed } : {}),
+    // Gates that failed at final integration and passed on the immediate rerun (FactoryRunner.verify).
+    ...(flakyGates?.length ? { flakyGates } : {}),
     ...(policy ? { reviewPolicy: ".aai/review.md" } : {}),
   };
   if (!request.checks.length) throw new Error("Review requires at least one intake requirement or acceptance scenario.");

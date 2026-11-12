@@ -107,6 +107,10 @@ export function previousRelease(job, runs) {
   };
 }
 
+// Edits earlier features made to files this feature owns (writesFailure's cursor.shared), for its build and review.
+const sharedEdits = (job, owner) => [job.sliceStats, job.recoveryPhase?.stats].flatMap((stats) => Object.entries(stats ?? {}))
+  .flatMap(([by, stats]) => (stats.shared ?? []).filter((entry) => entry.owner === owner).map((entry) => ({ by, file: entry.file })));
+
 // Test files and fixtures: never widened into, since editing another feature's tests can weaken them, unless this
 // feature broke that test's proof (cursor.brokenProofs).
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
@@ -512,7 +516,7 @@ export class SoloFactory {
       const caseIds = integrationProofs(job).flatMap((entry) => (entry.obligation.cases ?? []).map((item) => item.id));
       const editedProofs = Object.fromEntries(Object.entries(job.sliceStats ?? {}).filter(([, stats]) => stats.editedProofs?.length).map(([id, stats]) => [id, stats.editedProofs]));
       const unreviewed = job.planVersion === 2 ? unreviewedFeatures(job) : [];
-      try { request = await prepareReview(appDir, job, { checks: [...originalChecks(job.brief), ...pending], caseResults: caseIds.length ? Object.fromEntries(caseIds.map((id) => [id, job.caseResults?.[id] ?? { status: "missing" }])) : undefined, editedProofs, unreviewed }); }
+      try { request = await prepareReview(appDir, job, { checks: [...originalChecks(job.brief), ...pending], caseResults: caseIds.length ? Object.fromEntries(caseIds.map((id) => [id, job.caseResults?.[id] ?? { status: "missing" }])) : undefined, editedProofs, unreviewed, flakyGates: job.flakyGates }); }
       catch (error) { throw new FactoryError("review_rejected", `Cannot review the frozen contract: ${error.message}`); }
       if (job.reviewContractDigest && request.contractDigest !== job.reviewContractDigest) {
         throw new FactoryError("review_rejected", "Frozen contract changed after the first review; scope cannot be narrowed during repair.");
@@ -822,6 +826,7 @@ export class SoloFactory {
         reviews: cursor.reviews,
         commit: cursor.commit,
         ...(cursor.widened && { widened: cursor.widened }),
+        ...(cursor.shared && { shared: cursor.shared }),
         ...(cursor.brokenProofs?.length && { editedProofs: cursor.brokenProofs }),
       };
       job.sliceDone = [...(job.sliceDone ?? []), slice.id];
@@ -845,7 +850,9 @@ export class SoloFactory {
   async setAside(job, slice, error, signal) {
     const cursor = job.featureCursor;
     const slices = job.approvedPlan.plan.slices;
-    if (signal?.aborted || !["quality_gate_failed", "review_rejected", "review_unstable"].includes(error.code) || !cursor?.base || cursor.restored || !slices.every((item) => item.writes)) return false;
+    // A feature that changed an unbuilt feature's file is not set aside: the owner would build over that change, then
+    // parkSetAside would restore this feature's version over the owner's.
+    if (signal?.aborted || !["quality_gate_failed", "review_rejected", "review_unstable"].includes(error.code) || !cursor?.base || cursor.restored || cursor.shared?.length || !slices.every((item) => item.writes)) return false;
     const waiting = new Set([slice.id, ...(job.setAside ?? []).map((entry) => entry.id)]);
     let independent = false;
     for (const item of slices.slice(slices.indexOf(slice) + 1)) {
@@ -962,7 +969,7 @@ export class SoloFactory {
         const label = resumed ? labels.resume : labels.build;
         // The last feature writes the README; left to the final reviewer it is a source change that forces the post-review gate rerun.
         const [index, total] = position.split("/");
-        const prompt = featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed, precheck: cursor.precheck, last: index === total, ownerDecisions: job.ownerDecisions });
+        const prompt = featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed, precheck: cursor.precheck, last: index === total, ownerDecisions: job.ownerDecisions, sharedEdits: sharedEdits(job, slice.id) });
         const before = await candidate();
         try {
           await this.invoke(job, label, prompt, signal, { resumeSessionId: this.resumeSessionFor(job, label) });
@@ -970,7 +977,7 @@ export class SoloFactory {
           // A build that hit the safety cap while still changing files is too big for one turn, not stuck:
           // continue it once in its own session (the stage's one continuation allowance) instead of parking.
           if (error.code !== "agent_hard_timeout" || await candidate() === before || !await this.allowContinuation(job, labels.build)) throw error;
-          await this.invoke(job, labels.resume, featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed: true, precheck: cursor.precheck, last: index === total, ownerDecisions: job.ownerDecisions }), signal, { resumeSessionId: error.details?.sessionId ?? this.resumeSessionFor(job, labels.resume) });
+          await this.invoke(job, labels.resume, featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed: true, precheck: cursor.precheck, last: index === total, ownerDecisions: job.ownerDecisions, sharedEdits: sharedEdits(job, slice.id) }), signal, { resumeSessionId: error.details?.sessionId ?? this.resumeSessionFor(job, labels.resume) });
         }
         await save("checking");
         if (scope.buildOnly) return job;
@@ -999,7 +1006,7 @@ export class SoloFactory {
         cursor.reviewRequest = request;
         await this.store.writeState(job);
         const label = labels.review(cursor.reviews);
-        await this.invoke(job, label, featureReviewPrompt(slice), signal);
+        await this.invoke(job, label, featureReviewPrompt(slice, undefined, sharedEdits(job, slice.id)), signal);
         await archiveReview(this, job, label);
         if (await candidate() !== cursor.candidate) {
           await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "review", message: "The reviewer changed source; its verdict is void and the feature is rechecked." });
@@ -1388,7 +1395,7 @@ export class SoloFactory {
       // on Node 26) otherwise surfaced only at integration and cost a repair in every 2026-11-08 smoke arm.
       const firstFeature = !current.sliceDone?.length;
       const earlier = slice ? new Set(proofs.filter((proof) => !ownProof(slice, proof)).map((proof) => JSON.stringify(proof.proof.command))) : null;
-      const failure = (slice?.writes && await this.writesFailure(current, slice)) || await this.secretsFailure(current) || await this.verify(current, manifest, signal, { includeInstall, proofs, first, earlier, skipTest: Boolean(slice && proofs.length && !firstFeature) });
+      const failure = (slice?.writes && await this.writesFailure(current, slice)) || await this.secretsFailure(current) || await this.verify(current, manifest, signal, { includeInstall, proofs, first, earlier, skipTest: Boolean(slice && proofs.length && !firstFeature), rerun: !slice });
       if (!failure) {
         if (!slice) {
           const candidate = await sourceBaseline(this.store, { head: false });
@@ -1436,9 +1443,11 @@ export class SoloFactory {
   // from the feature's start commit also catches files the agent committed itself. A cursor without a
   // base (saved by an older release) falls back to the uncommitted tree.
   // A plan's file lists can miss a file the feature's checks need (run 2026-10-07-4f2dd1cf: VIEWER-DATES wrote only its
-  // test while its fix lived in app.js, so three repairs changed nothing). An edit to an existing source file no unbuilt
-  // feature owns widens this feature's writes on its cursor instead of failing; tests (except a broken earlier proof's), new
-  // files and deletions still fail.
+  // test while its fix lived in app.js, so three repairs changed nothing). An edit to an existing source file widens this
+  // feature's writes on its cursor instead of failing; tests (except a broken earlier proof's), new files and deletions still
+  // fail. A file an unbuilt feature owns widens too (run 2026-11-12-d07bfd16: QUEUE's one-line server.js wiring and a store
+  // method were refused, and three repairs trusted the prompt's promise): it is recorded in cursor.shared and shown to the
+  // owner's build and review. A set-aside owner's file still fails, since parkSetAside would restore it over the edit.
   async writesFailure(job, slice) {
     const recovery = job.recoveryPhase?.cursor?.id === slice.id;
     const cursor = recovery ? job.recoveryPhase.cursor : job.featureCursor?.id === slice.id ? job.featureCursor : null;
@@ -1453,18 +1462,23 @@ export class SoloFactory {
       const plan = recovery ? job.recoveryPhase.plan : job.approvedPlan?.plan;
       const done = (recovery ? job.recoveryPhase.done : job.sliceDone) ?? [];
       const others = (plan?.slices ?? []).filter((item) => item.id !== slice.id && !done.includes(item.id) && item.writes);
-      const widen = outside.filter((file) => modified.has(file) && (!TEST_PATH.test(file) || cursor.brokenProofs?.includes(file)) && !others.some((item) => writesCover(item.writes, file)));
+      const setAside = new Set((job.setAside ?? []).map((entry) => entry.id));
+      const ownerOf = (file) => others.find((item) => writesCover(item.writes, file));
+      const widen = outside.filter((file) => modified.has(file) && (!TEST_PATH.test(file) || cursor.brokenProofs?.includes(file)) && !others.some((item) => setAside.has(item.id) && writesCover(item.writes, file)));
       if (widen.length) {
+        const shared = widen.filter(ownerOf).map((file) => ({ file, owner: ownerOf(file).id }));
         cursor.widened = [...(cursor.widened ?? []), ...widen];
+        if (shared.length) cursor.shared = [...(cursor.shared ?? []), ...shared];
         await this.store.writeState(job);
-        await this.emit(job.id, { type: "slice.writes_widened", state: job.state, slice: slice.id, files: widen, message: `Feature ${slice.id} needed ${widen.join(", ")} beyond its declared writes; its writes now include them` });
+        const named = widen.map((file) => { const owner = ownerOf(file); return owner ? `${file} (owned by ${owner.id}, not built yet)` : file; });
+        await this.emit(job.id, { type: "slice.writes_widened", state: job.state, slice: slice.id, files: widen, ...(shared.length && { shared }), message: `Feature ${slice.id} needed ${named.join(", ")} beyond its declared writes; its writes now include them` });
         outside = outside.filter((file) => !widen.includes(file));
       }
     }
     if (!outside.length) return null;
     const message = `Feature ${slice.id} changed files outside its declared writes: ${outside.join(", ")}.`;
     await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "writes", feature: slice.id, message });
-    return new FactoryError("quality_gate_failed", message, { gate: "writes", output: `${message}\nDeclared writes: ${writes.join(", ")}\nAn existing source file outside the writes is allowed when the fix needs it, but not another feature's tests (unless this feature broke that test's proof), a new file outside the writes, a deletion, or a file an unbuilt feature owns. Move the change into an allowed file or revert it.` });
+    return new FactoryError("quality_gate_failed", message, { gate: "writes", output: `${message}\nDeclared writes: ${writes.join(", ")}\nAn existing source file outside the writes is allowed when the fix needs it, but not another feature's tests (unless this feature broke that test's proof), a new file outside the writes, a deletion, or a file a set-aside feature owns. Move the change into an allowed file or revert it.` });
   }
 
   // Committed credentials (docs/sdlc-hardening-spec.md item 6): the token shapes feedback.mjs scrubs, in any file this run
@@ -1602,7 +1616,7 @@ export class SoloFactory {
     await this.store.writeState(job);
   }
 
-  async verify(job, manifest, signal, { includeInstall, proofs = [], first = null, skipTest = false, earlier = null }) {
+  async verify(job, manifest, signal, { includeInstall, proofs = [], first = null, skipTest = false, earlier = null, rerun = false }) {
     // earlier: commands of earlier features' proofs. One that fails does not stop the pass: the rest of them run
     // too, so a single repair sees every earlier test this feature broke (run 2026-11-09-bb64b19c needed one each).
     const broken = [];
@@ -1644,7 +1658,7 @@ export class SoloFactory {
         if (integrated) for (const entry of integrationProofs(job)) entry.proofCandidate = candidate;
       }
       const feature = featureOf(job);
-      const started = Date.now();
+      let started = Date.now();
       job.activeCommand = { gate, command, startedAt: new Date().toISOString() };
       await this.store.writeState(job);
       await this.emit(job.id, { type: "gate.started", state: job.state, gate, command, feature, candidate, message: `${gate}: ${command.join(" ")}` });
@@ -1652,52 +1666,65 @@ export class SoloFactory {
       const timeoutMs = gate === "install" ? Math.max(10 * 60_000, gateMs) : gateMs;
       // ponytail: node:test only; a proof that sets its own --test-reporter fails loudly on the mismatch.
       const events = cases.length ? path.join(this.store.jobDir(job.id), `cases-${gate}-${job.attempt ?? 0}.jsonl`) : null;
-      if (events) await rm(events, { force: true });
-      // The case reporter writes its events itself; its stream output goes to a throwaway file in the run's
-      // folder. Never /dev/null: Node 22 fsyncs the destination on close, and Linux (WSL too) refuses fsync on
-      // /dev/null, so the run exits 1 after every test passed. The run's folder also works on Windows.
-      const discard = events ? path.join(this.store.jobDir(job.id), `reporter-${gate}-${job.attempt ?? 0}.log`) : null;
-      // An inherited NODE_TEST_CONTEXT makes node --test skip its files and report nothing, so cased gates drop it.
-      const env = events ? { NODE_OPTIONS: [process.env.NODE_OPTIONS, `--test-reporter=${nodeOptionPath(CASE_REPORTER)} --test-reporter-destination=${nodeOptionPath(discard)} --test-reporter=spec --test-reporter-destination=stdout`].filter(Boolean).join(" "), SOLOFACTORY_CASE_EVENTS: events, NODE_TEST_CONTEXT: undefined } : {};
-      let spawned;
-      let result;
-      try {
-        result = await this.commandRunner({
-          executable: command[0],
-          args: command.slice(1),
-          cwd: this.store.appDir(job.id),
-          logPath: path.join(this.store.appDir(job.id), gateLog(job, gate)),
-          gate,
-          env,
-          timeoutMs,
-          signal,
-          // A command inside its own deadline is waiting, not stalled; the progress window never stops it.
-          onSpawn: (child) => { spawned = this.trackWorker(job, child, { kind: "command", label: gate, gate, command, hardLimitMs: timeoutMs }); },
-        });
-      } finally {
-        await this.releaseWorker(job, spawned);
-      }
-      const durationMs = Date.now() - started;
-      let caseFailure = null;
-      let caseOutput = null;
-      if (events) {
-        const results = caseResults(cases, await readFile(events, "utf8").catch(() => ""));
-        job.caseResults = { ...job.caseResults, ...Object.fromEntries(Object.entries(results).map(([id, value]) => [id, { ...value, gate, at: new Date().toISOString() }])) };
-        await this.store.writeState(job);
-        const failed = Object.entries(results).filter(([, value]) => value.status !== "passed");
-        if (failed.length === cases.length && failed.every(([, value]) => value.status === "missing")) caseFailure = `${gate} recorded no test events for its cases; cased proofs must run under node:test without their own --test-reporter.`;
-        else if (failed.length) caseFailure = `${gate} cases did not pass: ${failed.map(([id, value]) => `${id} ${value.status}`).join(", ")}.`;
-        if (failed.length) {
-          const names = (status) => failed.filter(([, value]) => value.status === status).map(([id]) => `[${id}]`).join(", ");
-          const missing = names("missing");
-          caseOutput = [
-            missing ? `Gate ${gate}: expected passing test(s) named ${missing} but none ran (no matching case events; check the test-name pattern and node:test reporter).` : `Gate ${gate}: expected cases did not pass.`,
-            `Failed cases: ${names("failed") || "none"}.`,
-            `Never ran: ${missing || "none"}.`,
-            ...(names("skipped") ? [`Skipped/todo cases: ${names("skipped")}.`] : []),
-          ].join("\n");
+      // At final integration a failing test or proof gate reruns once, at no repair cost (run 2026-11-12-b1da8f4b: one
+      // timing-dependent test failed the run after the last repair was spent). A pass on the rerun is recorded, never hidden.
+      let result, durationMs, caseFailure, caseOutput, rerunOf = null;
+      for (;;) {
+        started = Date.now();
+        if (events) await rm(events, { force: true });
+        // The case reporter writes its events itself; its stream output goes to a throwaway file in the run's
+        // folder. Never /dev/null: Node 22 fsyncs the destination on close, and Linux (WSL too) refuses fsync on
+        // /dev/null, so the run exits 1 after every test passed. The run's folder also works on Windows.
+        const discard = events ? path.join(this.store.jobDir(job.id), `reporter-${gate}-${job.attempt ?? 0}.log`) : null;
+        // An inherited NODE_TEST_CONTEXT makes node --test skip its files and report nothing, so cased gates drop it.
+        const env = events ? { NODE_OPTIONS: [process.env.NODE_OPTIONS, `--test-reporter=${nodeOptionPath(CASE_REPORTER)} --test-reporter-destination=${nodeOptionPath(discard)} --test-reporter=spec --test-reporter-destination=stdout`].filter(Boolean).join(" "), SOLOFACTORY_CASE_EVENTS: events, NODE_TEST_CONTEXT: undefined } : {};
+        let spawned;
+        try {
+          result = await this.commandRunner({
+            executable: command[0],
+            args: command.slice(1),
+            cwd: this.store.appDir(job.id),
+            logPath: path.join(this.store.appDir(job.id), gateLog(job, gate)),
+            gate,
+            env,
+            timeoutMs,
+            signal,
+            // A command inside its own deadline is waiting, not stalled; the progress window never stops it.
+            onSpawn: (child) => { spawned = this.trackWorker(job, child, { kind: "command", label: gate, gate, command, hardLimitMs: timeoutMs }); },
+          });
+        } finally {
+          await this.releaseWorker(job, spawned);
         }
-        result = { ...result, caseResults: results };
+        durationMs = Date.now() - started;
+        caseFailure = null;
+        caseOutput = null;
+        if (events) {
+          const results = caseResults(cases, await readFile(events, "utf8").catch(() => ""));
+          job.caseResults = { ...job.caseResults, ...Object.fromEntries(Object.entries(results).map(([id, value]) => [id, { ...value, gate, at: new Date().toISOString() }])) };
+          await this.store.writeState(job);
+          const failed = Object.entries(results).filter(([, value]) => value.status !== "passed");
+          if (failed.length === cases.length && failed.every(([, value]) => value.status === "missing")) caseFailure = `${gate} recorded no test events for its cases; cased proofs must run under node:test without their own --test-reporter.`;
+          else if (failed.length) caseFailure = `${gate} cases did not pass: ${failed.map(([id, value]) => `${id} ${value.status}`).join(", ")}.`;
+          if (failed.length) {
+            const names = (status) => failed.filter(([, value]) => value.status === status).map(([id]) => `[${id}]`).join(", ");
+            const missing = names("missing");
+            caseOutput = [
+              missing ? `Gate ${gate}: expected passing test(s) named ${missing} but none ran (no matching case events; check the test-name pattern and node:test reporter).` : `Gate ${gate}: expected cases did not pass.`,
+              `Failed cases: ${names("failed") || "none"}.`,
+              `Never ran: ${missing || "none"}.`,
+              ...(names("skipped") ? [`Skipped/todo cases: ${names("skipped")}.`] : []),
+            ].join("\n");
+          }
+          result = { ...result, caseResults: results };
+        }
+        if (rerunOf || !rerun || !(gate === "test" || gate.startsWith("proof-")) || result.timedOut || (result.code === 0 && !caseFailure)) break;
+        rerunOf = { gate, command, at: new Date().toISOString(), output: String(caseOutput ?? result.output ?? "").slice(-2000) };
+        await this.emit(job.id, { type: "gate.rerun", state: job.state, gate, feature, durationMs, message: `${gate} failed; rerunning it once before any repair` });
+      }
+      if (rerunOf && result.code === 0 && !caseFailure) {
+        (job.flakyGates ??= []).push(rerunOf);
+        await this.store.writeState(job);
+        await this.emit(job.id, { type: "gate.flaky", state: job.state, gate, feature, command, message: `${gate} failed, then passed when rerun: likely a race in the app or its test; the final review is told` });
       }
       if (result.timedOut) {
         // A killed command proved nothing about the app, so it is not handed to a repair turn.

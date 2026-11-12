@@ -485,7 +485,13 @@ carry a strategy forward.
    - **Declared writes are enforced.** The `writes` gate fails a feature that changed any file
      outside its list, naming the files. It diffs against the feature's start commit
      (`featureCursor.base`) plus untracked files, so a stray file the agent committed itself is
-     still caught. A cursor saved without a base falls back to the uncommitted tree.
+     still caught. A cursor saved without a base falls back to the uncommitted tree. A
+     modified existing source file outside the list widens the feature's writes instead
+     (`slice.writes_widened`); new files, deletions and other features' tests still fail. A
+     file an unbuilt feature owns widens too (run 2026-11-12-d07bfd16: QUEUE needed one wiring
+     line in RESTART's `server.js`): it is recorded as `sliceStats[id].shared`, and the owner's
+     build and scoped review prompts name the change so the owner keeps it working. A file a
+     set-aside feature owns never widens, since restoring that feature would overwrite it.
    - **Earlier proofs rerun when a later feature reaches them.** A feature's checks also run
      the proofs of every built feature whose own or dependencies' writes cover a file the
      feature changed since the last verified feature's commit (`slice.impact` event). Plans are
@@ -496,7 +502,7 @@ carry a strategy forward.
      fail, the rest still run and one failure carries every failing command
      (`details.commands`), so a single repair sees them all. Their test files go on the cursor
      (`brokenProofs`); for non-recovery features the `writes` gate widens into those files only
-     (modified, never new, never a file an unbuilt feature owns) and the repair prompt allows an
+     (modified, never new, never a file a set-aside feature owns) and the repair prompt allows an
      expectation update to the new contract that keeps every check. The edited files stay on
      `sliceStats[id].editedProofs`; both the feature and the final review requests carry them,
      and both reviewers must open those files and block an edit that weakened what the test
@@ -511,7 +517,9 @@ carry a strategy forward.
      the first set-aside feature's files inside its declared writes restored from the ref
      (files it wrote outside its writes are not restored), its unspent repairs restored on top of
      the shared attempt counter, and its original error code, so Resume, repair planning and
-     restart behave as for any blocked feature. Only the main feature plan does this.
+     restart behave as for any blocked feature. Only the main feature plan does this. A
+     feature with shared edits (it changed an unbuilt feature's file) is never set aside; the
+     run parks on it instead.
 5. **Budgets.** 2 corrections per plan (more while each review finds fewer blockers than the one
    before, at most 3× the base), 2 repairs per feature, 2 for final integration. Each is
    set once and never refilled by resume. Restart from a slice keeps the run-wide repair counter
@@ -525,6 +533,13 @@ carry a strategy forward.
    original), every release-QA bug proof recorded so far and every `qa/*.test.*` file in the
    tree, so a later repair or follow-on release cannot quietly bring back a fixed bug. Features
    built by an earlier recovery phase are not carried into this rerun.
+   At final integration only, a `test` or `proof-*` gate that exits non-zero (not a timeout or a
+   runner crash) reruns once at once, before any repair and at no repair cost; a cased gate redoes
+   its case results. A pass on the rerun emits `gate.flaky`, is pushed to `job.flakyGates` (gate,
+   command, the first run's output tail) and goes to the final review request as `flakyGates`,
+   which the reviewer judges as a likely race. A second failure takes the normal repair path
+   with the rerun's output. Install, lint and build never rerun, and feature-build gates go
+   straight to repair, whose prompt says a test that passes on rerun is a bug to fix.
    The final reviewer of a feature plan is told every feature already passed its scoped review,
    and spends the review on integration and deploy readiness. The exception is features whose
    scoped review never ran (`reviews === 0`): features skipped under `risky`, and features built
