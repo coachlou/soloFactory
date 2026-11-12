@@ -303,7 +303,9 @@ ${bugs.map((bug) => `- ${bug.proof.command.at(-1)}: ${bug.description}`).join("\
 "Symptom: ..." (what the gate saw), "Cause: ..." (why it happens), "Files: ..." (the files at fault). End your final
 message with the same three lines. Fix the root cause of the recorded controller
 gate failure with the smallest coherent change. Do not weaken, skip, rename, or delete tests,
-health checks, metrics, build commands, or acceptance criteria.${sliceLines}${bugLines}
+health checks, metrics, build commands, or acceptance criteria. A test that fails, then passes when rerun, is a bug
+in the app or the test (a race, an unawaited promise, a timer, shared state): find the cause and fix it; never leave it
+as "intermittent".${sliceLines}${bugLines}
 ${ownerDecisionsBlock(ownerDecisions, "repair to them")}Run the relevant checks and leave the app ready for the controller to rerun every gate.
 
 ${DATA_RULE}`;
@@ -388,6 +390,9 @@ frozen contract to match the implementation. A finished worker turn is not an ap
 ${OWNER_DECISIONS}
 ${SECURITY_RULE}
 ${REVIEW_POLICY_RULE}
+If review-request.json lists flakyGates, each gate failed at final integration and passed when the controller reran
+it at once (its output holds the first failure). Treat it as a likely race in the app or its test: find the cause, and
+block when it could fail a user, not only a test run.
 Report all missing work honestly; the controller will repair within its budget or park the run. The controller rejects missing, stale, partial or
 blocked verdicts even when npm test passes.
 

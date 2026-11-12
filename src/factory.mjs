@@ -512,7 +512,7 @@ export class SoloFactory {
       const caseIds = integrationProofs(job).flatMap((entry) => (entry.obligation.cases ?? []).map((item) => item.id));
       const editedProofs = Object.fromEntries(Object.entries(job.sliceStats ?? {}).filter(([, stats]) => stats.editedProofs?.length).map(([id, stats]) => [id, stats.editedProofs]));
       const unreviewed = job.planVersion === 2 ? unreviewedFeatures(job) : [];
-      try { request = await prepareReview(appDir, job, { checks: [...originalChecks(job.brief), ...pending], caseResults: caseIds.length ? Object.fromEntries(caseIds.map((id) => [id, job.caseResults?.[id] ?? { status: "missing" }])) : undefined, editedProofs, unreviewed }); }
+      try { request = await prepareReview(appDir, job, { checks: [...originalChecks(job.brief), ...pending], caseResults: caseIds.length ? Object.fromEntries(caseIds.map((id) => [id, job.caseResults?.[id] ?? { status: "missing" }])) : undefined, editedProofs, unreviewed, flakyGates: job.flakyGates }); }
       catch (error) { throw new FactoryError("review_rejected", `Cannot review the frozen contract: ${error.message}`); }
       if (job.reviewContractDigest && request.contractDigest !== job.reviewContractDigest) {
         throw new FactoryError("review_rejected", "Frozen contract changed after the first review; scope cannot be narrowed during repair.");
@@ -1388,7 +1388,7 @@ export class SoloFactory {
       // on Node 26) otherwise surfaced only at integration and cost a repair in every 2026-11-08 smoke arm.
       const firstFeature = !current.sliceDone?.length;
       const earlier = slice ? new Set(proofs.filter((proof) => !ownProof(slice, proof)).map((proof) => JSON.stringify(proof.proof.command))) : null;
-      const failure = (slice?.writes && await this.writesFailure(current, slice)) || await this.secretsFailure(current) || await this.verify(current, manifest, signal, { includeInstall, proofs, first, earlier, skipTest: Boolean(slice && proofs.length && !firstFeature) });
+      const failure = (slice?.writes && await this.writesFailure(current, slice)) || await this.secretsFailure(current) || await this.verify(current, manifest, signal, { includeInstall, proofs, first, earlier, skipTest: Boolean(slice && proofs.length && !firstFeature), rerun: !slice });
       if (!failure) {
         if (!slice) {
           const candidate = await sourceBaseline(this.store, { head: false });
@@ -1602,7 +1602,7 @@ export class SoloFactory {
     await this.store.writeState(job);
   }
 
-  async verify(job, manifest, signal, { includeInstall, proofs = [], first = null, skipTest = false, earlier = null }) {
+  async verify(job, manifest, signal, { includeInstall, proofs = [], first = null, skipTest = false, earlier = null, rerun = false }) {
     // earlier: commands of earlier features' proofs. One that fails does not stop the pass: the rest of them run
     // too, so a single repair sees every earlier test this feature broke (run 2026-11-09-bb64b19c needed one each).
     const broken = [];
@@ -1644,7 +1644,7 @@ export class SoloFactory {
         if (integrated) for (const entry of integrationProofs(job)) entry.proofCandidate = candidate;
       }
       const feature = featureOf(job);
-      const started = Date.now();
+      let started = Date.now();
       job.activeCommand = { gate, command, startedAt: new Date().toISOString() };
       await this.store.writeState(job);
       await this.emit(job.id, { type: "gate.started", state: job.state, gate, command, feature, candidate, message: `${gate}: ${command.join(" ")}` });
@@ -1652,52 +1652,65 @@ export class SoloFactory {
       const timeoutMs = gate === "install" ? Math.max(10 * 60_000, gateMs) : gateMs;
       // ponytail: node:test only; a proof that sets its own --test-reporter fails loudly on the mismatch.
       const events = cases.length ? path.join(this.store.jobDir(job.id), `cases-${gate}-${job.attempt ?? 0}.jsonl`) : null;
-      if (events) await rm(events, { force: true });
-      // The case reporter writes its events itself; its stream output goes to a throwaway file in the run's
-      // folder. Never /dev/null: Node 22 fsyncs the destination on close, and Linux (WSL too) refuses fsync on
-      // /dev/null, so the run exits 1 after every test passed. The run's folder also works on Windows.
-      const discard = events ? path.join(this.store.jobDir(job.id), `reporter-${gate}-${job.attempt ?? 0}.log`) : null;
-      // An inherited NODE_TEST_CONTEXT makes node --test skip its files and report nothing, so cased gates drop it.
-      const env = events ? { NODE_OPTIONS: [process.env.NODE_OPTIONS, `--test-reporter=${nodeOptionPath(CASE_REPORTER)} --test-reporter-destination=${nodeOptionPath(discard)} --test-reporter=spec --test-reporter-destination=stdout`].filter(Boolean).join(" "), SOLOFACTORY_CASE_EVENTS: events, NODE_TEST_CONTEXT: undefined } : {};
-      let spawned;
-      let result;
-      try {
-        result = await this.commandRunner({
-          executable: command[0],
-          args: command.slice(1),
-          cwd: this.store.appDir(job.id),
-          logPath: path.join(this.store.appDir(job.id), gateLog(job, gate)),
-          gate,
-          env,
-          timeoutMs,
-          signal,
-          // A command inside its own deadline is waiting, not stalled; the progress window never stops it.
-          onSpawn: (child) => { spawned = this.trackWorker(job, child, { kind: "command", label: gate, gate, command, hardLimitMs: timeoutMs }); },
-        });
-      } finally {
-        await this.releaseWorker(job, spawned);
-      }
-      const durationMs = Date.now() - started;
-      let caseFailure = null;
-      let caseOutput = null;
-      if (events) {
-        const results = caseResults(cases, await readFile(events, "utf8").catch(() => ""));
-        job.caseResults = { ...job.caseResults, ...Object.fromEntries(Object.entries(results).map(([id, value]) => [id, { ...value, gate, at: new Date().toISOString() }])) };
-        await this.store.writeState(job);
-        const failed = Object.entries(results).filter(([, value]) => value.status !== "passed");
-        if (failed.length === cases.length && failed.every(([, value]) => value.status === "missing")) caseFailure = `${gate} recorded no test events for its cases; cased proofs must run under node:test without their own --test-reporter.`;
-        else if (failed.length) caseFailure = `${gate} cases did not pass: ${failed.map(([id, value]) => `${id} ${value.status}`).join(", ")}.`;
-        if (failed.length) {
-          const names = (status) => failed.filter(([, value]) => value.status === status).map(([id]) => `[${id}]`).join(", ");
-          const missing = names("missing");
-          caseOutput = [
-            missing ? `Gate ${gate}: expected passing test(s) named ${missing} but none ran (no matching case events; check the test-name pattern and node:test reporter).` : `Gate ${gate}: expected cases did not pass.`,
-            `Failed cases: ${names("failed") || "none"}.`,
-            `Never ran: ${missing || "none"}.`,
-            ...(names("skipped") ? [`Skipped/todo cases: ${names("skipped")}.`] : []),
-          ].join("\n");
+      // At final integration a failing test or proof gate reruns once, at no repair cost (run 2026-11-12-b1da8f4b: one
+      // timing-dependent test failed the run after the last repair was spent). A pass on the rerun is recorded, never hidden.
+      let result, durationMs, caseFailure, caseOutput, rerunOf = null;
+      for (;;) {
+        started = Date.now();
+        if (events) await rm(events, { force: true });
+        // The case reporter writes its events itself; its stream output goes to a throwaway file in the run's
+        // folder. Never /dev/null: Node 22 fsyncs the destination on close, and Linux (WSL too) refuses fsync on
+        // /dev/null, so the run exits 1 after every test passed. The run's folder also works on Windows.
+        const discard = events ? path.join(this.store.jobDir(job.id), `reporter-${gate}-${job.attempt ?? 0}.log`) : null;
+        // An inherited NODE_TEST_CONTEXT makes node --test skip its files and report nothing, so cased gates drop it.
+        const env = events ? { NODE_OPTIONS: [process.env.NODE_OPTIONS, `--test-reporter=${nodeOptionPath(CASE_REPORTER)} --test-reporter-destination=${nodeOptionPath(discard)} --test-reporter=spec --test-reporter-destination=stdout`].filter(Boolean).join(" "), SOLOFACTORY_CASE_EVENTS: events, NODE_TEST_CONTEXT: undefined } : {};
+        let spawned;
+        try {
+          result = await this.commandRunner({
+            executable: command[0],
+            args: command.slice(1),
+            cwd: this.store.appDir(job.id),
+            logPath: path.join(this.store.appDir(job.id), gateLog(job, gate)),
+            gate,
+            env,
+            timeoutMs,
+            signal,
+            // A command inside its own deadline is waiting, not stalled; the progress window never stops it.
+            onSpawn: (child) => { spawned = this.trackWorker(job, child, { kind: "command", label: gate, gate, command, hardLimitMs: timeoutMs }); },
+          });
+        } finally {
+          await this.releaseWorker(job, spawned);
         }
-        result = { ...result, caseResults: results };
+        durationMs = Date.now() - started;
+        caseFailure = null;
+        caseOutput = null;
+        if (events) {
+          const results = caseResults(cases, await readFile(events, "utf8").catch(() => ""));
+          job.caseResults = { ...job.caseResults, ...Object.fromEntries(Object.entries(results).map(([id, value]) => [id, { ...value, gate, at: new Date().toISOString() }])) };
+          await this.store.writeState(job);
+          const failed = Object.entries(results).filter(([, value]) => value.status !== "passed");
+          if (failed.length === cases.length && failed.every(([, value]) => value.status === "missing")) caseFailure = `${gate} recorded no test events for its cases; cased proofs must run under node:test without their own --test-reporter.`;
+          else if (failed.length) caseFailure = `${gate} cases did not pass: ${failed.map(([id, value]) => `${id} ${value.status}`).join(", ")}.`;
+          if (failed.length) {
+            const names = (status) => failed.filter(([, value]) => value.status === status).map(([id]) => `[${id}]`).join(", ");
+            const missing = names("missing");
+            caseOutput = [
+              missing ? `Gate ${gate}: expected passing test(s) named ${missing} but none ran (no matching case events; check the test-name pattern and node:test reporter).` : `Gate ${gate}: expected cases did not pass.`,
+              `Failed cases: ${names("failed") || "none"}.`,
+              `Never ran: ${missing || "none"}.`,
+              ...(names("skipped") ? [`Skipped/todo cases: ${names("skipped")}.`] : []),
+            ].join("\n");
+          }
+          result = { ...result, caseResults: results };
+        }
+        if (rerunOf || !rerun || !(gate === "test" || gate.startsWith("proof-")) || result.timedOut || (result.code === 0 && !caseFailure)) break;
+        rerunOf = { gate, command, at: new Date().toISOString(), output: String(caseOutput ?? result.output ?? "").slice(-2000) };
+        await this.emit(job.id, { type: "gate.rerun", state: job.state, gate, feature, durationMs, message: `${gate} failed; rerunning it once before any repair` });
+      }
+      if (rerunOf && result.code === 0 && !caseFailure) {
+        (job.flakyGates ??= []).push(rerunOf);
+        await this.store.writeState(job);
+        await this.emit(job.id, { type: "gate.flaky", state: job.state, gate, feature, command, message: `${gate} failed, then passed when rerun: likely a race in the app or its test; the final review is told` });
       }
       if (result.timedOut) {
         // A killed command proved nothing about the app, so it is not handed to a repair turn.
