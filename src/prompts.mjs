@@ -286,7 +286,7 @@ export function repairPrompt(failurePath, slice = null, bugs = [], featureFile =
 The failure is inside slice ${slice.id} (${slice.title}), given in full below: do not read the plan file.
 Earlier completed slices must be preserved — fix only what this slice's acceptance criteria need.${slice.writes ? ` Change
 the files its writes list. If the fix needs an existing source file outside them, edit it: the controller adds it to this
-feature's writes. Never edit another feature's tests, create a new file outside the writes, or delete one; those fail its checks.` : ""}${brokenTests?.length ? `
+feature's writes. If another feature owns that file, keep the edit minimal; that feature is told. Never edit another feature's tests, create a new file outside the writes, or delete one; those fail its checks.` : ""}${brokenTests?.length ? `
 This feature's change broke an earlier feature's proof (${brokenTests.join(", ")}). If this feature's acceptance criteria
 require the new behavior, update only the expectations in that test that pin the old behavior, keeping every check it
 makes; the controller allows that edit. Otherwise fix the source.` : ""}
@@ -491,7 +491,8 @@ export const PLAN_CHECKLIST = `A plan is blocked when:
 - a proof marked "pending": "integration" could run when its feature is built;
 - a required model, native package, runtime or tool is unverified;
 - a feature's writes miss files its obligations plainly need (a behavior shown in the UI needs the UI file, even
-  when another feature also writes it), or are broad enough to serialize the plan (a glob over a whole tree);
+  when another feature also writes it; an entry point or shared store a feature must change to wire its behavior
+  belongs in its writes), or are broad enough to serialize the plan (a glob over a whole tree);
 - a proof reruns other features' proofs (a cumulative regression or aggregate suite) instead of only its own tests.`;
 
 export function featurePlanPrompt({ followOn = false } = {}) {
@@ -652,7 +653,7 @@ case text, clause by clause.
 - The proof command exits 0 on this candidate. A check that cannot run on this machine is a blocker to
   report, never something to skip or fake.`;
 
-export function featureBuildPrompt(slice, { owned, planDigest, planFile = ".factory/slices.json", featureFile = ".factory/logs/feature.json", followOn = false, resumed = false, precheck = null, last = false, ownerDecisions = [] }) {
+export function featureBuildPrompt(slice, { owned, planDigest, planFile = ".factory/slices.json", featureFile = ".factory/logs/feature.json", followOn = false, resumed = false, precheck = null, last = false, ownerDecisions = [], sharedEdits = [] }) {
   const { feature, commands } = sharedCommands(slice);
   return `You are the implementation worker for ONE approved feature (plan digest ${planDigest}).
 Your feature is given in full below (or in the file it names): do not read ${planFile} or other features' plans. Read the frozen
@@ -671,7 +672,7 @@ ${JSON.stringify(owned, null, 2)}
 
 ${REVIEW_BAR}
 A check with no cases is judged directly against real behavior, not by a test alone: make it work in the running app the way a reviewer would exercise it.
-${ownerDecisionsBlock(ownerDecisions, "build to them")}
+${ownerDecisionsBlock(ownerDecisions, "build to them")}${sharedBlock(sharedEdits)}
 Build one case at a time: write its proof test, then the minimum real behavior that passes it, and run that
 proof until it passes before starting the next case, so an interrupted turn leaves passing cases, not half-wired
 code. Run only this feature's proof commands, plus targeted tests of earlier code you changed; do not run the
@@ -683,7 +684,8 @@ whose name contains [CASE-ID], run by its proof command without a --test-reporte
 controller passes it only when every case's own test passed. Cases are read only from node:test events, so even
 a standalone script proof must import node:test and wrap each case in test(); a script that prints its own
 ok/fail lines records nothing and fails its gate. Change the files your feature's writes list. If your
-obligations need an existing source file outside them, edit it: the controller adds it to your writes. Never edit
+obligations need an existing source file outside them, edit it: the controller adds it to your writes. If another
+feature owns that file, keep the edit minimal; that feature is told. Never edit
 another feature's tests, create a new file outside your writes, or delete one; those fail its checks. Do not edit .factory contract or plan files. Before finishing,
 map each clause of each case to the assertion that proves it and add any that is missing. Do not
 deploy; the controller runs build and this feature's proof commands, then a scoped review.
@@ -691,7 +693,11 @@ deploy; the controller runs build and this feature's proof commands, then a scop
 ${DATA_RULE}`;
 }
 
-export function featureReviewPrompt(slice, featureFile = ".factory/logs/feature.json") {
+const sharedBlock = (edits, review = false) => edits?.length ? edits.map((edit) => review
+  ? `Feature ${edit.by} changed ${edit.file} (this feature's) before it was built: block if this feature broke that change.`
+  : `Feature ${edit.by} changed ${edit.file} (yours) before you were built; keep its change working.`).join("\n") + "\n" : "";
+
+export function featureReviewPrompt(slice, featureFile = ".factory/logs/feature.json", sharedEdits = []) {
   return `You are the scoped reviewer for ONE feature. Review it against every check in
 .factory/review-request.json: its obligations and the original requirements it closes. The
 controller already ran build and the feature's own proof commands on this exact candidate (the whole
@@ -705,7 +711,7 @@ already reviewed: do not reread, rerun or explore their code or tests unless thi
 depends on it, or the request's editedProofs lists them. ${EDITED_PROOFS_RULE} Later planned features may still be missing and must not
 block this verdict; a broad requirement this feature closes still needs full proof.
 ${OWNER_DECISIONS}
-${SECURITY_RULE} Judge it only in this feature's own code.
+${sharedBlock(sharedEdits, true)}${SECURITY_RULE} Judge it only in this feature's own code.
 ${REVIEW_POLICY_RULE}
 ${HOST_RULE}
 

@@ -107,6 +107,10 @@ export function previousRelease(job, runs) {
   };
 }
 
+// Edits earlier features made to files this feature owns (writesFailure's cursor.shared), for its build and review.
+const sharedEdits = (job, owner) => [job.sliceStats, job.recoveryPhase?.stats].flatMap((stats) => Object.entries(stats ?? {}))
+  .flatMap(([by, stats]) => (stats.shared ?? []).filter((entry) => entry.owner === owner).map((entry) => ({ by, file: entry.file })));
+
 // Test files and fixtures: never widened into, since editing another feature's tests can weaken them, unless this
 // feature broke that test's proof (cursor.brokenProofs).
 const TEST_PATH = /(^|\/)(tests?|__tests__|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
@@ -822,6 +826,7 @@ export class SoloFactory {
         reviews: cursor.reviews,
         commit: cursor.commit,
         ...(cursor.widened && { widened: cursor.widened }),
+        ...(cursor.shared && { shared: cursor.shared }),
         ...(cursor.brokenProofs?.length && { editedProofs: cursor.brokenProofs }),
       };
       job.sliceDone = [...(job.sliceDone ?? []), slice.id];
@@ -845,7 +850,9 @@ export class SoloFactory {
   async setAside(job, slice, error, signal) {
     const cursor = job.featureCursor;
     const slices = job.approvedPlan.plan.slices;
-    if (signal?.aborted || !["quality_gate_failed", "review_rejected", "review_unstable"].includes(error.code) || !cursor?.base || cursor.restored || !slices.every((item) => item.writes)) return false;
+    // A feature that changed an unbuilt feature's file is not set aside: the owner would build over that change, then
+    // parkSetAside would restore this feature's version over the owner's.
+    if (signal?.aborted || !["quality_gate_failed", "review_rejected", "review_unstable"].includes(error.code) || !cursor?.base || cursor.restored || cursor.shared?.length || !slices.every((item) => item.writes)) return false;
     const waiting = new Set([slice.id, ...(job.setAside ?? []).map((entry) => entry.id)]);
     let independent = false;
     for (const item of slices.slice(slices.indexOf(slice) + 1)) {
@@ -962,7 +969,7 @@ export class SoloFactory {
         const label = resumed ? labels.resume : labels.build;
         // The last feature writes the README; left to the final reviewer it is a source change that forces the post-review gate rerun.
         const [index, total] = position.split("/");
-        const prompt = featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed, precheck: cursor.precheck, last: index === total, ownerDecisions: job.ownerDecisions });
+        const prompt = featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed, precheck: cursor.precheck, last: index === total, ownerDecisions: job.ownerDecisions, sharedEdits: sharedEdits(job, slice.id) });
         const before = await candidate();
         try {
           await this.invoke(job, label, prompt, signal, { resumeSessionId: this.resumeSessionFor(job, label) });
@@ -970,7 +977,7 @@ export class SoloFactory {
           // A build that hit the safety cap while still changing files is too big for one turn, not stuck:
           // continue it once in its own session (the stage's one continuation allowance) instead of parking.
           if (error.code !== "agent_hard_timeout" || await candidate() === before || !await this.allowContinuation(job, labels.build)) throw error;
-          await this.invoke(job, labels.resume, featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed: true, precheck: cursor.precheck, last: index === total, ownerDecisions: job.ownerDecisions }), signal, { resumeSessionId: error.details?.sessionId ?? this.resumeSessionFor(job, labels.resume) });
+          await this.invoke(job, labels.resume, featureBuildPrompt(slice, { owned, planDigest, planFile, followOn: job.followOn, resumed: true, precheck: cursor.precheck, last: index === total, ownerDecisions: job.ownerDecisions, sharedEdits: sharedEdits(job, slice.id) }), signal, { resumeSessionId: error.details?.sessionId ?? this.resumeSessionFor(job, labels.resume) });
         }
         await save("checking");
         if (scope.buildOnly) return job;
@@ -999,7 +1006,7 @@ export class SoloFactory {
         cursor.reviewRequest = request;
         await this.store.writeState(job);
         const label = labels.review(cursor.reviews);
-        await this.invoke(job, label, featureReviewPrompt(slice), signal);
+        await this.invoke(job, label, featureReviewPrompt(slice, undefined, sharedEdits(job, slice.id)), signal);
         await archiveReview(this, job, label);
         if (await candidate() !== cursor.candidate) {
           await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "review", message: "The reviewer changed source; its verdict is void and the feature is rechecked." });
@@ -1436,9 +1443,11 @@ export class SoloFactory {
   // from the feature's start commit also catches files the agent committed itself. A cursor without a
   // base (saved by an older release) falls back to the uncommitted tree.
   // A plan's file lists can miss a file the feature's checks need (run 2026-10-07-4f2dd1cf: VIEWER-DATES wrote only its
-  // test while its fix lived in app.js, so three repairs changed nothing). An edit to an existing source file no unbuilt
-  // feature owns widens this feature's writes on its cursor instead of failing; tests (except a broken earlier proof's), new
-  // files and deletions still fail.
+  // test while its fix lived in app.js, so three repairs changed nothing). An edit to an existing source file widens this
+  // feature's writes on its cursor instead of failing; tests (except a broken earlier proof's), new files and deletions still
+  // fail. A file an unbuilt feature owns widens too (run 2026-11-12-d07bfd16: QUEUE's one-line server.js wiring and a store
+  // method were refused, and three repairs trusted the prompt's promise): it is recorded in cursor.shared and shown to the
+  // owner's build and review. A set-aside owner's file still fails, since parkSetAside would restore it over the edit.
   async writesFailure(job, slice) {
     const recovery = job.recoveryPhase?.cursor?.id === slice.id;
     const cursor = recovery ? job.recoveryPhase.cursor : job.featureCursor?.id === slice.id ? job.featureCursor : null;
@@ -1453,18 +1462,23 @@ export class SoloFactory {
       const plan = recovery ? job.recoveryPhase.plan : job.approvedPlan?.plan;
       const done = (recovery ? job.recoveryPhase.done : job.sliceDone) ?? [];
       const others = (plan?.slices ?? []).filter((item) => item.id !== slice.id && !done.includes(item.id) && item.writes);
-      const widen = outside.filter((file) => modified.has(file) && (!TEST_PATH.test(file) || cursor.brokenProofs?.includes(file)) && !others.some((item) => writesCover(item.writes, file)));
+      const setAside = new Set((job.setAside ?? []).map((entry) => entry.id));
+      const ownerOf = (file) => others.find((item) => writesCover(item.writes, file));
+      const widen = outside.filter((file) => modified.has(file) && (!TEST_PATH.test(file) || cursor.brokenProofs?.includes(file)) && !others.some((item) => setAside.has(item.id) && writesCover(item.writes, file)));
       if (widen.length) {
+        const shared = widen.filter(ownerOf).map((file) => ({ file, owner: ownerOf(file).id }));
         cursor.widened = [...(cursor.widened ?? []), ...widen];
+        if (shared.length) cursor.shared = [...(cursor.shared ?? []), ...shared];
         await this.store.writeState(job);
-        await this.emit(job.id, { type: "slice.writes_widened", state: job.state, slice: slice.id, files: widen, message: `Feature ${slice.id} needed ${widen.join(", ")} beyond its declared writes; its writes now include them` });
+        const named = widen.map((file) => { const owner = ownerOf(file); return owner ? `${file} (owned by ${owner.id}, not built yet)` : file; });
+        await this.emit(job.id, { type: "slice.writes_widened", state: job.state, slice: slice.id, files: widen, ...(shared.length && { shared }), message: `Feature ${slice.id} needed ${named.join(", ")} beyond its declared writes; its writes now include them` });
         outside = outside.filter((file) => !widen.includes(file));
       }
     }
     if (!outside.length) return null;
     const message = `Feature ${slice.id} changed files outside its declared writes: ${outside.join(", ")}.`;
     await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "writes", feature: slice.id, message });
-    return new FactoryError("quality_gate_failed", message, { gate: "writes", output: `${message}\nDeclared writes: ${writes.join(", ")}\nAn existing source file outside the writes is allowed when the fix needs it, but not another feature's tests (unless this feature broke that test's proof), a new file outside the writes, a deletion, or a file an unbuilt feature owns. Move the change into an allowed file or revert it.` });
+    return new FactoryError("quality_gate_failed", message, { gate: "writes", output: `${message}\nDeclared writes: ${writes.join(", ")}\nAn existing source file outside the writes is allowed when the fix needs it, but not another feature's tests (unless this feature broke that test's proof), a new file outside the writes, a deletion, or a file a set-aside feature owns. Move the change into an allowed file or revert it.` });
   }
 
   // Committed credentials (docs/sdlc-hardening-spec.md item 6): the token shapes feedback.mjs scrubs, in any file this run
