@@ -17,7 +17,7 @@ import {
   validateInterviewResult,
   validateMessages,
 } from "./interview.mjs";
-import { createProvider, detectProviderDiagnostics, discoverProviders } from "./providers.mjs";
+import { claudeMaxTurns, createProvider, detectProviderDiagnostics, discoverProviders } from "./providers.mjs";
 import { createFixtureProvider } from "./fixture-provider.mjs";
 import { createUpdateChecker } from "./update-check.mjs";
 import { REPORTABLE_STATES, buildDiagnostics, issuesConfig, renderReport, scrub, validateFeedback } from "./feedback.mjs";
@@ -94,6 +94,7 @@ export async function createSoloFactoryServer(options = {}) {
   // Tests that exercise the owner's manual Approve path turn the automatic repair start off.
   const autoStartRepairs = options.autoStartRepairs ?? true;
   watchConfig(); // fails fast on an invalid progress window or loop threshold
+  claudeMaxTurns(); // and on an invalid per-turn step limit
   const providerFactory = options.providerFactory ?? ((id) => {
     if (id === "fixture" && fixtureMode) return createFixtureProvider();
     // Runs made with SOLOFACTORY_DEMO=1 persist in the project; outside demo mode they can't run.
