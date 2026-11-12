@@ -1,5 +1,6 @@
 import http from "node:http";
 import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { JobStore } from "./store.mjs";
@@ -900,7 +901,12 @@ export function loopbackHost(value) {
   throw new Error(`HOST=${host} would expose SoloFactory's unauthenticated API to the network. Use 127.0.0.1 (the default).`);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// Compare real paths: started through a symlinked folder (macOS /tmp), argv[1] and import.meta.url differ.
+function isEntry(url) {
+  try { return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(url)); } catch { return false; }
+}
+
+if (isEntry(import.meta.url)) {
   const port = Number(process.env.PORT || 4173);
   let host;
   try { host = loopbackHost(process.env.HOST); } catch (error) { console.error(error.message); process.exit(1); }
