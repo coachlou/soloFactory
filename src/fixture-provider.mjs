@@ -232,6 +232,7 @@ async function writeFixtureApp(cwd) {
 const fixtureServerSource = `import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 const started = Date.now();
 const routes = new Map();
 let active = 0;
@@ -243,7 +244,9 @@ export function metricsSnapshot() {
   const sorted = [...latencies].sort((a, b) => a - b);
   return { startedAt: new Date(started).toISOString(), uptimeSeconds: Math.floor((Date.now() - started) / 1000), requests: { total, errors, active }, latencyMs: { count: latencies.length, average, p95: sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)] ?? 0 }, routes: [...routes.values()] };
 }
-if (process.argv[1] === fileURLToPath(import.meta.url)) http.createServer(async (req, res) => {
+let entry = false;
+try { entry = Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch {}
+if (entry) http.createServer(async (req, res) => {
   const began = Date.now(); active += 1; total += 1;
   const route = req.url === "/health" ? "/health" : req.url === "/_factory/metrics" ? "/_factory/metrics" : "/";
   const key = req.method + " " + route;

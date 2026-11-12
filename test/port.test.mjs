@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, symlink } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -16,9 +16,9 @@ async function occupy(handler) {
   return blocker;
 }
 
-async function start(port, extra = {}) {
+async function start(port, extra = {}, file = serverFile) {
   const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-port-"));
-  const child = spawn(process.execPath, [serverFile], { env: { ...process.env, PORT: String(port), SOLOFACTORY_HOME: home, SOLOFACTORY_ROOT: home, ...extra }, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [file], { env: { ...process.env, PORT: String(port), SOLOFACTORY_HOME: home, SOLOFACTORY_ROOT: home, ...extra }, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   child.stdout.on("data", (chunk) => { output += chunk; });
   child.stderr.on("data", (chunk) => { output += chunk; });
@@ -56,4 +56,17 @@ test("a non-loopback HOST exits 1 before listening", async () => {
   assert.equal(code, 1);
   assert.match(output, /HOST=0\.0\.0\.0 would expose/);
   assert.doesNotMatch(output, /is ready at/);
+});
+
+test("a server started through a symlinked folder still runs (no silent exit 0)", async () => {
+  const link = path.join(await mkdtemp(path.join(os.tmpdir(), "solo-factory-link-")), "app");
+  await symlink(path.dirname(path.dirname(serverFile)), link, "dir");
+  const blocker = await occupy((request, response) => { response.writeHead(404); response.end(); });
+  const { port } = blocker.address();
+  try {
+    // The busy port makes the entry block run and exit 1; a skipped entry block would exit 0 with no output.
+    const { code, output } = await start(port, {}, path.join(link, "src", "server.mjs"));
+    assert.equal(code, 1);
+    assert.match(output, new RegExp(`Port ${port} is in use by another app`));
+  } finally { blocker.close(); }
 });
