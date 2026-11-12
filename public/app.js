@@ -281,6 +281,9 @@ const EARLIER_SHOWN = 4;
 const STAGE_NAMES = { queued: "the queue", specifying: "Specify", building: "Build", repairing: "Repair", verifying: "Verify", reviewing: "Review", deploying: "Deploy" };
 const hasValue = (value) => (Array.isArray(value) ? value.some((entry) => String(entry).trim()) : Boolean(String(value ?? "").trim()));
 const sameValue = (a, b) => JSON.stringify(a ?? (Array.isArray(b) ? [] : "")) === JSON.stringify(b ?? (Array.isArray(a) ? [] : ""));
+// Per key, so a key the review only filled with its empty default (a brief from before 0.11 has no
+// manualChecks) is not a change; a whole-object compare told the owner "adjusted" after every review.
+const briefChanged = (a, b) => Object.keys({ ...a, ...b }).some((key) => !sameValue(a?.[key], b?.[key]));
 const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
 
@@ -835,7 +838,7 @@ $("#start-button").addEventListener("click", async () => {
       reviewOutcome("The Guide's review did not carry one of your direct edits, so this brief is not fully reviewed. Read its reply, then press Queue anyway to queue the brief as shown, or change it.");
       return;
     }
-    if (!sameValue(before, state.guide.brief)) {
+    if (briefChanged(before, state.guide.brief)) {
       if (!state.revises) state.baseBrief = before;
       renderWorkspace();
       reviewOutcome("The Guide adjusted the brief in its review. Check the marked sections, then press Queue.");
@@ -856,8 +859,15 @@ $("#start-button").addEventListener("click", async () => {
     renderBackgroundBanner();
     $("#system-status").textContent = job.queuePosition ? `Brief queued #${job.queuePosition} as run ${job.id}` : `Queued as run ${job.id}`;
   } catch (error) {
-    showError(error);
     $("#start-button").disabled = false;
+    // Another stopped run holds the queue than the one this brief named when opened (or it was opened before
+    // the factory tracked that). The server saved the current one to the draft; show it, one more press queues.
+    if (error.body?.code === "revise_blocker_changed") {
+      state.replaces = error.body.replaces ?? null;
+      renderBar();
+      renderWorkspace();
+    }
+    showError(error);
   }
 });
 
@@ -1797,7 +1807,7 @@ async function api(url, options = {}) {
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok && !options.allow?.includes(response.status)) throw new Error(body.error || `Request failed with HTTP ${response.status}.`);
+  if (!response.ok && !options.allow?.includes(response.status)) throw Object.assign(new Error(body.error || `Request failed with HTTP ${response.status}.`), { body });
   return body;
 }
 
@@ -1812,7 +1822,7 @@ function reportError(error, action = "notice") {
   fetch("/api/errors", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ source: "browser", action, message: error?.stack || error?.message || String(error), jobId: state.job?.id, project: state.project }),
+    body: JSON.stringify({ source: "browser", action, message: [error?.message ?? String(error), error?.stack].filter(Boolean).join("\n"), jobId: state.job?.id, project: state.project }),
   }).catch(() => {});
 }
 window.addEventListener("error", (event) => reportError(event.error ?? event.message, "uncaught"));

@@ -995,6 +995,16 @@ test("revise brief reopens a stopped run's brief in the interview, and queuing i
   assert.equal((await post(`${base}/api/jobs`, { provider: "fixture", transcript, coverage: turned.coverage, brief: turned.brief, revises: job.id })).status, 409, "only a stopped run can be replaced");
 });
 
+test("a review that only adds an empty section to an older brief does not count as adjusting it", async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const helpers = source.match(/const sameValue = .*\n[\s\S]*?const briefChanged = .*\n/)[0];
+  const briefChanged = new Function(`${helpers}; return briefChanged;`)();
+  const old = { goal: "Track reading", requirements: ["List books"] };
+  assert.equal(briefChanged(old, { ...old, manualChecks: [] }), false);
+  assert.equal(briefChanged(old, { ...old, manualChecks: ["Open on a phone"] }), true);
+  assert.equal(briefChanged(old, { ...old, goal: "Track books" }), true);
+});
+
 test("revise brief works on a finished run and an older set-aside run, and sets aside only the run holding the queue", async (t) => {
   const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-revise-old-"));
   const app = await createSoloFactoryServer({ home, fixtureMode: true });
@@ -1022,8 +1032,13 @@ test("revise brief works on a finished run and an older set-aside run, and sets 
   const body = { provider: "fixture", transcript: draft.messages, coverage: draft.guide.coverage, brief: draft.guide.brief, revises: finished.id };
   const stale = await post(`${base}/api/jobs`, { ...body, replaces: null });
   assert.equal(stale.status, 409, "queuing never sets aside a run the owner was not shown");
-  assert.equal((await stale.json()).code, "revise_blocker_changed");
-  assert.equal((await post(`${base}/api/jobs`, { ...body, replaces: latest.id })).status, 202);
+  const staleBody = await stale.json();
+  assert.equal(staleBody.code, "revise_blocker_changed");
+  assert.equal(staleBody.replaces, latest.id, "the refusal names the run queuing would now set aside");
+  assert.match(staleBody.error, new RegExp(`sets aside run ${latest.id}.*press it again`));
+  const refreshed = (await getJson(`${base}/api/interview/draft`)).draft;
+  assert.equal(refreshed.replaces, latest.id, "the draft keeps the current holder, so reopening Revise brief cannot loop on a stale one");
+  assert.equal((await post(`${base}/api/jobs`, { ...body, replaces: staleBody.replaces })).status, 202);
   assert.equal(JSON.parse(await stateFile(app, latest.id)).dismissed, true, "the run holding the queue is set aside");
   const kept = JSON.parse(await stateFile(app, finished.id));
   assert.equal(kept.state, "completed");

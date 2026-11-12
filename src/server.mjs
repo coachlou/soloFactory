@@ -489,7 +489,13 @@ export async function createSoloFactoryServer(options = {}) {
           const revised = await store.read(body.revises);
           if (!revisable(revised)) return json(response, 409, { error: "The run this brief revises is running or queued again, so this brief cannot replace it. Start over in the interview to queue this brief on its own.", code: "revise_not_parked" });
           const holder = await blockerFor(active.id);
-          if (holder !== (body.replaces ?? null)) return json(response, 409, { error: `The stopped run holding this project changed since this brief was opened${holder ? ` (now ${holder})` : ""}. Open Revise brief on the run again to see what queuing sets aside.`, code: "revise_blocker_changed" });
+          if (holder !== (body.replaces ?? null)) {
+            // Save the current holder to the draft so the owner sees it on the Queue button; the next press queues.
+            const draft = await readFile(draftFile(active.dir), "utf8").then(JSON.parse).catch(() => null);
+            if (draft?.revises === body.revises) await writeFile(draftFile(active.dir), JSON.stringify({ ...draft, replaces: holder }, null, 2));
+            const now = holder === body.revises ? `queuing now replaces run ${holder}` : holder ? `queuing now sets aside run ${holder}` : "queuing now adds a new run and sets nothing aside";
+            return json(response, 409, { error: `The stopped run holding this project changed since this brief was opened: ${now}. Check the Queue button, then press it again.`, code: "revise_blocker_changed", replaces: holder });
+          }
           blocker = holder && (await store.read(holder));
         }
         const job = await store.create({ brief: validated.brief, transcript: body.transcript, provider, sdlc, notices, featureReview });
