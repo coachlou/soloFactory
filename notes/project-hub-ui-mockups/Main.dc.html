@@ -33,7 +33,7 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 <button onClick="{{g.toggle}}" aria-expanded="{{g.expanded}}" style="display: flex; gap: 6px; align-items: center; width: 100%; min-height: 32px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: #cfd0ca; text-align: left">
 <span aria-hidden="true" style="width: 12px; font-size: 11px; color: #a3a49f">{{g.chev}}</span>
 <span style="flex: 1 1 auto; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase">{{g.label}}</span>
-<span style="font-size: 12px; color: #a3a49f">{{g.count}}</span>
+<span style="font-size: 12px; font-weight: {{g.countW}}; color: {{g.countFg}}">{{g.count}}</span>
 </button>
 <sc-if value="{{g.open}}" hint-placeholder-val="{{true}}">
 <sc-for list="{{g.items}}" as="w" hint-placeholder-count="2">
@@ -41,7 +41,7 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 <div style="display: flex; gap: 2px; align-items: flex-start">
 <button onClick="{{w.open}}" aria-label="{{w.aria}}" style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 2px 0; border: 0; background: transparent; color: #f2efe6; text-align: left">
 <span style="max-width: 100%; font-size: 13px; font-weight: {{w.weight}}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{w.title}}</span>
-<span style="font-size: 11px; color: #a3a49f"><span style="font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase">{{w.kind}}</span> · {{w.state}}</span>
+<span style="font-size: 11px; color: #a3a49f"><span style="font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase">{{w.kind}}</span> · <span style="color: {{w.stColor}}; font-weight: {{w.stWeight}}">{{w.state}}</span></span>
 </button>
 <sc-if value="{{w.queued}}" hint-placeholder-val="{{false}}">
 <button onClick="{{w.toggleMenu}}" aria-label="{{w.menuLabel}}" aria-expanded="{{w.menuExpanded}}" style="flex: none; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #cfd0ca; font-size: 16px; letter-spacing: 1px">···</button>
@@ -83,7 +83,7 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 <button onClick="{{pm.toggle}}" aria-haspopup="menu" aria-expanded="{{pm.expanded}}" aria-label="{{pm.aria}}" style="display: flex; gap: 8px; align-items: center; margin-left: -8px; padding: 2px 8px; border: 0; border-radius: 8px; background: transparent; color: #f2efe6">
 <span style="font-family: 'Iowan Old Style', Charter, Georgia, serif; font-size: 24px; font-weight: 500; letter-spacing: -0.01em">{{current.name}}</span>
 <span aria-hidden="true" style="font-size: 14px; color: #a3a49f">▾</span>
-<sc-if value="{{pm.others}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; color: #a3a49f">{{pm.othersText}}</span></sc-if>
+<sc-if value="{{pm.others}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; font-weight: 600; color: #ffb36b">{{pm.othersText}}</span></sc-if>
 </button>
 <sc-if value="{{pm.open}}" hint-placeholder-val="{{false}}">
 <div role="menu" aria-label="Projects" style="position: absolute; top: calc(100% + 6px); left: -8px; z-index: 4; display: flex; flex-direction: column; min-width: 300px; padding: 6px; border: 1px solid #3a413c; border-radius: 12px; background: #151917; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45)">
@@ -159,7 +159,7 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 </sc-if>
 
 <sc-if value="{{m.isRun}}" hint-placeholder-val="{{false}}">
-<section aria-label="Run" style="display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid #303632; border-radius: 14px; background: #191d1b">
+<section aria-label="Run" style="display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid {{m.cardBorder}}; border-radius: 14px; background: #191d1b">
 <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between">
 <span style="display: flex; gap: 8px; align-items: center; min-width: 0"><span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a3a49f">{{m.kindLabel}}</span><strong style="font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{m.title}}</strong></span>
 <button onClick="{{m.openRun}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #5a605b; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Open the run</button>
@@ -169,7 +169,7 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 <span style="flex: 1 1 0; height: 6px; border-radius: 3px; background: {{g.bg}}"></span>
 </sc-for>
 </div>
-<span style="font-size: 13px; color: #cfd0ca">{{m.line}}</span>
+<span style="font-size: 13px; font-weight: {{m.lineWeight}}; color: {{m.lineColor}}">{{m.line}}</span>
 <div style="display: flex; flex-wrap: wrap; gap: 8px">
 <sc-for list="{{m.ctrls}}" as="c" hint-placeholder-count="2">
 <button onClick="{{c.act}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid {{c.border}}; border-radius: 9px; background: {{c.bg}}; color: {{c.fg}}; font-size: 13px; font-weight: 600">{{c.label}}</button>
@@ -282,11 +282,11 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 <div style="display: flex; flex-direction: column; gap: 4px">
 <span style="align-self: flex-start; padding: 2px 9px; border-radius: 99px; background: {{run.chipBg}}; color: {{run.chipFg}}; font-size: 12px; font-weight: 700">{{run.kindLabel}}</span>
 <strong style="font-size: 16px; font-weight: 600">{{run.title}}</strong>
-<span style="font-size: 13px; color: #a3a49f">{{run.line}}</span>
+<span style="font-size: 13px; font-weight: {{run.lineWeight}}; color: {{run.lineColor}}">{{run.line}}</span>
 </div>
 <sc-if value="{{run.stuck}}" hint-placeholder-val="{{false}}">
-<div role="status" style="display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid #3a413c; border-radius: 12px; background: #2a1817">
-<strong style="font-weight: 600; color: #ffb3ae">This run needs you</strong>
+<div role="status" style="display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid #6a3835; border-radius: 12px; background: #2a1817">
+<strong style="font-weight: 600; color: #ff9d98">This run needs you</strong>
 <span style="color: #e6e3da">One check failed twice, so the factory stopped instead of spending more turns. Nothing was deployed and the last release is still live. Choose a repair, restart from an earlier step, or cancel.</span>
 </div>
 </sc-if>
@@ -464,7 +464,7 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 <sc-for list="{{cfg.sections}}" as="sec" hint-placeholder-count="3">
 <section style="display: flex; flex-direction: column; gap: 4px">
 <h3 style="margin: 0 0 6px; font-size: 15px; font-weight: 600">{{sec.title}}</h3>
-<sc-if value="{{sec.hasNote}}" hint-placeholder-val="{{false}}"><p style="margin: 0 0 6px; font-size: 13px; color: #cfd0ca">{{sec.note}}</p></sc-if>
+<sc-if value="{{sec.hasNote}}" hint-placeholder-val="{{false}}"><p style="margin: 0 0 6px; font-size: 13px; color: #ffb36b">{{sec.note}}</p></sc-if>
 <sc-for list="{{sec.fields}}" as="fd" hint-placeholder-count="3">
 <div style="display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 0; border-bottom: 1px solid #262b28">
 <div style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 2px">
@@ -642,9 +642,16 @@ class Component extends DCLogic {
     return 'Cancelled · nothing was deployed · the spec is kept';
   }
 
+  alertOf(r) {
+    if (!r) return '';
+    if (r.state === 'stuck') return '#ff7d77';
+    if (r.state === 'paused') return '#ffb36b';
+    return '';
+  }
+
   runSegs(r) {
     return this.kinds()[r.kind].steps.map((x, i) => ({
-      bg: r.state === 'shipped' ? '#8a8d87' : r.state === 'cancelled' || r.state === 'queued' || r.state === 'revising' ? '#2a2f2c' : i < r.idx ? '#8a8d87' : i > r.idx ? '#2a2f2c' : '#f2efe6'
+      bg: r.state === 'shipped' ? '#8a8d87' : r.state === 'cancelled' || r.state === 'queued' || r.state === 'revising' ? '#2a2f2c' : i < r.idx ? '#8a8d87' : i > r.idx ? '#2a2f2c' : (this.alertOf(r) || '#f2efe6')
     }));
   }
 
@@ -891,6 +898,9 @@ class Component extends DCLogic {
       }
       if (run) {
         v.title = run.title; v.line = this.runLine(run, s.runs);
+        const al = this.alertOf(run);
+        v.cardBorder = run.state === 'stuck' ? '#6a3835' : run.state === 'paused' ? '#5c4424' : '#303632';
+        v.lineColor = al || '#cfd0ca'; v.lineWeight = al ? '600' : '400';
         v.segs = this.runSegs(run);
         v.ctrls = this.runCtrls(run);
         v.openRun = () => this.setState({ panel: 'run' });
@@ -1005,7 +1015,7 @@ class Component extends DCLogic {
     const parked = r && (r.state === 'paused' || r.state === 'stuck');
     const run = r ? {
       title: r.title, line: this.runLine(r, s.runs), kindLabel: K[r.kind].label, chipBg: K[r.kind].chipBg, chipFg: K[r.kind].chipFg,
-      ctrls: this.runCtrls(r), stuck: r.state === 'stuck',
+      ctrls: this.runCtrls(r), stuck: r.state === 'stuck', lineColor: this.alertOf(r) || '#a3a49f', lineWeight: this.alertOf(r) ? '600' : '400',
       openSpec: () => this.setState({ viewer: this.specName(r), viewerEdit: false }),
       more: this.moreCtrls(r), hasMore: this.moreCtrls(r).length > 0,
       revising: r.state === 'revising', change: r.change || '', fieldId: 'revise-a', revTitle: 'Spec reopened · draft of revision ' + ((r.rev || 1) + 1),
@@ -1020,9 +1030,9 @@ class Component extends DCLogic {
         return {
           n: i + 1, label: label,
           state: done ? 'Done' : bad ? 'Failed twice' : held ? 'Paused here' : now ? 'Now' : 'To do',
-          bg: done ? '#262b28' : bad ? '#f2efe6' : held ? '#cfd0ca' : now ? '#f2efe6' : 'transparent',
+          bg: done ? '#262b28' : bad ? '#ff7d77' : held ? '#ffb36b' : now ? '#f2efe6' : 'transparent',
           fg: done ? '#f2efe6' : now ? '#11170f' : '#a3a49f',
-          ring: bad ? '#f2efe6' : held ? '#cfd0ca' : done || now ? '#f2efe6' : '#3a413c',
+          ring: bad ? '#ff7d77' : held ? '#ffb36b' : done || now ? '#f2efe6' : '#3a413c',
           text: done || now ? '#f2efe6' : '#a3a49f',
           canRestart: parked && i < r.idx,
           restart: () => this.patchRun(r.id, { state: 'building', idx: i })
@@ -1076,6 +1086,7 @@ class Component extends DCLogic {
         title: m.ask, kind: K[m.kind].label, chipBg: K[m.kind].chipBg, chipFg: K[m.kind].chipFg, state: st,
         aria: rr ? 'Open the run: ' + m.ask : m.ask + ', in the chat',
         bg: picked ? '#202522' : 'transparent', weight: g === 'needs' ? '600' : '500',
+        stColor: this.alertOf(rr) || '#a3a49f', stWeight: this.alertOf(rr) ? '600' : '400',
         menuOpen: qi >= 0 && s.rowMenu === rr.id, menuExpanded: qi >= 0 && s.rowMenu === rr.id ? 'true' : 'false',
         menuLabel: 'Queue actions for ' + m.ask,
         toggleMenu: () => this.setState({ rowMenu: this.state.rowMenu === (rr && rr.id) ? 0 : rr.id }),
@@ -1097,7 +1108,7 @@ class Component extends DCLogic {
       return {
         label: d[1], count: items.length, items: items, open: open, empty: items.length === 0, emptyText: d[2],
         expanded: open ? 'true' : 'false', chev: open ? '▾' : '▸',
-        color: hot ? '#cfd0ca' : '#f2efe6', countBg: hot ? '#202522' : '#202522', countFg: hot ? '#cfd0ca' : '#cfd0ca',
+        countW: hot ? '700' : '400', countFg: hot ? '#ffb36b' : '#a3a49f',
         toggle: () => this.setState({ groupsOpen: { ...this.state.groupsOpen, [d[0]]: !open } })
       };
     });
@@ -1224,7 +1235,7 @@ class Component extends DCLogic {
       vw: vw,
       docs: docs, noDocs: docsRaw.length === 0, hasDoc: !!doc, doc: doc || { name: '', sections: [], ctrls: [], hasLine: false, line: '', revising: false, change: '', revTitle: '' },
       closeDoc: () => this.setState({ docName: '' }),
-      hasRun: !!run, noRun: !run, run: run || { more: [], hasMore: false, title: '', line: '', kindLabel: '', chipBg: '#202522', chipFg: '#f2efe6', stops: [], ctrls: [], stuck: false, note: '', revising: false, change: '', fieldId: 'revise-a', revTitle: '' },
+      hasRun: !!run, noRun: !run, run: run || { more: [], hasMore: false, title: '', line: '', kindLabel: '', chipBg: '#202522', chipFg: '#f2efe6', lineColor: '#a3a49f', lineWeight: '400', stops: [], ctrls: [], stuck: false, note: '', revising: false, change: '', fieldId: 'revise-a', revTitle: '' },
       queue: queue, hasQueue: queue.length > 0,
       queueTitle: queue.length + ' queued behind it',
       queueNote: blocked ? 'Waiting for your call on the run above. Nothing here starts until it is resolved.' : 'They start one at a time, top first, each building on the last.'
