@@ -11,27 +11,31 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <style>
 body{margin:0}
+[data-theme]{--bg:#111413;--panel:#151917;--card:#191d1b;--raise:#202522;--raise2:#262b28;--track:#2a2f2c;--line:#303632;--line2:#3a413c;--line3:#5a605b;--muted2:#7d807a;--dim:#8a8d87;--muted:#a3a49f;--text2:#cfd0ca;--text1:#e6e3da;--fg:#f2efe6;--fg-strong:#ffffff;--inv:#f2efe6;--inv-fg:#11170f;--amber:#ffb36b;--red:#ff7d77;--red-text:#ff9d98;--red-line:#6a3835;--red-bg:#2a1817;--amber-line:#5c4424;--scrim:rgba(8, 10, 9, 0.74);--shadow:rgba(0, 0, 0, 0.45);color-scheme:dark}
+[data-theme="light"]{--bg:#f7f6f2;--panel:#efeee8;--card:#ffffff;--raise:#e8e7e0;--raise2:#e0dfd8;--track:#dad9d2;--line:#dcdad3;--line2:#c9c7bf;--line3:#9c9e97;--muted2:#8a8c85;--dim:#7a7d76;--muted:#62645d;--text2:#3b3e39;--text1:#262825;--fg:#161816;--fg-strong:#000000;--inv:#1d201e;--inv-fg:#f7f6f2;--amber:#a85600;--red:#c62f28;--red-text:#b0241d;--red-line:#e6a7a2;--red-bg:#fcebe9;--amber-line:#e3bd8a;--scrim:rgba(30, 32, 30, 0.40);--shadow:rgba(0, 0, 0, 0.16);color-scheme:light}
+@media (prefers-color-scheme: light){[data-theme="auto"]{--bg:#f7f6f2;--panel:#efeee8;--card:#ffffff;--raise:#e8e7e0;--raise2:#e0dfd8;--track:#dad9d2;--line:#dcdad3;--line2:#c9c7bf;--line3:#9c9e97;--muted2:#8a8c85;--dim:#7a7d76;--muted:#62645d;--text2:#3b3e39;--text1:#262825;--fg:#161816;--fg-strong:#000000;--inv:#1d201e;--inv-fg:#f7f6f2;--amber:#a85600;--red:#c62f28;--red-text:#b0241d;--red-line:#e6a7a2;--red-bg:#fcebe9;--amber-line:#e3bd8a;--scrim:rgba(30, 32, 30, 0.40);--shadow:rgba(0, 0, 0, 0.16);color-scheme:light}}
+
 *{box-sizing:border-box}
 button{font:inherit;cursor:pointer}
 input{font:inherit}
-button:focus-visible,input:focus-visible{outline:2px solid #f2efe6;outline-offset:2px}
-a{color:#f2efe6}a:hover{color:#ffffff}
+button:focus-visible,input:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+a{color:var(--fg)}a:hover{color:var(--fg-strong)}
 </style>
 </helmet>
-<div style="position: relative; display: flex; flex-wrap: wrap; height: 100vh; min-height: 600px; overflow: auto; background: #111413; color: #f2efe6; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 14px; line-height: 1.45">
+<div data-theme="{{theme.mode}}" style="position: relative; display: flex; flex-wrap: wrap; height: 100vh; min-height: 600px; overflow: auto; background: var(--bg); color: var(--fg); font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 14px; line-height: 1.45">
 
-<nav aria-label="Projects" style="flex: 1 1 248px; max-width: 300px; min-width: 0; display: flex; flex-direction: column; gap: 22px; padding: 18px 14px; border-right: 1px solid #303632; background: #151917; overflow-y: auto">
+<nav aria-label="Projects" style="flex: 1 1 248px; max-width: 300px; min-width: 0; display: flex; flex-direction: column; gap: 22px; padding: 18px 14px; border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto">
 <div style="display: flex; align-items: center; gap: 10px; padding: 0 4px">
-<span style="display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: #f2efe6; color: #0c110d; font-size: 11px; font-weight: 700">SF</span>
-<span style="display: flex; flex-direction: column"><strong style="font-weight: 600">SoloFactory</strong><span style="font-size: 12px; color: #a3a49f">{{slots}}</span></span>
+<span style="display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--inv); color: var(--inv-fg); font-size: 11px; font-weight: 700">SF</span>
+<span style="display: flex; flex-direction: column"><strong style="font-weight: 600">SoloFactory</strong><span style="font-size: 12px; color: var(--muted)">{{slots}}</span></span>
 </div>
 
 <div style="display: flex; flex-direction: column; gap: 10px">
-<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a3a49f; margin-left: 6px">Work</h2>
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-left: 6px">Work</h2>
 <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
 <div style="display: flex; flex-direction: column; gap: 1px">
-<button onClick="{{g.toggle}}" aria-expanded="{{g.expanded}}" style="display: flex; gap: 6px; align-items: center; width: 100%; min-height: 32px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: #cfd0ca; text-align: left">
-<span aria-hidden="true" style="width: 12px; font-size: 11px; color: #a3a49f">{{g.chev}}</span>
+<button onClick="{{g.toggle}}" aria-expanded="{{g.expanded}}" style="display: flex; gap: 6px; align-items: center; width: 100%; min-height: 32px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--text2); text-align: left">
+<span aria-hidden="true" style="width: 12px; font-size: 11px; color: var(--muted)">{{g.chev}}</span>
 <span style="flex: 1 1 auto; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase">{{g.label}}</span>
 <span style="font-size: 12px; font-weight: {{g.countW}}; color: {{g.countFg}}">{{g.count}}</span>
 </button>
@@ -39,71 +43,87 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 <sc-for list="{{g.items}}" as="w" hint-placeholder-count="2">
 <div style="display: flex; flex-direction: column; padding: 5px 4px 5px 24px; border-radius: 8px; background: {{w.bg}}">
 <div style="display: flex; gap: 2px; align-items: flex-start">
-<button onClick="{{w.open}}" aria-label="{{w.aria}}" style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 2px 0; border: 0; background: transparent; color: #f2efe6; text-align: left">
+<button onClick="{{w.open}}" aria-label="{{w.aria}}" style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 2px 0; border: 0; background: transparent; color: var(--fg); text-align: left">
 <span style="max-width: 100%; font-size: 13px; font-weight: {{w.weight}}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{w.title}}</span>
-<span style="font-size: 11px; color: #a3a49f"><span style="font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase">{{w.kind}}</span> · <span style="color: {{w.stColor}}; font-weight: {{w.stWeight}}">{{w.state}}</span></span>
+<span style="font-size: 11px; color: var(--muted)"><span style="font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase">{{w.kind}}</span> · <span style="color: {{w.stColor}}; font-weight: {{w.stWeight}}">{{w.state}}</span></span>
 </button>
 <sc-if value="{{w.queued}}" hint-placeholder-val="{{false}}">
-<button onClick="{{w.toggleMenu}}" aria-label="{{w.menuLabel}}" aria-expanded="{{w.menuExpanded}}" style="flex: none; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #cfd0ca; font-size: 16px; letter-spacing: 1px">···</button>
+<button onClick="{{w.toggleMenu}}" aria-label="{{w.menuLabel}}" aria-expanded="{{w.menuExpanded}}" style="flex: none; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text2); font-size: 16px; letter-spacing: 1px">···</button>
 </sc-if>
 </div>
 <sc-if value="{{w.menuOpen}}" hint-placeholder-val="{{false}}">
 <div role="group" aria-label="{{w.menuLabel}}" style="display: flex; gap: 2px; justify-content: flex-end">
-<button onClick="{{w.up}}" disabled="{{w.noUp}}" aria-label="Move up" title="Move up" style="display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #cfd0ca; opacity: {{w.upOpacity}}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M4 7l4-4 4 4"></path></svg></button>
-<button onClick="{{w.down}}" disabled="{{w.noDown}}" aria-label="Move down" title="Move down" style="display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #cfd0ca; opacity: {{w.downOpacity}}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M4 9l4 4 4-4"></path></svg></button>
-<button onClick="{{w.remove}}" aria-label="Remove from queue" title="Remove from queue" style="display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #cfd0ca"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"></path></svg></button>
+<button onClick="{{w.up}}" disabled="{{w.noUp}}" aria-label="Move up" title="Move up" style="display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text2); opacity: {{w.upOpacity}}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M4 7l4-4 4 4"></path></svg></button>
+<button onClick="{{w.down}}" disabled="{{w.noDown}}" aria-label="Move down" title="Move down" style="display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text2); opacity: {{w.downOpacity}}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M4 9l4 4 4-4"></path></svg></button>
+<button onClick="{{w.remove}}" aria-label="Remove from queue" title="Remove from queue" style="display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text2)"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"></path></svg></button>
 </div>
 </sc-if>
 </div>
 </sc-for>
 <sc-if value="{{g.empty}}" hint-placeholder-val="{{false}}">
-<p style="margin: 0 6px 4px 24px; font-size: 12px; color: #a3a49f">{{g.emptyText}}</p>
+<p style="margin: 0 6px 4px 24px; font-size: 12px; color: var(--muted)">{{g.emptyText}}</p>
 </sc-if>
 </sc-if>
 </div>
 </sc-for>
 </div>
 
-<div style="position: relative; margin-top: auto; padding-top: 10px; border-top: 1px solid #303632">
+<div style="position: relative; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line)">
 <sc-if value="{{nav.open}}" hint-placeholder-val="{{false}}">
-<div role="menu" aria-label="SoloFactory menu" style="position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; z-index: 4; display: flex; flex-direction: column; padding: 6px; border: 1px solid #3a413c; border-radius: 12px; background: #151917; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45)">
+<div role="menu" aria-label="SoloFactory menu" style="position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; z-index: 4; display: flex; flex-direction: column; padding: 6px; border: 1px solid var(--line2); border-radius: 12px; background: var(--panel); box-shadow: 0 12px 32px var(--shadow)">
 <sc-for list="{{railLinks}}" as="k" hint-placeholder-count="5">
-<button role="menuitem" onClick="{{k.act}}" style="display: flex; gap: 8px; align-items: center; justify-content: space-between; width: 100%; min-height: 40px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: #f2efe6; font-size: 13px; text-align: left"><span>{{k.label}}</span><sc-if value="{{k.hasBadge}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; color: #a3a49f">{{k.badge}}</span></sc-if></button>
+<button role="menuitem" onClick="{{k.act}}" style="display: flex; gap: 8px; align-items: center; justify-content: space-between; width: 100%; min-height: 40px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--fg); font-size: 13px; text-align: left"><span>{{k.label}}</span><sc-if value="{{k.hasBadge}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; color: var(--muted)">{{k.badge}}</span></sc-if></button>
 </sc-for>
 </div>
 </sc-if>
-<button onClick="{{nav.toggle}}" aria-haspopup="menu" aria-expanded="{{nav.expanded}}" style="display: flex; gap: 8px; align-items: center; justify-content: space-between; width: 100%; min-height: 40px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: #f2efe6; font-size: 13px; text-align: left"><span>Menu</span><span style="font-size: 12px; color: #a3a49f">{{nav.hint}}</span></button>
+<button onClick="{{nav.toggle}}" aria-haspopup="menu" aria-expanded="{{nav.expanded}}" style="display: flex; gap: 8px; align-items: center; justify-content: space-between; width: 100%; min-height: 40px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--fg); font-size: 13px; text-align: left"><span>Menu</span><span style="font-size: 12px; color: var(--muted)">{{nav.hint}}</span></button>
 </div>
 </nav>
 
 <main style="flex: 999 1 480px; min-width: 0; min-height: 0; display: flex; flex-direction: column">
-<header style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 14px 24px; border-bottom: 1px solid #303632">
+<header style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 14px 24px; border-bottom: 1px solid var(--line)">
 <div style="display: flex; flex-direction: column; min-width: 0">
 <div style="position: relative">
-<button onClick="{{pm.toggle}}" aria-haspopup="menu" aria-expanded="{{pm.expanded}}" aria-label="{{pm.aria}}" style="display: flex; gap: 8px; align-items: center; margin-left: -8px; padding: 2px 8px; border: 0; border-radius: 8px; background: transparent; color: #f2efe6">
+<button onClick="{{pm.toggle}}" aria-haspopup="menu" aria-expanded="{{pm.expanded}}" aria-label="{{pm.aria}}" style="display: flex; gap: 8px; align-items: center; margin-left: -8px; padding: 2px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--fg)">
 <span style="font-family: 'Iowan Old Style', Charter, Georgia, serif; font-size: 24px; font-weight: 500; letter-spacing: -0.01em">{{current.name}}</span>
-<span aria-hidden="true" style="font-size: 14px; color: #a3a49f">▾</span>
-<sc-if value="{{pm.others}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; font-weight: 600; color: #ffb36b">{{pm.othersText}}</span></sc-if>
+<span aria-hidden="true" style="font-size: 14px; color: var(--muted)">▾</span>
+<sc-if value="{{pm.others}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; font-weight: 600; color: var(--amber)">{{pm.othersText}}</span></sc-if>
 </button>
 <sc-if value="{{pm.open}}" hint-placeholder-val="{{false}}">
-<div role="menu" aria-label="Projects" style="position: absolute; top: calc(100% + 6px); left: -8px; z-index: 4; display: flex; flex-direction: column; min-width: 300px; padding: 6px; border: 1px solid #3a413c; border-radius: 12px; background: #151917; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45)">
+<div role="menu" aria-label="Projects" style="position: absolute; top: calc(100% + 6px); left: -8px; z-index: 4; display: flex; flex-direction: column; min-width: 300px; padding: 6px; border: 1px solid var(--line2); border-radius: 12px; background: var(--panel); box-shadow: 0 12px 32px var(--shadow)">
 <sc-for list="{{projects}}" as="p" hint-placeholder-count="3">
-<button role="menuitemradio" aria-checked="{{p.pressed}}" onClick="{{p.go}}" style="display: flex; flex-direction: column; gap: 1px; width: 100%; min-height: 48px; padding: 7px 10px; border: 0; border-radius: 8px; background: {{p.bg}}; color: #f2efe6; text-align: left">
+<button role="menuitemradio" aria-checked="{{p.pressed}}" onClick="{{p.go}}" style="display: flex; flex-direction: column; gap: 1px; width: 100%; min-height: 48px; padding: 7px 10px; border: 0; border-radius: 8px; background: {{p.bg}}; color: var(--fg); text-align: left">
 <span style="font-weight: {{p.weight}}">{{p.name}}</span>
-<span style="font-size: 12px; color: #a3a49f">{{p.status}}</span>
+<span style="font-size: 12px; color: var(--muted)">{{p.status}}</span>
 </button>
 </sc-for>
-<div style="height: 1px; margin: 6px 4px; background: #303632"></div>
-<button role="menuitem" onClick="{{pm.newProject}}" style="width: 100%; min-height: 40px; padding: 7px 10px; border: 0; border-radius: 8px; background: transparent; color: #f2efe6; text-align: left">+ New project</button>
+<div style="height: 1px; margin: 6px 4px; background: var(--line)"></div>
+<button role="menuitem" onClick="{{pm.newProject}}" style="width: 100%; min-height: 40px; padding: 7px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--fg); text-align: left">+ New project</button>
 </div>
 </sc-if>
 </div>
-<span style="font-size: 12px; color: #a3a49f">{{current.live}}</span>
+<span style="font-size: 12px; color: var(--muted)">{{current.live}}</span>
+</div>
+<div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
+<div style="position: relative">
+<button onClick="{{theme.toggle}}" aria-haspopup="menu" aria-expanded="{{theme.expanded}}" aria-label="{{theme.aria}}" title="{{theme.aria}}" style="display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--text2)">
+<sc-if value="{{theme.isAuto}}" hint-placeholder-val="{{true}}"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="9" r="6.5"></circle><path d="M9 2.5a6.5 6.5 0 0 1 0 13z" fill="currentColor"></path></svg></sc-if>
+<sc-if value="{{theme.isLight}}" hint-placeholder-val="{{false}}"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="9" cy="9" r="3.2"></circle><path d="M9 1.5v2M9 14.5v2M1.5 9h2M14.5 9h2M3.7 3.7l1.4 1.4M12.9 12.9l1.4 1.4M3.7 14.3l1.4-1.4M12.9 5.1l1.4-1.4"></path></svg></sc-if>
+<sc-if value="{{theme.isDark}}" hint-placeholder-val="{{false}}"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M14.8 11.3A6.5 6.5 0 0 1 6.7 3.2a6.5 6.5 0 1 0 8.1 8.1z"></path></svg></sc-if>
+</button>
+<sc-if value="{{theme.open}}" hint-placeholder-val="{{false}}">
+<div role="menu" aria-label="Theme" style="position: absolute; top: calc(100% + 6px); right: 0; z-index: 4; display: flex; flex-direction: column; min-width: 200px; padding: 6px; border: 1px solid var(--line2); border-radius: 12px; background: var(--panel); box-shadow: 0 12px 32px var(--shadow)">
+<sc-for list="{{theme.opts}}" as="o" hint-placeholder-count="3">
+<button role="menuitemradio" aria-checked="{{o.checked}}" onClick="{{o.pick}}" style="display: flex; justify-content: space-between; gap: 12px; width: 100%; min-height: 40px; padding: 7px 10px; border: 0; border-radius: 8px; background: {{o.bg}}; color: var(--fg); text-align: left"><span style="font-weight: {{o.weight}}">{{o.label}}</span><span style="font-size: 12px; color: var(--muted)">{{o.help}}</span></button>
+</sc-for>
+</div>
+</sc-if>
 </div>
 <div role="group" aria-label="Side panel" style="display: flex; gap: 6px; flex-wrap: wrap">
 <sc-for list="{{panelTabs}}" as="t" hint-placeholder-count="3">
 <button onClick="{{t.toggle}}" aria-pressed="{{t.pressed}}" style="min-height: 40px; padding: 8px 13px; border: 1px solid {{t.border}}; border-radius: 9px; background: {{t.bg}}; color: {{t.fg}}; font-size: 13px; font-weight: 600">{{t.label}}</button>
 </sc-for>
+</div>
 </div>
 </header>
 
@@ -112,57 +132,57 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 <div style="display: flex; flex-direction: column; max-width: 720px; width: 100%; margin: 0 auto">
 
 <sc-if value="{{m.isUser}}" hint-placeholder-val="{{false}}">
-<p style="align-self: flex-end; max-width: 82%; margin: 0; padding: 11px 14px; border-radius: 14px 14px 4px 14px; background: #262b28; color: #f2efe6">{{m.text}}</p>
+<p style="align-self: flex-end; max-width: 82%; margin: 0; padding: 11px 14px; border-radius: 14px 14px 4px 14px; background: var(--raise2); color: var(--fg)">{{m.text}}</p>
 </sc-if>
 
 <sc-if value="{{m.isGuide}}" hint-placeholder-val="{{true}}">
 <div style="display: flex; flex-direction: column; gap: 4px; max-width: 88%">
-<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8a8d87">Guide</span>
-<p style="margin: 0; color: #e6e3da">{{m.text}}</p>
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim)">Guide</span>
+<p style="margin: 0; color: var(--text1)">{{m.text}}</p>
 </div>
 </sc-if>
 
 <sc-if value="{{m.isPick}}" hint-placeholder-val="{{false}}">
-<section aria-label="Guide plan" style="display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid #303632; border-radius: 14px; background: #191d1b">
+<section aria-label="Guide plan" style="display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--card)">
 <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
-<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8a8d87">Guide</span>
-<span style="color: #a3a49f; font-size: 13px">read</span>
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim)">Guide</span>
+<span style="color: var(--muted); font-size: 13px">read</span>
 <sc-for list="{{m.read}}" as="d" hint-placeholder-count="3">
-<span style="padding: 2px 8px; border: 1px solid #303632; border-radius: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #cfd0ca">{{d}}</span>
+<span style="padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--text2)">{{d}}</span>
 </sc-for>
 </div>
 <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline">
-<span style="font-size: 13px; color: #a3a49f">I would treat this as a</span>
-<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #f2efe6">{{m.kindLabel}}</span>
+<span style="font-size: 13px; color: var(--muted)">I would treat this as a</span>
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg)">{{m.kindLabel}}</span>
 </div>
 <sc-if value="{{m.open}}" hint-placeholder-val="{{true}}">
-<p style="margin: 0; color: #e6e3da">{{m.why}}</p>
+<p style="margin: 0; color: var(--text1)">{{m.why}}</p>
 <ol aria-label="Steps this run will take" style="display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none">
 <sc-for list="{{m.steps}}" as="s" hint-placeholder-count="5">
-<li style="display: flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 7px; background: #202522; font-size: 12px; color: #cfd0ca"><span style="color: #a3a49f">{{s.n}}</span>{{s.label}}</li>
+<li style="display: flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 7px; background: var(--raise); font-size: 12px; color: var(--text2)"><span style="color: var(--muted)">{{s.n}}</span>{{s.label}}</li>
 </sc-for>
 </ol>
 </sc-if>
 <sc-if value="{{m.open}}" hint-placeholder-val="{{true}}">
 <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 4px">
-<button onClick="{{m.send}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #f2efe6; color: #11170f; font-weight: 700">{{m.cta}}</button>
-<span style="margin-left: 6px; font-size: 12px; color: #a3a49f">Wrong size?</span>
+<button onClick="{{m.send}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: var(--inv); color: var(--inv-fg); font-weight: 700">{{m.cta}}</button>
+<span style="margin-left: 6px; font-size: 12px; color: var(--muted)">Wrong size?</span>
 <sc-for list="{{m.alts}}" as="a" hint-placeholder-count="2">
-<button onClick="{{a.set}}" style="min-height: 44px; padding: 10px 12px; border: 1px solid #303632; border-radius: 10px; background: transparent; color: #f2efe6; font-size: 13px">{{a.label}}</button>
+<button onClick="{{a.set}}" style="min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--fg); font-size: 13px">{{a.label}}</button>
 </sc-for>
 </div>
 </sc-if>
 <sc-if value="{{m.sent}}" hint-placeholder-val="{{false}}">
-<p style="margin: 0; font-size: 13px; color: #a3a49f">{{m.sentLine}}</p>
+<p style="margin: 0; font-size: 13px; color: var(--muted)">{{m.sentLine}}</p>
 </sc-if>
 </section>
 </sc-if>
 
 <sc-if value="{{m.isRun}}" hint-placeholder-val="{{false}}">
-<section aria-label="Run" style="display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid {{m.cardBorder}}; border-radius: 14px; background: #191d1b">
+<section aria-label="Run" style="display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid {{m.cardBorder}}; border-radius: 14px; background: var(--card)">
 <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between">
-<span style="display: flex; gap: 8px; align-items: center; min-width: 0"><span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a3a49f">{{m.kindLabel}}</span><strong style="font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{m.title}}</strong></span>
-<button onClick="{{m.openRun}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #5a605b; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Open the run</button>
+<span style="display: flex; gap: 8px; align-items: center; min-width: 0"><span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted)">{{m.kindLabel}}</span><strong style="font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{m.title}}</strong></span>
+<button onClick="{{m.openRun}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid var(--line3); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">Open the run</button>
 </div>
 <div aria-hidden="true" style="display: flex; gap: 4px">
 <sc-for list="{{m.segs}}" as="g" hint-placeholder-count="5">
@@ -174,7 +194,7 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 <sc-for list="{{m.ctrls}}" as="c" hint-placeholder-count="2">
 <button onClick="{{c.act}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid {{c.border}}; border-radius: 9px; background: {{c.bg}}; color: {{c.fg}}; font-size: 13px; font-weight: 600">{{c.label}}</button>
 </sc-for>
-<button onClick="{{m.openSpec}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Open the spec</button>
+<button onClick="{{m.openSpec}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">Open the spec</button>
 </div>
 </section>
 </sc-if>
@@ -183,53 +203,53 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 </sc-for>
 </div>
 
-<div style="display: flex; flex-direction: column; gap: 10px; padding: 12px 24px 18px; border-top: 1px solid #303632; background: #151917">
+<div style="display: flex; flex-direction: column; gap: 10px; padding: 12px 24px 18px; border-top: 1px solid var(--line); background: var(--panel)">
 <div style="display: flex; flex-wrap: wrap; gap: 6px; max-width: 720px; width: 100%; margin: 0 auto">
 <sc-for list="{{suggestions}}" as="s" hint-placeholder-count="3">
-<button onClick="{{s.use}}" style="min-height: 36px; padding: 6px 11px; border: 1px solid #303632; border-radius: 99px; background: transparent; color: #cfd0ca; font-size: 12px">{{s.text}}</button>
+<button onClick="{{s.use}}" style="min-height: 36px; padding: 6px 11px; border: 1px solid var(--line); border-radius: 99px; background: transparent; color: var(--text2); font-size: 12px">{{s.text}}</button>
 </sc-for>
 </div>
-<div style="display: flex; gap: 8px; align-items: center; max-width: 720px; width: 100%; margin: 0 auto; padding: 6px 6px 6px 14px; border: 1px solid #3a413c; border-radius: 14px; background: #202522">
-<button onClick="{{onAttach}}" aria-label="Attach a file" style="flex: none; min-height: 40px; padding: 6px 10px; border: 1px solid #3a413c; border-radius: 9px; background: transparent; color: #cfd0ca; font-size: 13px">Attach</button>
+<div style="display: flex; gap: 8px; align-items: center; max-width: 720px; width: 100%; margin: 0 auto; padding: 6px 6px 6px 14px; border: 1px solid var(--line2); border-radius: 14px; background: var(--raise)">
+<button onClick="{{onAttach}}" aria-label="Attach a file" style="flex: none; min-height: 40px; padding: 6px 10px; border: 1px solid var(--line2); border-radius: 9px; background: transparent; color: var(--text2); font-size: 13px">Attach</button>
 <label for="guide-a" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0)">Message the Guide</label>
-<input id="guide-a" type="text" value="{{draft}}" onChange="{{onDraft}}" onKeyDown="{{onKey}}" placeholder="{{placeholder}}" autocomplete="off" style="flex: 1 1 auto; min-width: 0; min-height: 44px; border: 0; outline-offset: 4px; background: transparent; color: #f2efe6">
-<button onClick="{{onSend}}" style="flex: none; min-height: 44px; padding: 10px 18px; border: 0; border-radius: 10px; background: #f2efe6; color: #11170f; font-weight: 700">Send</button>
+<input id="guide-a" type="text" value="{{draft}}" onChange="{{onDraft}}" onKeyDown="{{onKey}}" placeholder="{{placeholder}}" autocomplete="off" style="flex: 1 1 auto; min-width: 0; min-height: 44px; border: 0; outline-offset: 4px; background: transparent; color: var(--fg)">
+<button onClick="{{onSend}}" style="flex: none; min-height: 44px; padding: 10px 18px; border: 0; border-radius: 10px; background: var(--inv); color: var(--inv-fg); font-weight: 700">Send</button>
 </div>
-<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; max-width: 720px; width: 100%; margin: 0 auto; font-size: 12px; color: #a3a49f">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; max-width: 720px; width: 100%; margin: 0 auto; font-size: 12px; color: var(--muted)">
 <span>The Guide reads this project's documents first. Do not paste passwords, tokens or private customer data.</span>
-<button onClick="{{toggleProvider}}" aria-label="{{providerAria}}" style="min-height: 32px; padding: 4px 10px; border: 1px solid #303632; border-radius: 99px; background: transparent; color: #cfd0ca; font-size: 12px">Builds with {{provider}}</button>
+<button onClick="{{toggleProvider}}" aria-label="{{providerAria}}" style="min-height: 32px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 99px; background: transparent; color: var(--text2); font-size: 12px">Builds with {{provider}}</button>
 </div>
 </div>
 </main>
 
 <sc-if value="{{panelOpen}}" hint-placeholder-val="{{true}}">
-<aside aria-label="{{panelTitle}}" style="flex: 1 1 420px; max-width: 520px; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid #303632; background: #151917">
-<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px; border-bottom: 1px solid #303632">
+<aside aria-label="{{panelTitle}}" style="flex: 1 1 420px; max-width: 520px; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--panel)">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line)">
 <h2 style="margin: 0; font-size: 15px; font-weight: 600">{{panelTitle}}</h2>
-<button onClick="{{closePanel}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Close</button>
+<button onClick="{{closePanel}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">Close</button>
 </div>
 <div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px 18px">
 
 
 <sc-if value="{{showDocs}}" hint-placeholder-val="{{false}}">
 <sc-if value="{{noDocs}}" hint-placeholder-val="{{false}}">
-<p style="margin: 0; color: #a3a49f">This project has no documents yet. The first brief writes PRD.md, FEATURES.md and ACCEPTANCE.md. If the app already exists in a folder, the Guide can adopt it and write the baseline from the code.</p>
+<p style="margin: 0; color: var(--muted)">This project has no documents yet. The first brief writes PRD.md, FEATURES.md and ACCEPTANCE.md. If the app already exists in a folder, the Guide can adopt it and write the baseline from the code.</p>
 </sc-if>
 <sc-for list="{{docs}}" as="d" hint-placeholder-count="4">
-<button onClick="{{d.open}}" aria-pressed="{{d.pressed}}" style="display: flex; flex-direction: column; gap: 3px; width: 100%; min-height: 48px; padding: 9px 12px; border: 1px solid {{d.border}}; border-radius: 10px; background: {{d.bg}}; color: #f2efe6; text-align: left">
-<span style="display: flex; gap: 8px; align-items: center; justify-content: space-between"><span style="font-family: ui-monospace, Menlo, monospace; font-size: 13px">{{d.name}}</span><span style="font-size: 12px; color: #a3a49f">{{d.tag}}</span></span>
-<span style="font-size: 12px; color: #a3a49f">{{d.note}}</span>
+<button onClick="{{d.open}}" aria-pressed="{{d.pressed}}" style="display: flex; flex-direction: column; gap: 3px; width: 100%; min-height: 48px; padding: 9px 12px; border: 1px solid {{d.border}}; border-radius: 10px; background: {{d.bg}}; color: var(--fg); text-align: left">
+<span style="display: flex; gap: 8px; align-items: center; justify-content: space-between"><span style="font-family: ui-monospace, Menlo, monospace; font-size: 13px">{{d.name}}</span><span style="font-size: 12px; color: var(--muted)">{{d.tag}}</span></span>
+<span style="font-size: 12px; color: var(--muted)">{{d.note}}</span>
 </button>
 </sc-for>
 <sc-if value="{{hasDoc}}" hint-placeholder-val="{{false}}">
 <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
-<button onClick="{{closeDoc}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">All documents</button>
+<button onClick="{{closeDoc}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">All documents</button>
 <sc-for list="{{doc.ctrls}}" as="c" hint-placeholder-count="0">
 <button onClick="{{c.act}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid {{c.border}}; border-radius: 9px; background: {{c.bg}}; color: {{c.fg}}; font-size: 13px; font-weight: 600">{{c.label}}</button>
 </sc-for>
 </div>
 <sc-if value="{{doc.hasLine}}" hint-placeholder-val="{{false}}">
-<span style="font-size: 13px; color: #cfd0ca">{{doc.line}}</span>
+<span style="font-size: 13px; color: var(--text2)">{{doc.line}}</span>
 </sc-if>
 <article style="display: flex; flex-direction: column; gap: 12px; margin-top: 4px; padding: 22px 24px; border-radius: 6px; background: #f4efe2; color: #23261f">
 <h3 style="margin: 0; font-family: 'Iowan Old Style', Charter, Georgia, serif; font-size: 20px; font-weight: 500">{{doc.name}}</h3>
@@ -238,7 +258,7 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 <strong style="font-weight: 600; color: #6b4a12">{{doc.revTitle}}</strong>
 <span>Nothing is building. Type what should change, or tell the Guide in plain words and it edits this spec for you.</span>
 <label for="revise-a" style="font-size: 12px; font-weight: 600">What should change in this revision</label>
-<textarea id="revise-a" value="{{doc.change}}" onChange="{{doc.onChange}}" rows="3" placeholder="For example: compare by transcript id, not by file name" style="width: 100%; padding: 10px 12px; border: 1px solid #a89f80; border-radius: 10px; background: #ffffff; color: #23261f; font: inherit; resize: vertical"></textarea>
+<textarea id="revise-a" value="{{doc.change}}" onChange="{{doc.onChange}}" rows="3" placeholder="For example: compare by transcript id, not by file name" style="width: 100%; padding: 10px 12px; border: 1px solid #a89f80; border-radius: 10px; background: var(--fg-strong); color: #23261f; font: inherit; resize: vertical"></textarea>
 <span style="font-size: 13px">Resubmit runs a short Guide review of the changed spec, then replaces the run. Work the change does not touch is reused. Discard changes throws this draft away and puts the run back as it was.</span>
 </div>
 </sc-if>
@@ -254,29 +274,29 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 
 <sc-if value="{{showApp}}" hint-placeholder-val="{{false}}">
 <sc-if value="{{app.none}}" hint-placeholder-val="{{false}}">
-<p style="margin: 0; color: #a3a49f">Nothing is live yet. The first run deploys the app here, on a free local port.</p>
+<p style="margin: 0; color: var(--muted)">Nothing is live yet. The first run deploys the app here, on a free local port.</p>
 </sc-if>
 <sc-if value="{{app.live}}" hint-placeholder-val="{{true}}">
 <div style="display: flex; flex-direction: column; gap: 4px">
-<span style="display: flex; gap: 8px; align-items: center"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 99px; background: #f2efe6"></span><strong style="font-weight: 600">Live · {{app.release}}</strong></span>
-<span style="font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: #cfd0ca">{{app.url}}</span>
+<span style="display: flex; gap: 8px; align-items: center"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 99px; background: var(--inv)"></span><strong style="font-weight: 600">Live · {{app.release}}</strong></span>
+<span style="font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--text2)">{{app.url}}</span>
 </div>
 <div style="display: flex; flex-wrap: wrap; gap: 8px">
-<a href="{{app.url}}" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; min-height: 44px; padding: 10px 14px; border-radius: 10px; background: #f2efe6; color: #11170f; font-size: 13px; font-weight: 700; text-decoration: none">Open the app</a>
-<button onClick="{{app.relaunch}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid #5a605b; border-radius: 10px; background: transparent; color: #f2efe6; font-size: 13px; font-weight: 600">Relaunch</button>
+<a href="{{app.url}}" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; min-height: 44px; padding: 10px 14px; border-radius: 10px; background: var(--inv); color: var(--inv-fg); font-size: 13px; font-weight: 700; text-decoration: none">Open the app</a>
+<button onClick="{{app.relaunch}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid var(--line3); border-radius: 10px; background: transparent; color: var(--fg); font-size: 13px; font-weight: 600">Relaunch</button>
 </div>
 <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
 <sc-for list="{{app.stats}}" as="t" hint-placeholder-count="4">
-<div style="display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid #303632; border-radius: 10px; background: #191d1b"><span style="font-size: 12px; color: #a3a49f">{{t.label}}</span><strong style="font-size: 18px; font-weight: 600">{{t.value}}</strong></div>
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card)"><span style="font-size: 12px; color: var(--muted)">{{t.label}}</span><strong style="font-size: 18px; font-weight: 600">{{t.value}}</strong></div>
 </sc-for>
 </div>
-<p style="margin: 0; font-size: 13px; color: #a3a49f">Live request counts, errors, response time and uptime from the app's telemetry, as on today's run page. Busiest routes list below them once traffic arrives. The previous release stays up until a new one passes its deploy checks.</p>
+<p style="margin: 0; font-size: 13px; color: var(--muted)">Live request counts, errors, response time and uptime from the app's telemetry, as on today's run page. Busiest routes list below them once traffic arrives. The previous release stays up until a new one passes its deploy checks.</p>
 </sc-if>
 </sc-if>
 
 <sc-if value="{{showRun}}" hint-placeholder-val="{{false}}">
 <sc-if value="{{noRun}}" hint-placeholder-val="{{false}}">
-<p style="margin: 0; color: #a3a49f">No run is active in this project. Send the Guide a request and confirm its plan to start one.</p>
+<p style="margin: 0; color: var(--muted)">No run is active in this project. Send the Guide a request and confirm its plan to start one.</p>
 </sc-if>
 <sc-if value="{{hasRun}}" hint-placeholder-val="{{false}}">
 <div style="display: flex; flex-direction: column; gap: 4px">
@@ -285,37 +305,37 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 <span style="font-size: 13px; font-weight: {{run.lineWeight}}; color: {{run.lineColor}}">{{run.line}}</span>
 </div>
 <sc-if value="{{run.stuck}}" hint-placeholder-val="{{false}}">
-<div role="status" style="display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid #6a3835; border-radius: 12px; background: #2a1817">
-<strong style="font-weight: 600; color: #ff9d98">This run needs you</strong>
-<span style="color: #e6e3da">One check failed twice, so the factory stopped instead of spending more turns. Nothing was deployed and the last release is still live. Choose a repair, restart from an earlier step, or cancel.</span>
+<div role="status" style="display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--red-line); border-radius: 12px; background: var(--red-bg)">
+<strong style="font-weight: 600; color: var(--red-text)">This run needs you</strong>
+<span style="color: var(--text1)">One check failed twice, so the factory stopped instead of spending more turns. Nothing was deployed and the last release is still live. Choose a repair, restart from an earlier step, or cancel.</span>
 </div>
 </sc-if>
 <div style="display: flex; flex-wrap: wrap; gap: 8px">
 <sc-for list="{{run.ctrls}}" as="c" hint-placeholder-count="2">
 <button onClick="{{c.act}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid {{c.border}}; border-radius: 10px; background: {{c.bg}}; color: {{c.fg}}; font-size: 13px; font-weight: 600">{{c.label}}</button>
 </sc-for>
-<button onClick="{{run.openSpec}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Open the spec</button>
+<button onClick="{{run.openSpec}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">Open the spec</button>
 </div>
 <ol style="display: flex; flex-direction: column; gap: 0; margin: 6px 0 0; padding: 0; list-style: none">
 <sc-for list="{{run.stops}}" as="s" hint-placeholder-count="5">
-<li style="display: flex; gap: 12px; align-items: center; min-height: 46px; border-bottom: 1px solid #262b28">
+<li style="display: flex; gap: 12px; align-items: center; min-height: 46px; border-bottom: 1px solid var(--raise2)">
 <span style="flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 99px; border: 1px solid {{s.ring}}; background: {{s.bg}}; color: {{s.fg}}; font-size: 12px; font-weight: 700">{{s.n}}</span>
 <span style="flex: 1 1 auto; color: {{s.text}}">{{s.label}}</span>
-<span style="font-size: 12px; color: #a3a49f">{{s.state}}</span>
+<span style="font-size: 12px; color: var(--muted)">{{s.state}}</span>
 <sc-if value="{{s.canRestart}}" hint-placeholder-val="{{false}}">
-<button onClick="{{s.restart}}" style="flex: none; min-height: 36px; padding: 6px 10px; border: 1px solid #3a413c; border-radius: 8px; background: transparent; color: #f2efe6; font-size: 12px">Restart from here</button>
+<button onClick="{{s.restart}}" style="flex: none; min-height: 36px; padding: 6px 10px; border: 1px solid var(--line2); border-radius: 8px; background: transparent; color: var(--fg); font-size: 12px">Restart from here</button>
 </sc-if>
 </li>
 </sc-for>
 </ol>
-<p style="margin: 6px 0 0; font-size: 13px; color: #a3a49f">{{run.note}}</p>
+<p style="margin: 6px 0 0; font-size: 13px; color: var(--muted)">{{run.note}}</p>
 <sc-if value="{{hasQueue}}" hint-placeholder-val="{{false}}">
-<p style="margin: 4px 0 0; font-size: 13px; color: #cfd0ca">{{queueTitle}}. {{queueNote}} Reorder them under Queued in the left rail.</p>
+<p style="margin: 4px 0 0; font-size: 13px; color: var(--text2)">{{queueTitle}}. {{queueNote}} Reorder them under Queued in the left rail.</p>
 </sc-if>
 <sc-if value="{{run.hasMore}}" hint-placeholder-val="{{false}}">
-<div style="display: flex; flex-wrap: wrap; gap: 6px; padding-top: 10px; border-top: 1px solid #262b28">
+<div style="display: flex; flex-wrap: wrap; gap: 6px; padding-top: 10px; border-top: 1px solid var(--raise2)">
 <sc-for list="{{run.more}}" as="c" hint-placeholder-count="3">
-<button onClick="{{c.act}}" style="min-height: 36px; padding: 6px 10px; border: 1px solid #3a413c; border-radius: 8px; background: transparent; color: #f2efe6; font-size: 12px">{{c.label}}</button>
+<button onClick="{{c.act}}" style="min-height: 36px; padding: 6px 10px; border: 1px solid var(--line2); border-radius: 8px; background: transparent; color: var(--fg); font-size: 12px">{{c.label}}</button>
 </sc-for>
 </div>
 </sc-if>
@@ -327,13 +347,13 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 </sc-if>
 
 <sc-if value="{{vw.open}}" hint-placeholder-val="{{false}}">
-<div role="dialog" aria-modal="true" aria-label="Document" style="position: absolute; inset: 0; z-index: 5; display: flex; padding: 24px; background: rgba(8, 10, 9, 0.74)">
-<div style="flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid #3a413c; border-radius: 14px; background: #151917; overflow: hidden">
-<div style="flex: none; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid #303632">
+<div role="dialog" aria-modal="true" aria-label="Document" style="position: absolute; inset: 0; z-index: 5; display: flex; padding: 24px; background: var(--scrim)">
+<div style="flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line2); border-radius: 14px; background: var(--panel); overflow: hidden">
+<div style="flex: none; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid var(--line)">
 <div style="flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column">
-<span style="display: flex; gap: 10px; align-items: baseline; min-width: 0"><strong style="font-family: ui-monospace, Menlo, monospace; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{vw.name}}</strong><span style="font-size: 12px; color: #a3a49f">{{vw.tag}}</span></span>
+<span style="display: flex; gap: 10px; align-items: baseline; min-width: 0"><strong style="font-family: ui-monospace, Menlo, monospace; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{vw.name}}</strong><span style="font-size: 12px; color: var(--muted)">{{vw.tag}}</span></span>
 <sc-if value="{{vw.hasLine}}" hint-placeholder-val="{{false}}">
-<span style="font-size: 12px; color: #a3a49f">{{vw.line}}</span>
+<span style="font-size: 12px; color: var(--muted)">{{vw.line}}</span>
 </sc-if>
 </div>
 <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
@@ -343,7 +363,7 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 <sc-for list="{{vw.ctrls}}" as="c" hint-placeholder-count="1">
 <button onClick="{{c.act}}" style="min-height: 40px; padding: 8px 14px; border: 1px solid {{c.border}}; border-radius: 9px; background: {{c.bg}}; color: {{c.fg}}; font-size: 13px; font-weight: 600">{{c.label}}</button>
 </sc-for>
-<button onClick="{{vw.close}}" style="min-height: 40px; padding: 8px 14px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Close</button>
+<button onClick="{{vw.close}}" style="min-height: 40px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">Close</button>
 </div>
 </div>
 <div style="flex: 1 1 0; min-height: 0; display: flex; flex-wrap: wrap; overflow: auto">
@@ -379,27 +399,27 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 <p style="margin: 0; padding-top: 14px; border-top: 1px solid #d8d0b8; font-size: 13px; color: #5c5f55">{{vw.footer}}</p>
 </article>
 </div>
-<aside aria-label="Guide for this document" style="flex: 1 1 340px; max-width: 420px; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid #303632">
-<div style="flex: none; display: flex; flex-direction: column; padding: 12px 16px; border-bottom: 1px solid #303632">
-<strong style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8a8d87">Guide</strong>
-<span style="font-size: 12px; color: #a3a49f">Working on this document with you</span>
+<aside aria-label="Guide for this document" style="flex: 1 1 340px; max-width: 420px; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line)">
+<div style="flex: none; display: flex; flex-direction: column; padding: 12px 16px; border-bottom: 1px solid var(--line)">
+<strong style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim)">Guide</strong>
+<span style="font-size: 12px; color: var(--muted)">Working on this document with you</span>
 </div>
 <div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column-reverse; gap: 12px; padding: 16px">
 <sc-for list="{{vw.chat}}" as="m" hint-placeholder-count="1">
 <div style="display: flex; flex-direction: column">
 <sc-if value="{{m.mine}}" hint-placeholder-val="{{false}}">
-<p style="align-self: flex-end; max-width: 88%; margin: 0; padding: 9px 12px; border-radius: 12px 12px 4px 12px; background: #f2efe6; color: #11170f">{{m.text}}</p>
+<p style="align-self: flex-end; max-width: 88%; margin: 0; padding: 9px 12px; border-radius: 12px 12px 4px 12px; background: var(--inv); color: var(--inv-fg)">{{m.text}}</p>
 </sc-if>
 <sc-if value="{{m.guide}}" hint-placeholder-val="{{true}}">
-<p style="max-width: 94%; margin: 0; padding: 9px 12px; border: 1px solid #303632; border-radius: 12px 12px 12px 4px; background: #202522; color: #e6e3da">{{m.text}}</p>
+<p style="max-width: 94%; margin: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px 12px 12px 4px; background: var(--raise); color: var(--text1)">{{m.text}}</p>
 </sc-if>
 </div>
 </sc-for>
 </div>
-<div style="flex: none; display: flex; gap: 8px; align-items: center; margin: 12px 16px 16px; padding: 5px 5px 5px 12px; border: 1px solid #3a413c; border-radius: 12px; background: #202522">
+<div style="flex: none; display: flex; gap: 8px; align-items: center; margin: 12px 16px 16px; padding: 5px 5px 5px 12px; border: 1px solid var(--line2); border-radius: 12px; background: var(--raise)">
 <label for="guide-doc" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0)">Ask the Guide about this document</label>
-<input id="guide-doc" type="text" value="{{vw.draft}}" onChange="{{vw.onDraft}}" onKeyDown="{{vw.onKey}}" placeholder="Tell the Guide what to change" autocomplete="off" style="flex: 1 1 auto; min-width: 0; min-height: 44px; border: 0; outline-offset: 4px; background: transparent; color: #f2efe6">
-<button onClick="{{vw.send}}" style="flex: none; min-height: 44px; padding: 10px 14px; border: 0; border-radius: 9px; background: #f2efe6; color: #11170f; font-weight: 700">Send</button>
+<input id="guide-doc" type="text" value="{{vw.draft}}" onChange="{{vw.onDraft}}" onKeyDown="{{vw.onKey}}" placeholder="Tell the Guide what to change" autocomplete="off" style="flex: 1 1 auto; min-width: 0; min-height: 44px; border: 0; outline-offset: 4px; background: transparent; color: var(--fg)">
+<button onClick="{{vw.send}}" style="flex: none; min-height: 44px; padding: 10px 14px; border: 0; border-radius: 9px; background: var(--inv); color: var(--inv-fg); font-weight: 700">Send</button>
 </div>
 </aside>
 </div>
@@ -408,83 +428,83 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 </sc-if>
 
 <sc-if value="{{info.open}}" hint-placeholder-val="{{false}}">
-<div role="dialog" aria-modal="true" aria-label="{{info.title}}" style="position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(8, 10, 9, 0.74)">
-<div style="display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 520px; padding: 22px 24px; border: 1px solid #3a413c; border-radius: 14px; background: #151917">
+<div role="dialog" aria-modal="true" aria-label="{{info.title}}" style="position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--scrim)">
+<div style="display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 520px; padding: 22px 24px; border: 1px solid var(--line2); border-radius: 14px; background: var(--panel)">
 <h2 style="margin: 0; font-size: 18px; font-weight: 600">{{info.title}}</h2>
-<p style="margin: 0; color: #e6e3da">{{info.text}}</p>
-<p style="margin: 0; font-size: 13px; color: #a3a49f">Same as today's version. This mockup only shows where it lives.</p>
-<button onClick="{{info.close}}" style="align-self: flex-end; min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #f2efe6; color: #11170f; font-weight: 700">OK</button>
+<p style="margin: 0; color: var(--text1)">{{info.text}}</p>
+<p style="margin: 0; font-size: 13px; color: var(--muted)">Same as today's version. This mockup only shows where it lives.</p>
+<button onClick="{{info.close}}" style="align-self: flex-end; min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: var(--inv); color: var(--inv-fg); font-weight: 700">OK</button>
 </div>
 </div>
 </sc-if>
 
 <sc-if value="{{np.open}}" hint-placeholder-val="{{false}}">
-<div role="dialog" aria-modal="true" aria-label="New project" style="position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(8, 10, 9, 0.74)">
-<div style="display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 520px; padding: 22px 24px; border: 1px solid #3a413c; border-radius: 14px; background: #151917">
+<div role="dialog" aria-modal="true" aria-label="New project" style="position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--scrim)">
+<div style="display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 520px; padding: 22px 24px; border: 1px solid var(--line2); border-radius: 14px; background: var(--panel)">
 <h2 style="margin: 0; font-size: 18px; font-weight: 600">New project</h2>
 <label for="np-name" style="font-size: 13px; font-weight: 600">Project name</label>
-<input id="np-name" type="text" value="{{np.name}}" onChange="{{np.onName}}" placeholder="For example: Client Portal" autocomplete="off" style="min-height: 44px; padding: 8px 12px; border: 1px solid #3a413c; border-radius: 10px; background: #202522; color: #f2efe6">
+<input id="np-name" type="text" value="{{np.name}}" onChange="{{np.onName}}" placeholder="For example: Client Portal" autocomplete="off" style="min-height: 44px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise); color: var(--fg)">
 <div role="radiogroup" aria-label="Start from" style="display: flex; flex-direction: column; gap: 8px">
 <sc-for list="{{np.modes}}" as="o" hint-placeholder-count="2">
-<button role="radio" aria-checked="{{o.checked}}" onClick="{{o.pick}}" style="display: flex; flex-direction: column; gap: 2px; width: 100%; min-height: 56px; padding: 10px 12px; border: 1px solid {{o.border}}; border-radius: 10px; background: {{o.bg}}; color: #f2efe6; text-align: left"><strong style="font-weight: 600">{{o.label}}</strong><span style="font-size: 12px; color: #a3a49f">{{o.help}}</span></button>
+<button role="radio" aria-checked="{{o.checked}}" onClick="{{o.pick}}" style="display: flex; flex-direction: column; gap: 2px; width: 100%; min-height: 56px; padding: 10px 12px; border: 1px solid {{o.border}}; border-radius: 10px; background: {{o.bg}}; color: var(--fg); text-align: left"><strong style="font-weight: 600">{{o.label}}</strong><span style="font-size: 12px; color: var(--muted)">{{o.help}}</span></button>
 </sc-for>
 </div>
 <sc-if value="{{np.adopt}}" hint-placeholder-val="{{false}}">
 <label for="np-folder" style="font-size: 13px; font-weight: 600">Folder on this computer</label>
-<input id="np-folder" type="text" value="{{np.folder}}" onChange="{{np.onFolder}}" placeholder="/Users/you/code/my-app" autocomplete="off" style="min-height: 44px; padding: 8px 12px; border: 1px solid #3a413c; border-radius: 10px; background: #202522; color: #f2efe6; font-family: ui-monospace, Menlo, monospace">
+<input id="np-folder" type="text" value="{{np.folder}}" onChange="{{np.onFolder}}" placeholder="/Users/you/code/my-app" autocomplete="off" style="min-height: 44px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise); color: var(--fg); font-family: ui-monospace, Menlo, monospace">
 </sc-if>
 <div role="radiogroup" aria-label="Where the repo lives" style="display: flex; flex-direction: column; gap: 6px">
 <span style="font-size: 13px; font-weight: 600">Where the repo lives</span>
 <sc-for list="{{np.repoModes}}" as="o" hint-placeholder-count="2">
-<button role="radio" aria-checked="{{o.checked}}" onClick="{{o.pick}}" style="display: flex; flex-direction: column; gap: 2px; width: 100%; min-height: 48px; padding: 8px 12px; border: 1px solid {{o.border}}; border-radius: 10px; background: {{o.bg}}; color: #f2efe6; text-align: left"><strong style="font-weight: 600">{{o.label}}</strong><span style="font-size: 12px; color: #a3a49f; font-family: {{o.font}}">{{o.help}}</span></button>
+<button role="radio" aria-checked="{{o.checked}}" onClick="{{o.pick}}" style="display: flex; flex-direction: column; gap: 2px; width: 100%; min-height: 48px; padding: 8px 12px; border: 1px solid {{o.border}}; border-radius: 10px; background: {{o.bg}}; color: var(--fg); text-align: left"><strong style="font-weight: 600">{{o.label}}</strong><span style="font-size: 12px; color: var(--muted); font-family: {{o.font}}">{{o.help}}</span></button>
 </sc-for>
 <sc-if value="{{np.custom}}" hint-placeholder-val="{{false}}">
 <label for="np-repo" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Repo folder</label>
-<input id="np-repo" type="text" value="{{np.repo}}" onChange="{{np.onRepo}}" placeholder="/Users/you/code/client-portal" autocomplete="off" style="min-height: 44px; padding: 8px 12px; border: 1px solid #3a413c; border-radius: 10px; background: #202522; color: #f2efe6; font-family: ui-monospace, Menlo, monospace">
-<span style="font-size: 12px; color: #a3a49f">SoloFactory makes this folder a git repo if it is not one yet, and lists the project here as usual. An empty folder is best.</span>
+<input id="np-repo" type="text" value="{{np.repo}}" onChange="{{np.onRepo}}" placeholder="/Users/you/code/client-portal" autocomplete="off" style="min-height: 44px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise); color: var(--fg); font-family: ui-monospace, Menlo, monospace">
+<span style="font-size: 12px; color: var(--muted)">SoloFactory makes this folder a git repo if it is not one yet, and lists the project here as usual. An empty folder is best.</span>
 </sc-if>
 </div>
 <div style="display: flex; gap: 8px; justify-content: flex-end">
-<button onClick="{{np.close}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid #303632; border-radius: 10px; background: transparent; color: #f2efe6">Cancel</button>
-<button onClick="{{np.create}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #f2efe6; color: #11170f; font-weight: 700">{{np.cta}}</button>
+<button onClick="{{np.close}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--fg)">Cancel</button>
+<button onClick="{{np.create}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: var(--inv); color: var(--inv-fg); font-weight: 700">{{np.cta}}</button>
 </div>
 </div>
 </div>
 </sc-if>
 
 <sc-if value="{{cfg.open}}" hint-placeholder-val="{{false}}">
-<div role="dialog" aria-modal="true" aria-label="Settings" style="position: absolute; inset: 0; z-index: 6; display: flex; padding: 24px; background: rgba(8, 10, 9, 0.74)">
-<div style="flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; max-width: 1040px; margin: 0 auto; border: 1px solid #3a413c; border-radius: 14px; background: #151917; overflow: hidden">
-<div style="flex: none; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid #303632">
-<div style="display: flex; flex-direction: column"><h2 style="margin: 0; font-size: 18px; font-weight: 600">Settings</h2><span style="font-size: 12px; color: #a3a49f">{{cfg.status}}</span></div>
-<button onClick="{{cfg.close}}" style="min-height: 40px; padding: 8px 14px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Done</button>
+<div role="dialog" aria-modal="true" aria-label="Settings" style="position: absolute; inset: 0; z-index: 6; display: flex; padding: 24px; background: var(--scrim)">
+<div style="flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; max-width: 1040px; margin: 0 auto; border: 1px solid var(--line2); border-radius: 14px; background: var(--panel); overflow: hidden">
+<div style="flex: none; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--line)">
+<div style="display: flex; flex-direction: column"><h2 style="margin: 0; font-size: 18px; font-weight: 600">Settings</h2><span style="font-size: 12px; color: var(--muted)">{{cfg.status}}</span></div>
+<button onClick="{{cfg.close}}" style="min-height: 40px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">Done</button>
 </div>
 <div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; padding: 20px 24px 28px">
-<p style="margin: 0; font-size: 13px; color: #a3a49f">Saved as you change them, to settings.json in the factory home. A setting your environment already sets is locked here and names the variable. Changes apply from the next run: a run in progress keeps the settings it started with.</p>
+<p style="margin: 0; font-size: 13px; color: var(--muted)">Saved as you change them, to settings.json in the factory home. A setting your environment already sets is locked here and names the variable. Changes apply from the next run: a run in progress keeps the settings it started with.</p>
 <sc-for list="{{cfg.sections}}" as="sec" hint-placeholder-count="3">
 <section style="display: flex; flex-direction: column; gap: 4px">
 <h3 style="margin: 0 0 6px; font-size: 15px; font-weight: 600">{{sec.title}}</h3>
-<sc-if value="{{sec.hasNote}}" hint-placeholder-val="{{false}}"><p style="margin: 0 0 6px; font-size: 13px; color: #ffb36b">{{sec.note}}</p></sc-if>
+<sc-if value="{{sec.hasNote}}" hint-placeholder-val="{{false}}"><p style="margin: 0 0 6px; font-size: 13px; color: var(--amber)">{{sec.note}}</p></sc-if>
 <sc-for list="{{sec.fields}}" as="fd" hint-placeholder-count="3">
-<div style="display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 0; border-bottom: 1px solid #262b28">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--raise2)">
 <div style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 2px">
 <label for="{{fd.id}}" style="font-weight: 600">{{fd.label}}</label>
-<span style="font-size: 12px; color: #a3a49f">{{fd.help}}</span>
+<span style="font-size: 12px; color: var(--muted)">{{fd.help}}</span>
 <span style="font-size: 12px; color: {{fd.envColor}}; font-family: ui-monospace, Menlo, monospace">{{fd.envLine}}</span>
 </div>
 <div style="flex: 0 1 260px; min-width: 0; display: flex; gap: 8px; align-items: center">
 <sc-if value="{{fd.isSelect}}" hint-placeholder-val="{{false}}">
-<select id="{{fd.id}}" value="{{fd.value}}" onChange="{{fd.onChange}}" disabled="{{fd.locked}}" style="width: 100%; min-height: 40px; padding: 6px 10px; border: 1px solid #3a413c; border-radius: 9px; background: #202522; color: #f2efe6">
+<select id="{{fd.id}}" value="{{fd.value}}" onChange="{{fd.onChange}}" disabled="{{fd.locked}}" style="width: 100%; min-height: 40px; padding: 6px 10px; border: 1px solid var(--line2); border-radius: 9px; background: var(--raise); color: var(--fg)">
 <sc-for list="{{fd.options}}" as="op" hint-placeholder-count="2"><option value="{{op.v}}">{{op.label}}</option></sc-for>
 </select>
 </sc-if>
 <sc-if value="{{fd.isInput}}" hint-placeholder-val="{{true}}">
-<input id="{{fd.id}}" type="{{fd.inputType}}" value="{{fd.value}}" onChange="{{fd.onChange}}" disabled="{{fd.locked}}" min="{{fd.min}}" max="{{fd.max}}" autocomplete="off" style="width: 100%; min-height: 40px; padding: 6px 10px; border: 1px solid #3a413c; border-radius: 9px; background: #202522; color: #f2efe6">
-<sc-if value="{{fd.hasUnit}}" hint-placeholder-val="{{false}}"><span style="flex: none; font-size: 13px; color: #a3a49f">{{fd.unit}}</span></sc-if>
+<input id="{{fd.id}}" type="{{fd.inputType}}" value="{{fd.value}}" onChange="{{fd.onChange}}" disabled="{{fd.locked}}" min="{{fd.min}}" max="{{fd.max}}" autocomplete="off" style="width: 100%; min-height: 40px; padding: 6px 10px; border: 1px solid var(--line2); border-radius: 9px; background: var(--raise); color: var(--fg)">
+<sc-if value="{{fd.hasUnit}}" hint-placeholder-val="{{false}}"><span style="flex: none; font-size: 13px; color: var(--muted)">{{fd.unit}}</span></sc-if>
 </sc-if>
 <sc-if value="{{fd.isToggle}}" hint-placeholder-val="{{false}}">
-<input id="{{fd.id}}" type="checkbox" checked="{{fd.on}}" onChange="{{fd.onToggle}}" disabled="{{fd.locked}}" style="width: 22px; height: 22px; accent-color: #f2efe6">
-<span style="font-size: 13px; color: #cfd0ca">{{fd.toggleText}}</span>
+<input id="{{fd.id}}" type="checkbox" checked="{{fd.on}}" onChange="{{fd.onToggle}}" disabled="{{fd.locked}}" style="width: 22px; height: 22px; accent-color: var(--fg)">
+<span style="font-size: 13px; color: var(--text2)">{{fd.toggleText}}</span>
 </sc-if>
 </div>
 </div>
@@ -502,7 +522,7 @@ a{color:#f2efe6}a:hover{color:#ffffff}
 class Component extends DCLogic {
   state = {
     pid: 'nm', panel: 'run', docName: '', draft: '', nextId: 100,
-    groupsOpen: { needs: true, running: true, queued: true, done: false }, selRun: 0, pmOpen: false, navOpen: false, rowMenu: 0, info: null, np: null, cfgOpen: false, cfgVals: {}, cfgTouched: false, extra: [], provider: {},
+    themeMode: 'auto', themeOpen: false, groupsOpen: { needs: true, running: true, queued: true, done: false }, selRun: 0, pmOpen: false, navOpen: false, rowMenu: 0, info: null, np: null, cfgOpen: false, cfgVals: {}, cfgTouched: false, extra: [], provider: {},
     viewer: '', viewerEdit: false, vdraft: '', activeSec: -1, secDraft: '', docEdits: {}, docAdds: {}, docChat: {},
     runs: [
       { id: 1, pid: 'nm', kind: 'feature', title: 'Batch re-run report', state: 'building', idx: 2, trap: true, repairs: 0 },
@@ -555,9 +575,9 @@ class Component extends DCLogic {
 
   kinds() {
     return {
-      fix: { label: 'Quick fix', chipBg: '#202522', chipFg: '#cfd0ca', cta: 'Send to the factory', steps: ['Fix note', 'Build', 'Gates', 'Deploy', 'Update docs'] },
-      feature: { label: 'Feature', chipBg: '#262b28', chipFg: '#f2efe6', cta: 'Send to the factory', steps: ['Feature spec', 'Plan', 'Build', 'Gates', 'Review', 'Deploy', 'Update docs'] },
-      prd: { label: 'Full brief', chipBg: '#202522', chipFg: '#cfd0ca', cta: 'Start the interview', steps: ['Interview', 'PRD and plan', 'Planned features', 'Gates', 'Review', 'Deploy', 'Update docs'] }
+      fix: { label: 'Quick fix', chipBg: 'var(--raise)', chipFg: 'var(--text2)', cta: 'Send to the factory', steps: ['Fix note', 'Build', 'Gates', 'Deploy', 'Update docs'] },
+      feature: { label: 'Feature', chipBg: 'var(--raise2)', chipFg: 'var(--fg)', cta: 'Send to the factory', steps: ['Feature spec', 'Plan', 'Build', 'Gates', 'Review', 'Deploy', 'Update docs'] },
+      prd: { label: 'Full brief', chipBg: 'var(--raise)', chipFg: 'var(--text2)', cta: 'Start the interview', steps: ['Interview', 'PRD and plan', 'Planned features', 'Gates', 'Review', 'Deploy', 'Update docs'] }
     };
   }
 
@@ -644,21 +664,21 @@ class Component extends DCLogic {
 
   alertOf(r) {
     if (!r) return '';
-    if (r.state === 'stuck') return '#ff7d77';
-    if (r.state === 'paused') return '#ffb36b';
+    if (r.state === 'stuck') return 'var(--red)';
+    if (r.state === 'paused') return 'var(--amber)';
     return '';
   }
 
   runSegs(r) {
     return this.kinds()[r.kind].steps.map((x, i) => ({
-      bg: r.state === 'shipped' ? '#8a8d87' : r.state === 'cancelled' || r.state === 'queued' || r.state === 'revising' ? '#2a2f2c' : i < r.idx ? '#8a8d87' : i > r.idx ? '#2a2f2c' : (this.alertOf(r) || '#f2efe6')
+      bg: r.state === 'shipped' ? 'var(--dim)' : r.state === 'cancelled' || r.state === 'queued' || r.state === 'revising' ? 'var(--track)' : i < r.idx ? 'var(--dim)' : i > r.idx ? 'var(--track)' : (this.alertOf(r) || 'var(--inv)')
     }));
   }
 
   runCtrls(r) {
-    const plain = { bg: 'transparent', fg: '#f2efe6', border: '#5a605b' };
-    const main = { bg: '#f2efe6', fg: '#11170f', border: '#f2efe6' };
-    const risk = { bg: 'transparent', fg: '#f2efe6', border: '#3a413c' };
+    const plain = { bg: 'transparent', fg: 'var(--fg)', border: 'var(--line3)' };
+    const main = { bg: 'var(--inv)', fg: 'var(--inv-fg)', border: 'var(--inv)' };
+    const risk = { bg: 'transparent', fg: 'var(--fg)', border: 'var(--line2)' };
     const cancel = { label: 'Cancel run', act: () => this.patchRun(r.id, { state: 'cancelled' }), ...risk };
     const revise = { label: 'Revise the spec', act: () => this.revise(r), ...plain };
     if (r.state === 'queued') return [{ label: 'Remove from queue', act: () => this.patchRun(r.id, { state: 'cancelled' }), ...risk }];
@@ -830,7 +850,7 @@ class Component extends DCLogic {
     const K = this.kinds();
     const list = this.projectList();
     const current = list.find((p) => p.id === s.pid);
-    const tones = { run: '#f2efe6', ask: '#cfd0ca', idle: '#7d807a' };
+    const tones = { run: 'var(--fg)', ask: 'var(--text2)', idle: 'var(--muted2)' };
     const shownRun = (pid) => {
       const mine = s.runs.filter((r) => r.pid === pid && r.state !== 'dismissed');
       return this.activeIn(s.runs, pid) || mine[mine.length - 1] || null;
@@ -858,8 +878,8 @@ class Component extends DCLogic {
       return {
         name: p.name, status: st.t, dot: tones[st.tone],
         pressed: on ? 'true' : 'false',
-        bg: on ? '#202522' : 'transparent', border: on ? '#3a413c' : 'transparent',
-        border2: on ? '#5a605b' : '#303632',
+        bg: on ? 'var(--raise)' : 'transparent', border: on ? 'var(--line2)' : 'transparent',
+        border2: on ? 'var(--line3)' : 'var(--line)',
         goLabel: on ? 'You are here' : 'Open',
         go: () => this.setState({ pid: p.id, docName: '', viewer: '', selRun: 0, pmOpen: false, rowMenu: 0 }),
         weight: on ? '700' : '500',
@@ -899,8 +919,8 @@ class Component extends DCLogic {
       if (run) {
         v.title = run.title; v.line = this.runLine(run, s.runs);
         const al = this.alertOf(run);
-        v.cardBorder = run.state === 'stuck' ? '#6a3835' : run.state === 'paused' ? '#5c4424' : '#303632';
-        v.lineColor = al || '#cfd0ca'; v.lineWeight = al ? '600' : '400';
+        v.cardBorder = run.state === 'stuck' ? 'var(--red-line)' : run.state === 'paused' ? 'var(--amber-line)' : 'var(--line)';
+        v.lineColor = al || 'var(--text2)'; v.lineWeight = al ? '600' : '400';
         v.segs = this.runSegs(run);
         v.ctrls = this.runCtrls(run);
         v.openRun = () => this.setState({ panel: 'run' });
@@ -911,13 +931,13 @@ class Component extends DCLogic {
 
     const tab = (id, label) => {
       const on = s.panel === id;
-      return { label: label, pressed: on ? 'true' : 'false', bg: on ? '#262b28' : 'transparent', fg: on ? '#f2efe6' : '#f2efe6', border: on ? '#5a605b' : '#303632', toggle: () => this.setState({ panel: on ? '' : id }) };
+      return { label: label, pressed: on ? 'true' : 'false', bg: on ? 'var(--raise2)' : 'transparent', fg: on ? 'var(--fg)' : 'var(--fg)', border: on ? 'var(--line3)' : 'var(--line)', toggle: () => this.setState({ panel: on ? '' : id }) };
     };
 
     const docsRaw = this.docsFor(s.pid);
     const docs = docsRaw.map((d) => {
       const on = d.name === s.docName;
-      return { name: d.name, tag: d.tag, note: d.note, pressed: on ? 'true' : 'false', bg: on ? '#202522' : '#191d1b', border: on ? '#5a605b' : '#303632', open: () => this.setState({ viewer: d.name, viewerEdit: false }) };
+      return { name: d.name, tag: d.tag, note: d.note, pressed: on ? 'true' : 'false', bg: on ? 'var(--raise)' : 'var(--card)', border: on ? 'var(--line3)' : 'var(--line)', open: () => this.setState({ viewer: d.name, viewerEdit: false }) };
     });
     const doc = null;
     const key = s.pid + '|' + s.viewer;
@@ -971,7 +991,7 @@ class Component extends DCLogic {
       ctrls: vRun ? this.runCtrls(vRun).filter((c) => /Revis|Resubmit|Discard/.test(c.label)) : [],
       modes: canEdit && !(vRun && vRun.state === 'revising') ? [['Read', false], ['Edit', true]].map((m) => {
         const on = editing === m[1];
-        return { label: m[0], pressed: on ? 'true' : 'false', bg: on ? '#262b28' : 'transparent', fg: on ? '#f2efe6' : '#f2efe6', border: on ? '#5a605b' : '#303632', set: () => this.setState({ viewerEdit: m[1] }) };
+        return { label: m[0], pressed: on ? 'true' : 'false', bg: on ? 'var(--raise2)' : 'transparent', fg: on ? 'var(--fg)' : 'var(--fg)', border: on ? 'var(--line3)' : 'var(--line)', set: () => this.setState({ viewerEdit: m[1] }) };
       }) : [],
       hasNotes: false, notes: [],
       sections: vRaw.sections.map((x, n) => {
@@ -1015,7 +1035,7 @@ class Component extends DCLogic {
     const parked = r && (r.state === 'paused' || r.state === 'stuck');
     const run = r ? {
       title: r.title, line: this.runLine(r, s.runs), kindLabel: K[r.kind].label, chipBg: K[r.kind].chipBg, chipFg: K[r.kind].chipFg,
-      ctrls: this.runCtrls(r), stuck: r.state === 'stuck', lineColor: this.alertOf(r) || '#a3a49f', lineWeight: this.alertOf(r) ? '600' : '400',
+      ctrls: this.runCtrls(r), stuck: r.state === 'stuck', lineColor: this.alertOf(r) || 'var(--muted)', lineWeight: this.alertOf(r) ? '600' : '400',
       openSpec: () => this.setState({ viewer: this.specName(r), viewerEdit: false }),
       more: this.moreCtrls(r), hasMore: this.moreCtrls(r).length > 0,
       revising: r.state === 'revising', change: r.change || '', fieldId: 'revise-a', revTitle: 'Spec reopened · draft of revision ' + ((r.rev || 1) + 1),
@@ -1030,10 +1050,10 @@ class Component extends DCLogic {
         return {
           n: i + 1, label: label,
           state: done ? 'Done' : bad ? 'Failed twice' : held ? 'Paused here' : now ? 'Now' : 'To do',
-          bg: done ? '#262b28' : bad ? '#ff7d77' : held ? '#ffb36b' : now ? '#f2efe6' : 'transparent',
-          fg: done ? '#f2efe6' : now ? '#11170f' : '#a3a49f',
-          ring: bad ? '#ff7d77' : held ? '#ffb36b' : done || now ? '#f2efe6' : '#3a413c',
-          text: done || now ? '#f2efe6' : '#a3a49f',
+          bg: done ? 'var(--raise2)' : bad ? 'var(--red)' : held ? 'var(--amber)' : now ? 'var(--inv)' : 'transparent',
+          fg: done ? 'var(--fg)' : now ? 'var(--inv-fg)' : 'var(--muted)',
+          ring: bad ? 'var(--red)' : held ? 'var(--amber)' : done ? 'var(--fg)' : now ? 'var(--inv)' : 'var(--line2)',
+          text: done || now ? 'var(--fg)' : 'var(--muted)',
           canRestart: parked && i < r.idx,
           restart: () => this.patchRun(r.id, { state: 'building', idx: i })
         };
@@ -1085,8 +1105,8 @@ class Component extends DCLogic {
         g: g, order: order,
         title: m.ask, kind: K[m.kind].label, chipBg: K[m.kind].chipBg, chipFg: K[m.kind].chipFg, state: st,
         aria: rr ? 'Open the run: ' + m.ask : m.ask + ', in the chat',
-        bg: picked ? '#202522' : 'transparent', weight: g === 'needs' ? '600' : '500',
-        stColor: this.alertOf(rr) || '#a3a49f', stWeight: this.alertOf(rr) ? '600' : '400',
+        bg: picked ? 'var(--raise)' : 'transparent', weight: g === 'needs' ? '600' : '500',
+        stColor: this.alertOf(rr) || 'var(--muted)', stWeight: this.alertOf(rr) ? '600' : '400',
         menuOpen: qi >= 0 && s.rowMenu === rr.id, menuExpanded: qi >= 0 && s.rowMenu === rr.id ? 'true' : 'false',
         menuLabel: 'Queue actions for ' + m.ask,
         toggleMenu: () => this.setState({ rowMenu: this.state.rowMenu === (rr && rr.id) ? 0 : rr.id }),
@@ -1108,7 +1128,7 @@ class Component extends DCLogic {
       return {
         label: d[1], count: items.length, items: items, open: open, empty: items.length === 0, emptyText: d[2],
         expanded: open ? 'true' : 'false', chev: open ? '▾' : '▸',
-        countW: hot ? '700' : '400', countFg: hot ? '#ffb36b' : '#a3a49f',
+        countW: hot ? '700' : '400', countFg: hot ? 'var(--amber)' : 'var(--muted)',
         toggle: () => this.setState({ groupsOpen: { ...this.state.groupsOpen, [d[0]]: !open } })
       };
     });
@@ -1140,13 +1160,13 @@ class Component extends DCLogic {
       onRepo: (e) => this.setState({ np: { ...this.state.np, repo: e.target.value } }),
       repoModes: [['default', "In SoloFactory's projects folder", npDefault(s.np.name), 'ui-monospace, Menlo, monospace'], ['custom', 'Somewhere else', 'Pick any folder on this computer.', 'inherit']].map((o) => {
         const on = (s.np.where || 'default') === o[0];
-        return { label: o[1], help: o[2], font: o[3], checked: on ? 'true' : 'false', bg: on ? '#262b28' : 'transparent', border: on ? '#5a605b' : '#303632', pick: () => this.setState({ np: { ...this.state.np, where: o[0] } }) };
+        return { label: o[1], help: o[2], font: o[3], checked: on ? 'true' : 'false', bg: on ? 'var(--raise2)' : 'transparent', border: on ? 'var(--line3)' : 'var(--line)', pick: () => this.setState({ np: { ...this.state.np, where: o[0] } }) };
       }),
       onName: (e) => this.setState({ np: { ...this.state.np, name: e.target.value } }),
       onFolder: (e) => this.setState({ np: { ...this.state.np, folder: e.target.value } }),
       modes: [['empty', 'Start empty', 'The Guide starts with a full interview.'], ['adopt', 'Adopt an existing app', 'Copies a folder in, never touching the original, and writes the baseline documents from its code.']].map((o) => {
         const on = s.np.mode === o[0];
-        return { label: o[1], help: o[2], checked: on ? 'true' : 'false', bg: on ? '#262b28' : 'transparent', border: on ? '#5a605b' : '#303632', pick: () => this.setState({ np: { ...this.state.np, mode: o[0] } }) };
+        return { label: o[1], help: o[2], checked: on ? 'true' : 'false', bg: on ? 'var(--raise2)' : 'transparent', border: on ? 'var(--line3)' : 'var(--line)', pick: () => this.setState({ np: { ...this.state.np, mode: o[0] } }) };
       }),
       close: () => this.setState({ np: null }),
       create: () => {
@@ -1186,7 +1206,7 @@ class Component extends DCLogic {
             return {
               id: 'cfg-' + fd.key, label: fd.label, help: fd.help,
               envLine: fd.locked ? 'Set by ' + fd.env + ' in your environment' : (fd.env || ''),
-              envColor: fd.locked ? '#cfd0ca' : '#a3a49f',
+              envColor: fd.locked ? 'var(--text2)' : 'var(--muted)',
               locked: !!fd.locked,
               isSelect: fd.type === 'select', isInput: fd.type === 'number' || fd.type === 'text', isToggle: fd.type === 'toggle',
               inputType: fd.type === 'number' ? 'number' : 'text', min: fd.min || '', max: fd.max || '',
@@ -1212,6 +1232,16 @@ class Component extends DCLogic {
       onDraft: (e) => this.setState({ draft: e.target.value }),
       onKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.submit(this.state.draft); } },
       onSend: () => this.submit(this.state.draft),
+      theme: {
+        mode: s.themeMode, isAuto: s.themeMode === 'auto', isLight: s.themeMode === 'light', isDark: s.themeMode === 'dark',
+        open: s.themeOpen, expanded: s.themeOpen ? 'true' : 'false',
+        aria: 'Theme: ' + ({ auto: 'Auto', light: 'Light', dark: 'Dark' })[s.themeMode] + '. Change theme',
+        toggle: () => this.setState({ themeOpen: !this.state.themeOpen, pmOpen: false, navOpen: false }),
+        opts: [['auto', 'Auto', 'Match the system'], ['light', 'Light', ''], ['dark', 'Dark', '']].map((o) => {
+          const on = s.themeMode === o[0];
+          return { label: o[1], help: o[2], checked: on ? 'true' : 'false', bg: on ? 'var(--raise)' : 'transparent', weight: on ? '700' : '500', pick: () => this.setState({ themeMode: o[0], themeOpen: false }) };
+        })
+      },
       panelTabs: [tab('run', 'Run'), tab('docs', 'Documents'), tab('app', 'Live app')],
       panelOpen: s.panel !== '', panelTitle: titles[s.panel] || '',
       closePanel: () => this.setState({ panel: '' }),
@@ -1235,7 +1265,7 @@ class Component extends DCLogic {
       vw: vw,
       docs: docs, noDocs: docsRaw.length === 0, hasDoc: !!doc, doc: doc || { name: '', sections: [], ctrls: [], hasLine: false, line: '', revising: false, change: '', revTitle: '' },
       closeDoc: () => this.setState({ docName: '' }),
-      hasRun: !!run, noRun: !run, run: run || { more: [], hasMore: false, title: '', line: '', kindLabel: '', chipBg: '#202522', chipFg: '#f2efe6', lineColor: '#a3a49f', lineWeight: '400', stops: [], ctrls: [], stuck: false, note: '', revising: false, change: '', fieldId: 'revise-a', revTitle: '' },
+      hasRun: !!run, noRun: !run, run: run || { more: [], hasMore: false, title: '', line: '', kindLabel: '', chipBg: 'var(--raise)', chipFg: 'var(--fg)', lineColor: 'var(--muted)', lineWeight: '400', stops: [], ctrls: [], stuck: false, note: '', revising: false, change: '', fieldId: 'revise-a', revTitle: '' },
       queue: queue, hasQueue: queue.length > 0,
       queueTitle: queue.length + ' queued behind it',
       queueNote: blocked ? 'Waiting for your call on the run above. Nothing here starts until it is resolved.' : 'They start one at a time, top first, each building on the last.'
