@@ -1,0 +1,1214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SoloFactory, Guide thread</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+*{box-sizing:border-box}
+button{font:inherit;cursor:pointer}
+input{font:inherit}
+button:focus-visible,input:focus-visible{outline:2px solid #a7f070;outline-offset:2px}
+a{color:#a7f070}a:hover{color:#c9f7a4}
+</style>
+</helmet>
+<div style="position: relative; display: flex; flex-wrap: wrap; height: 100vh; min-height: 600px; overflow: auto; background: #111413; color: #f2efe6; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 14px; line-height: 1.45">
+
+<nav aria-label="Projects" style="flex: 1 1 248px; max-width: 300px; min-width: 0; display: flex; flex-direction: column; gap: 22px; padding: 18px 14px; border-right: 1px solid #303632; background: #151917; overflow-y: auto">
+<div style="display: flex; align-items: center; gap: 10px; padding: 0 4px">
+<span style="display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: #a7f070; color: #0c110d; font-size: 11px; font-weight: 700">SF</span>
+<span style="display: flex; flex-direction: column"><strong style="font-weight: 600">SoloFactory</strong><span style="font-size: 12px; color: #a3a49f">{{slots}}</span></span>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a3a49f; margin-left: 6px">Work</h2>
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+<div style="display: flex; flex-direction: column; gap: 1px">
+<button onClick="{{g.toggle}}" aria-expanded="{{g.expanded}}" style="display: flex; gap: 6px; align-items: center; width: 100%; min-height: 32px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: #cfd0ca; text-align: left">
+<span aria-hidden="true" style="width: 12px; font-size: 11px; color: #a3a49f">{{g.chev}}</span>
+<span style="flex: 1 1 auto; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase">{{g.label}}</span>
+<span style="font-size: 12px; color: #a3a49f">{{g.count}}</span>
+</button>
+<sc-if value="{{g.open}}" hint-placeholder-val="{{true}}">
+<sc-for list="{{g.items}}" as="w" hint-placeholder-count="2">
+<div style="display: flex; flex-direction: column; padding: 5px 4px 5px 24px; border-radius: 8px; background: {{w.bg}}">
+<div style="display: flex; gap: 2px; align-items: flex-start">
+<button onClick="{{w.open}}" aria-label="{{w.aria}}" style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 2px 0; border: 0; background: transparent; color: #f2efe6; text-align: left">
+<span style="max-width: 100%; font-size: 13px; font-weight: {{w.weight}}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{w.title}}</span>
+<span style="font-size: 11px; color: #a3a49f"><span style="font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase">{{w.kind}}</span> · {{w.state}}</span>
+</button>
+<sc-if value="{{w.queued}}" hint-placeholder-val="{{false}}">
+<button onClick="{{w.toggleMenu}}" aria-label="{{w.menuLabel}}" aria-expanded="{{w.menuExpanded}}" style="flex: none; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #cfd0ca; font-size: 16px; letter-spacing: 1px">···</button>
+</sc-if>
+</div>
+<sc-if value="{{w.menuOpen}}" hint-placeholder-val="{{false}}">
+<div role="group" aria-label="{{w.menuLabel}}" style="display: flex; gap: 2px; justify-content: flex-end">
+<button onClick="{{w.up}}" disabled="{{w.noUp}}" aria-label="Move up" title="Move up" style="display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #cfd0ca; opacity: {{w.upOpacity}}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M4 7l4-4 4 4"></path></svg></button>
+<button onClick="{{w.down}}" disabled="{{w.noDown}}" aria-label="Move down" title="Move down" style="display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #cfd0ca; opacity: {{w.downOpacity}}"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M4 9l4 4 4-4"></path></svg></button>
+<button onClick="{{w.remove}}" aria-label="Remove from queue" title="Remove from queue" style="display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #cfd0ca"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"></path></svg></button>
+</div>
+</sc-if>
+</div>
+</sc-for>
+<sc-if value="{{g.empty}}" hint-placeholder-val="{{false}}">
+<p style="margin: 0 6px 4px 24px; font-size: 12px; color: #a3a49f">{{g.emptyText}}</p>
+</sc-if>
+</sc-if>
+</div>
+</sc-for>
+</div>
+
+<div style="position: relative; margin-top: auto; padding-top: 10px; border-top: 1px solid #303632">
+<sc-if value="{{nav.open}}" hint-placeholder-val="{{false}}">
+<div role="menu" aria-label="SoloFactory menu" style="position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; z-index: 4; display: flex; flex-direction: column; padding: 6px; border: 1px solid #3a413c; border-radius: 12px; background: #151917; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45)">
+<sc-for list="{{railLinks}}" as="k" hint-placeholder-count="5">
+<button role="menuitem" onClick="{{k.act}}" style="display: flex; gap: 8px; align-items: center; justify-content: space-between; width: 100%; min-height: 40px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: #f2efe6; font-size: 13px; text-align: left"><span>{{k.label}}</span><sc-if value="{{k.hasBadge}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; color: #a3a49f">{{k.badge}}</span></sc-if></button>
+</sc-for>
+</div>
+</sc-if>
+<button onClick="{{nav.toggle}}" aria-haspopup="menu" aria-expanded="{{nav.expanded}}" style="display: flex; gap: 8px; align-items: center; justify-content: space-between; width: 100%; min-height: 40px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: #f2efe6; font-size: 13px; text-align: left"><span>Menu</span><span style="font-size: 12px; color: #a3a49f">{{nav.hint}}</span></button>
+</div>
+</nav>
+
+<main style="flex: 999 1 480px; min-width: 0; min-height: 0; display: flex; flex-direction: column">
+<header style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 14px 24px; border-bottom: 1px solid #303632">
+<div style="display: flex; flex-direction: column; min-width: 0">
+<div style="position: relative">
+<button onClick="{{pm.toggle}}" aria-haspopup="menu" aria-expanded="{{pm.expanded}}" aria-label="{{pm.aria}}" style="display: flex; gap: 8px; align-items: center; margin-left: -8px; padding: 2px 8px; border: 0; border-radius: 8px; background: transparent; color: #f2efe6">
+<span style="font-family: 'Iowan Old Style', Charter, Georgia, serif; font-size: 24px; font-weight: 500; letter-spacing: -0.01em">{{current.name}}</span>
+<span aria-hidden="true" style="font-size: 14px; color: #a3a49f">▾</span>
+<sc-if value="{{pm.others}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; color: #a3a49f">{{pm.othersText}}</span></sc-if>
+</button>
+<sc-if value="{{pm.open}}" hint-placeholder-val="{{false}}">
+<div role="menu" aria-label="Projects" style="position: absolute; top: calc(100% + 6px); left: -8px; z-index: 4; display: flex; flex-direction: column; min-width: 300px; padding: 6px; border: 1px solid #3a413c; border-radius: 12px; background: #151917; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45)">
+<sc-for list="{{projects}}" as="p" hint-placeholder-count="3">
+<button role="menuitemradio" aria-checked="{{p.pressed}}" onClick="{{p.go}}" style="display: flex; flex-direction: column; gap: 1px; width: 100%; min-height: 48px; padding: 7px 10px; border: 0; border-radius: 8px; background: {{p.bg}}; color: #f2efe6; text-align: left">
+<span style="font-weight: {{p.weight}}">{{p.name}}</span>
+<span style="font-size: 12px; color: #a3a49f">{{p.status}}</span>
+</button>
+</sc-for>
+<div style="height: 1px; margin: 6px 4px; background: #303632"></div>
+<button role="menuitem" onClick="{{pm.newProject}}" style="width: 100%; min-height: 40px; padding: 7px 10px; border: 0; border-radius: 8px; background: transparent; color: #f2efe6; text-align: left">+ New project</button>
+</div>
+</sc-if>
+</div>
+<span style="font-size: 12px; color: #a3a49f">{{current.live}}</span>
+</div>
+<div role="group" aria-label="Side panel" style="display: flex; gap: 6px; flex-wrap: wrap">
+<sc-for list="{{panelTabs}}" as="t" hint-placeholder-count="3">
+<button onClick="{{t.toggle}}" aria-pressed="{{t.pressed}}" style="min-height: 40px; padding: 8px 13px; border: 1px solid {{t.border}}; border-radius: 9px; background: {{t.bg}}; color: {{t.fg}}; font-size: 13px; font-weight: 600">{{t.label}}</button>
+</sc-for>
+</div>
+</header>
+
+<div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column-reverse; gap: 16px; padding: 22px 24px">
+<sc-for list="{{messages}}" as="m" hint-placeholder-count="3">
+<div style="display: flex; flex-direction: column; max-width: 720px; width: 100%; margin: 0 auto">
+
+<sc-if value="{{m.isUser}}" hint-placeholder-val="{{false}}">
+<p style="align-self: flex-end; max-width: 82%; margin: 0; padding: 11px 14px; border-radius: 14px 14px 4px 14px; background: #a7f070; color: #11170f">{{m.text}}</p>
+</sc-if>
+
+<sc-if value="{{m.isGuide}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; flex-direction: column; gap: 4px; max-width: 88%">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a7f070">Guide</span>
+<p style="margin: 0; color: #e6e3da">{{m.text}}</p>
+</div>
+</sc-if>
+
+<sc-if value="{{m.isPick}}" hint-placeholder-val="{{false}}">
+<section aria-label="Guide plan" style="display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid #303632; border-radius: 14px; background: #191d1b">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a7f070">Guide</span>
+<span style="color: #a3a49f; font-size: 13px">read</span>
+<sc-for list="{{m.read}}" as="d" hint-placeholder-count="3">
+<span style="padding: 2px 8px; border: 1px solid #303632; border-radius: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #cfd0ca">{{d}}</span>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline">
+<span style="font-size: 13px; color: #a3a49f">I would treat this as a</span>
+<span style="padding: 3px 11px; border-radius: 99px; background: {{m.chipBg}}; color: {{m.chipFg}}; font-weight: 700">{{m.kindLabel}}</span>
+</div>
+<sc-if value="{{m.open}}" hint-placeholder-val="{{true}}">
+<p style="margin: 0; color: #e6e3da">{{m.why}}</p>
+<ol aria-label="Steps this run will take" style="display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none">
+<sc-for list="{{m.steps}}" as="s" hint-placeholder-count="5">
+<li style="display: flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 7px; background: #202522; font-size: 12px; color: #cfd0ca"><span style="color: #a3a49f">{{s.n}}</span>{{s.label}}</li>
+</sc-for>
+</ol>
+</sc-if>
+<sc-if value="{{m.open}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 4px">
+<button onClick="{{m.send}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #a7f070; color: #11170f; font-weight: 700">{{m.cta}}</button>
+<span style="margin-left: 6px; font-size: 12px; color: #a3a49f">Wrong size?</span>
+<sc-for list="{{m.alts}}" as="a" hint-placeholder-count="2">
+<button onClick="{{a.set}}" style="min-height: 44px; padding: 10px 12px; border: 1px solid #303632; border-radius: 10px; background: transparent; color: #f2efe6; font-size: 13px">{{a.label}}</button>
+</sc-for>
+</div>
+</sc-if>
+<sc-if value="{{m.sent}}" hint-placeholder-val="{{false}}">
+<p style="margin: 0; font-size: 13px; color: #a3a49f">{{m.sentLine}}</p>
+</sc-if>
+</section>
+</sc-if>
+
+<sc-if value="{{m.isRun}}" hint-placeholder-val="{{false}}">
+<section aria-label="Run" style="display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid #2c4a2c; border-radius: 14px; background: #162119">
+<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between">
+<span style="display: flex; gap: 8px; align-items: center; min-width: 0"><span style="padding: 2px 9px; border-radius: 99px; background: {{m.chipBg}}; color: {{m.chipFg}}; font-size: 12px; font-weight: 700">{{m.kindLabel}}</span><strong style="font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{m.title}}</strong></span>
+<button onClick="{{m.openRun}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #3c5a3a; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Open the run</button>
+</div>
+<div aria-hidden="true" style="display: flex; gap: 4px">
+<sc-for list="{{m.segs}}" as="g" hint-placeholder-count="5">
+<span style="flex: 1 1 0; height: 6px; border-radius: 3px; background: {{g.bg}}"></span>
+</sc-for>
+</div>
+<span style="font-size: 13px; color: #cfd0ca">{{m.line}}</span>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<sc-for list="{{m.ctrls}}" as="c" hint-placeholder-count="2">
+<button onClick="{{c.act}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid {{c.border}}; border-radius: 9px; background: {{c.bg}}; color: {{c.fg}}; font-size: 13px; font-weight: 600">{{c.label}}</button>
+</sc-for>
+<button onClick="{{m.openSpec}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Open the spec</button>
+</div>
+</section>
+</sc-if>
+
+</div>
+</sc-for>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 10px; padding: 12px 24px 18px; border-top: 1px solid #303632; background: #151917">
+<div style="display: flex; flex-wrap: wrap; gap: 6px; max-width: 720px; width: 100%; margin: 0 auto">
+<sc-for list="{{suggestions}}" as="s" hint-placeholder-count="3">
+<button onClick="{{s.use}}" style="min-height: 36px; padding: 6px 11px; border: 1px solid #303632; border-radius: 99px; background: transparent; color: #cfd0ca; font-size: 12px">{{s.text}}</button>
+</sc-for>
+</div>
+<div style="display: flex; gap: 8px; align-items: center; max-width: 720px; width: 100%; margin: 0 auto; padding: 6px 6px 6px 14px; border: 1px solid #3a413c; border-radius: 14px; background: #202522">
+<button onClick="{{onAttach}}" aria-label="Attach a file" style="flex: none; min-height: 40px; padding: 6px 10px; border: 1px solid #3a413c; border-radius: 9px; background: transparent; color: #cfd0ca; font-size: 13px">Attach</button>
+<label for="guide-a" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0)">Message the Guide</label>
+<input id="guide-a" type="text" value="{{draft}}" onChange="{{onDraft}}" onKeyDown="{{onKey}}" placeholder="{{placeholder}}" autocomplete="off" style="flex: 1 1 auto; min-width: 0; min-height: 44px; border: 0; outline-offset: 4px; background: transparent; color: #f2efe6">
+<button onClick="{{onSend}}" style="flex: none; min-height: 44px; padding: 10px 18px; border: 0; border-radius: 10px; background: #a7f070; color: #11170f; font-weight: 700">Send</button>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; max-width: 720px; width: 100%; margin: 0 auto; font-size: 12px; color: #a3a49f">
+<span>The Guide reads this project's documents first. Do not paste passwords, tokens or private customer data.</span>
+<button onClick="{{toggleProvider}}" aria-label="{{providerAria}}" style="min-height: 32px; padding: 4px 10px; border: 1px solid #303632; border-radius: 99px; background: transparent; color: #cfd0ca; font-size: 12px">Builds with {{provider}}</button>
+</div>
+</div>
+</main>
+
+<sc-if value="{{panelOpen}}" hint-placeholder-val="{{true}}">
+<aside aria-label="{{panelTitle}}" style="flex: 1 1 420px; max-width: 520px; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid #303632; background: #151917">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px; border-bottom: 1px solid #303632">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">{{panelTitle}}</h2>
+<button onClick="{{closePanel}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Close</button>
+</div>
+<div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px 18px">
+
+
+<sc-if value="{{showDocs}}" hint-placeholder-val="{{false}}">
+<sc-if value="{{noDocs}}" hint-placeholder-val="{{false}}">
+<p style="margin: 0; color: #a3a49f">This project has no documents yet. The first brief writes PRD.md, FEATURES.md and ACCEPTANCE.md. If the app already exists in a folder, the Guide can adopt it and write the baseline from the code.</p>
+</sc-if>
+<sc-for list="{{docs}}" as="d" hint-placeholder-count="4">
+<button onClick="{{d.open}}" aria-pressed="{{d.pressed}}" style="display: flex; flex-direction: column; gap: 3px; width: 100%; min-height: 48px; padding: 9px 12px; border: 1px solid {{d.border}}; border-radius: 10px; background: {{d.bg}}; color: #f2efe6; text-align: left">
+<span style="display: flex; gap: 8px; align-items: center; justify-content: space-between"><span style="font-family: ui-monospace, Menlo, monospace; font-size: 13px">{{d.name}}</span><span style="font-size: 12px; color: #a3a49f">{{d.tag}}</span></span>
+<span style="font-size: 12px; color: #a3a49f">{{d.note}}</span>
+</button>
+</sc-for>
+<sc-if value="{{hasDoc}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<button onClick="{{closeDoc}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">All documents</button>
+<sc-for list="{{doc.ctrls}}" as="c" hint-placeholder-count="0">
+<button onClick="{{c.act}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid {{c.border}}; border-radius: 9px; background: {{c.bg}}; color: {{c.fg}}; font-size: 13px; font-weight: 600">{{c.label}}</button>
+</sc-for>
+</div>
+<sc-if value="{{doc.hasLine}}" hint-placeholder-val="{{false}}">
+<span style="font-size: 13px; color: #cfd0ca">{{doc.line}}</span>
+</sc-if>
+<article style="display: flex; flex-direction: column; gap: 12px; margin-top: 4px; padding: 22px 24px; border-radius: 6px; background: #f4efe2; color: #23261f">
+<h3 style="margin: 0; font-family: 'Iowan Old Style', Charter, Georgia, serif; font-size: 20px; font-weight: 500">{{doc.name}}</h3>
+<sc-if value="{{doc.revising}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid #c9bf9f; border-radius: 6px; background: #fbf8ee">
+<strong style="font-weight: 600; color: #6b4a12">{{doc.revTitle}}</strong>
+<span>Nothing is building. Type what should change, or tell the Guide in plain words and it edits this spec for you.</span>
+<label for="revise-a" style="font-size: 12px; font-weight: 600">What should change in this revision</label>
+<textarea id="revise-a" value="{{doc.change}}" onChange="{{doc.onChange}}" rows="3" placeholder="For example: compare by transcript id, not by file name" style="width: 100%; padding: 10px 12px; border: 1px solid #a89f80; border-radius: 10px; background: #ffffff; color: #23261f; font: inherit; resize: vertical"></textarea>
+<span style="font-size: 13px">Resubmit runs a short Guide review of the changed spec, then replaces the run. Work the change does not touch is reused. Discard changes throws this draft away and puts the run back as it was.</span>
+</div>
+</sc-if>
+<sc-for list="{{doc.sections}}" as="s" hint-placeholder-count="3">
+<div style="display: flex; flex-direction: column; gap: 3px">
+<h4 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #4c5a2c">{{s.h}}</h4>
+<p style="margin: 0; font-family: 'Iowan Old Style', Charter, Georgia, serif; font-size: 15px; line-height: 1.5">{{s.t}}</p>
+</div>
+</sc-for>
+</article>
+</sc-if>
+</sc-if>
+
+<sc-if value="{{showApp}}" hint-placeholder-val="{{false}}">
+<sc-if value="{{app.none}}" hint-placeholder-val="{{false}}">
+<p style="margin: 0; color: #a3a49f">Nothing is live yet. The first run deploys the app here, on a free local port.</p>
+</sc-if>
+<sc-if value="{{app.live}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="display: flex; gap: 8px; align-items: center"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 99px; background: #a7f070"></span><strong style="font-weight: 600">Live · {{app.release}}</strong></span>
+<span style="font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: #cfd0ca">{{app.url}}</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<a href="{{app.url}}" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; min-height: 44px; padding: 10px 14px; border-radius: 10px; background: #a7f070; color: #11170f; font-size: 13px; font-weight: 700; text-decoration: none">Open the app</a>
+<button onClick="{{app.relaunch}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid #3c5a3a; border-radius: 10px; background: transparent; color: #f2efe6; font-size: 13px; font-weight: 600">Relaunch</button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{app.stats}}" as="t" hint-placeholder-count="4">
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid #303632; border-radius: 10px; background: #191d1b"><span style="font-size: 12px; color: #a3a49f">{{t.label}}</span><strong style="font-size: 18px; font-weight: 600">{{t.value}}</strong></div>
+</sc-for>
+</div>
+<p style="margin: 0; font-size: 13px; color: #a3a49f">Live request counts, errors, response time and uptime from the app's telemetry, as on today's run page. Busiest routes list below them once traffic arrives. The previous release stays up until a new one passes its deploy checks.</p>
+</sc-if>
+</sc-if>
+
+<sc-if value="{{showRun}}" hint-placeholder-val="{{false}}">
+<sc-if value="{{noRun}}" hint-placeholder-val="{{false}}">
+<p style="margin: 0; color: #a3a49f">No run is active in this project. Send the Guide a request and confirm its plan to start one.</p>
+</sc-if>
+<sc-if value="{{hasRun}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="align-self: flex-start; padding: 2px 9px; border-radius: 99px; background: {{run.chipBg}}; color: {{run.chipFg}}; font-size: 12px; font-weight: 700">{{run.kindLabel}}</span>
+<strong style="font-size: 16px; font-weight: 600">{{run.title}}</strong>
+<span style="font-size: 13px; color: #a3a49f">{{run.line}}</span>
+</div>
+<sc-if value="{{run.stuck}}" hint-placeholder-val="{{false}}">
+<div role="status" style="display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid #6a3835; border-radius: 12px; background: #2a1817">
+<strong style="font-weight: 600; color: #ffb3ae">This run needs you</strong>
+<span style="color: #e6e3da">One check failed twice, so the factory stopped instead of spending more turns. Nothing was deployed and the last release is still live. Choose a repair, restart from an earlier step, or cancel.</span>
+</div>
+</sc-if>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<sc-for list="{{run.ctrls}}" as="c" hint-placeholder-count="2">
+<button onClick="{{c.act}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid {{c.border}}; border-radius: 10px; background: {{c.bg}}; color: {{c.fg}}; font-size: 13px; font-weight: 600">{{c.label}}</button>
+</sc-for>
+<button onClick="{{run.openSpec}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Open the spec</button>
+</div>
+<ol style="display: flex; flex-direction: column; gap: 0; margin: 6px 0 0; padding: 0; list-style: none">
+<sc-for list="{{run.stops}}" as="s" hint-placeholder-count="5">
+<li style="display: flex; gap: 12px; align-items: center; min-height: 46px; border-bottom: 1px solid #262b28">
+<span style="flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 99px; border: 1px solid {{s.ring}}; background: {{s.bg}}; color: {{s.fg}}; font-size: 12px; font-weight: 700">{{s.n}}</span>
+<span style="flex: 1 1 auto; color: {{s.text}}">{{s.label}}</span>
+<span style="font-size: 12px; color: #a3a49f">{{s.state}}</span>
+<sc-if value="{{s.canRestart}}" hint-placeholder-val="{{false}}">
+<button onClick="{{s.restart}}" style="flex: none; min-height: 36px; padding: 6px 10px; border: 1px solid #3a413c; border-radius: 8px; background: transparent; color: #f2efe6; font-size: 12px">Restart from here</button>
+</sc-if>
+</li>
+</sc-for>
+</ol>
+<p style="margin: 6px 0 0; font-size: 13px; color: #a3a49f">{{run.note}}</p>
+<sc-if value="{{hasQueue}}" hint-placeholder-val="{{false}}">
+<p style="margin: 4px 0 0; font-size: 13px; color: #cfd0ca">{{queueTitle}}. {{queueNote}} Reorder them under Queued in the left rail.</p>
+</sc-if>
+<sc-if value="{{run.hasMore}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-wrap: wrap; gap: 6px; padding-top: 10px; border-top: 1px solid #262b28">
+<sc-for list="{{run.more}}" as="c" hint-placeholder-count="3">
+<button onClick="{{c.act}}" style="min-height: 36px; padding: 6px 10px; border: 1px solid #3a413c; border-radius: 8px; background: transparent; color: #f2efe6; font-size: 12px">{{c.label}}</button>
+</sc-for>
+</div>
+</sc-if>
+</sc-if>
+</sc-if>
+
+</div>
+</aside>
+</sc-if>
+
+<sc-if value="{{vw.open}}" hint-placeholder-val="{{false}}">
+<div role="dialog" aria-modal="true" aria-label="Document" style="position: absolute; inset: 0; z-index: 5; display: flex; padding: 24px; background: rgba(8, 10, 9, 0.74)">
+<div style="flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; border: 1px solid #3a413c; border-radius: 14px; background: #151917; overflow: hidden">
+<div style="flex: none; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid #303632">
+<div style="flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column">
+<span style="display: flex; gap: 10px; align-items: baseline; min-width: 0"><strong style="font-family: ui-monospace, Menlo, monospace; font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{vw.name}}</strong><span style="font-size: 12px; color: #a3a49f">{{vw.tag}}</span></span>
+<sc-if value="{{vw.hasLine}}" hint-placeholder-val="{{false}}">
+<span style="font-size: 12px; color: #a3a49f">{{vw.line}}</span>
+</sc-if>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<sc-for list="{{vw.modes}}" as="m" hint-placeholder-count="2">
+<button onClick="{{m.set}}" aria-pressed="{{m.pressed}}" style="min-height: 40px; padding: 8px 14px; border: 1px solid {{m.border}}; border-radius: 9px; background: {{m.bg}}; color: {{m.fg}}; font-size: 13px; font-weight: 600">{{m.label}}</button>
+</sc-for>
+<sc-for list="{{vw.ctrls}}" as="c" hint-placeholder-count="1">
+<button onClick="{{c.act}}" style="min-height: 40px; padding: 8px 14px; border: 1px solid {{c.border}}; border-radius: 9px; background: {{c.bg}}; color: {{c.fg}}; font-size: 13px; font-weight: 600">{{c.label}}</button>
+</sc-for>
+<button onClick="{{vw.close}}" style="min-height: 40px; padding: 8px 14px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Close</button>
+</div>
+</div>
+<div style="flex: 1 1 0; min-height: 0; display: flex; flex-wrap: wrap; overflow: auto">
+<div style="flex: 999 1 520px; min-width: 0; min-height: 0; overflow-y: auto; padding: 24px 28px">
+<article style="display: flex; flex-direction: column; gap: 20px; max-width: 800px; margin: 0 auto; padding: 40px 48px; border-radius: 6px; background: #f4efe2; color: #23261f">
+<h2 style="margin: 0; font-family: 'Iowan Old Style', Charter, Georgia, serif; font-size: 28px; font-weight: 500; letter-spacing: -0.01em">{{vw.name}}</h2>
+<sc-if value="{{vw.revising}}" hint-placeholder-val="{{false}}">
+<p role="status" style="margin: 0; padding: 10px 14px; border: 1px solid #c9bf9f; border-radius: 6px; background: #fbf8ee; font-weight: 600; color: #6b4a12">{{vw.revTitle}}</p>
+</sc-if>
+<sc-if value="{{vw.hasNotes}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 6px; background: #e3ecc9">
+<h3 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #3d4a1f">Changed in this draft</h3>
+<sc-for list="{{vw.notes}}" as="n" hint-placeholder-count="1">
+<p style="margin: 0; font-family: 'Iowan Old Style', Charter, Georgia, serif; font-size: 16px; line-height: 1.5">{{n}}</p>
+</sc-for>
+</div>
+</sc-if>
+<sc-for list="{{vw.sections}}" as="x" hint-placeholder-count="4">
+<div style="display: flex; flex-direction: column; gap: 5px">
+<h3 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #4c5a2c">{{x.h}}</h3>
+<sc-if value="{{x.view}}" hint-placeholder-val="{{true}}">
+<p style="margin: 0; font-family: 'Iowan Old Style', Charter, Georgia, serif; font-size: 17px; line-height: 1.6">{{x.t}} <sc-if value="{{x.hasAdd}}" hint-placeholder-val="{{false}}"><mark style="padding: 1px 3px; border-radius: 3px; background: #d5e5a6; color: #23261f">{{x.added}}</mark></sc-if></p>
+</sc-if>
+<sc-if value="{{x.click}}" hint-placeholder-val="{{false}}">
+<button onClick="{{x.start}}" aria-label="{{x.label}}" style="display: block; width: 100%; margin: 0; padding: 8px 12px; border: 1px dashed #b9b08f; border-radius: 8px; background: transparent; color: #23261f; font-family: 'Iowan Old Style', Charter, Georgia, serif; font-size: 17px; line-height: 1.6; text-align: left; cursor: text">{{x.t}} <sc-if value="{{x.hasAdd}}" hint-placeholder-val="{{false}}"><mark style="padding: 1px 3px; border-radius: 3px; background: #d5e5a6; color: #23261f">{{x.added}}</mark></sc-if></button>
+</sc-if>
+<sc-if value="{{x.edit}}" hint-placeholder-val="{{false}}">
+<textarea id="sec-edit" aria-label="{{x.label}}" value="{{x.draft}}" onChange="{{x.onChange}}" onBlur="{{x.keep}}" onKeyDown="{{x.onKey}}" rows="4" style="width: 100%; padding: 8px 12px; border: 2px solid #4c5a2c; border-radius: 8px; background: #fffdf6; color: #23261f; font-family: 'Iowan Old Style', Charter, Georgia, serif; font-size: 17px; line-height: 1.6; resize: vertical"></textarea>
+<span style="font-size: 12px; color: #5c5f55">Click away or press Cmd/Ctrl+Enter to keep. Escape cancels.</span>
+</sc-if>
+</div>
+</sc-for>
+<p style="margin: 0; padding-top: 14px; border-top: 1px solid #d8d0b8; font-size: 13px; color: #5c5f55">{{vw.footer}}</p>
+</article>
+</div>
+<aside aria-label="Guide for this document" style="flex: 1 1 340px; max-width: 420px; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid #303632">
+<div style="flex: none; display: flex; flex-direction: column; padding: 12px 16px; border-bottom: 1px solid #303632">
+<strong style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a7f070">Guide</strong>
+<span style="font-size: 12px; color: #a3a49f">Working on this document with you</span>
+</div>
+<div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column-reverse; gap: 12px; padding: 16px">
+<sc-for list="{{vw.chat}}" as="m" hint-placeholder-count="1">
+<div style="display: flex; flex-direction: column">
+<sc-if value="{{m.mine}}" hint-placeholder-val="{{false}}">
+<p style="align-self: flex-end; max-width: 88%; margin: 0; padding: 9px 12px; border-radius: 12px 12px 4px 12px; background: #a7f070; color: #11170f">{{m.text}}</p>
+</sc-if>
+<sc-if value="{{m.guide}}" hint-placeholder-val="{{true}}">
+<p style="max-width: 94%; margin: 0; padding: 9px 12px; border: 1px solid #303632; border-radius: 12px 12px 12px 4px; background: #202522; color: #e6e3da">{{m.text}}</p>
+</sc-if>
+</div>
+</sc-for>
+</div>
+<div style="flex: none; display: flex; gap: 8px; align-items: center; margin: 12px 16px 16px; padding: 5px 5px 5px 12px; border: 1px solid #3a413c; border-radius: 12px; background: #202522">
+<label for="guide-doc" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0)">Ask the Guide about this document</label>
+<input id="guide-doc" type="text" value="{{vw.draft}}" onChange="{{vw.onDraft}}" onKeyDown="{{vw.onKey}}" placeholder="Tell the Guide what to change" autocomplete="off" style="flex: 1 1 auto; min-width: 0; min-height: 44px; border: 0; outline-offset: 4px; background: transparent; color: #f2efe6">
+<button onClick="{{vw.send}}" style="flex: none; min-height: 44px; padding: 10px 14px; border: 0; border-radius: 9px; background: #a7f070; color: #11170f; font-weight: 700">Send</button>
+</div>
+</aside>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{info.open}}" hint-placeholder-val="{{false}}">
+<div role="dialog" aria-modal="true" aria-label="{{info.title}}" style="position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(8, 10, 9, 0.74)">
+<div style="display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 520px; padding: 22px 24px; border: 1px solid #3a413c; border-radius: 14px; background: #151917">
+<h2 style="margin: 0; font-size: 18px; font-weight: 600">{{info.title}}</h2>
+<p style="margin: 0; color: #e6e3da">{{info.text}}</p>
+<p style="margin: 0; font-size: 13px; color: #a3a49f">Same as today's version. This mockup only shows where it lives.</p>
+<button onClick="{{info.close}}" style="align-self: flex-end; min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #a7f070; color: #11170f; font-weight: 700">OK</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{np.open}}" hint-placeholder-val="{{false}}">
+<div role="dialog" aria-modal="true" aria-label="New project" style="position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(8, 10, 9, 0.74)">
+<div style="display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 520px; padding: 22px 24px; border: 1px solid #3a413c; border-radius: 14px; background: #151917">
+<h2 style="margin: 0; font-size: 18px; font-weight: 600">New project</h2>
+<label for="np-name" style="font-size: 13px; font-weight: 600">Project name</label>
+<input id="np-name" type="text" value="{{np.name}}" onChange="{{np.onName}}" placeholder="For example: Client Portal" autocomplete="off" style="min-height: 44px; padding: 8px 12px; border: 1px solid #3a413c; border-radius: 10px; background: #202522; color: #f2efe6">
+<div role="radiogroup" aria-label="Start from" style="display: flex; flex-direction: column; gap: 8px">
+<sc-for list="{{np.modes}}" as="o" hint-placeholder-count="2">
+<button role="radio" aria-checked="{{o.checked}}" onClick="{{o.pick}}" style="display: flex; flex-direction: column; gap: 2px; width: 100%; min-height: 56px; padding: 10px 12px; border: 1px solid {{o.border}}; border-radius: 10px; background: {{o.bg}}; color: #f2efe6; text-align: left"><strong style="font-weight: 600">{{o.label}}</strong><span style="font-size: 12px; color: #a3a49f">{{o.help}}</span></button>
+</sc-for>
+</div>
+<sc-if value="{{np.adopt}}" hint-placeholder-val="{{false}}">
+<label for="np-folder" style="font-size: 13px; font-weight: 600">Folder on this computer</label>
+<input id="np-folder" type="text" value="{{np.folder}}" onChange="{{np.onFolder}}" placeholder="/Users/you/code/my-app" autocomplete="off" style="min-height: 44px; padding: 8px 12px; border: 1px solid #3a413c; border-radius: 10px; background: #202522; color: #f2efe6; font-family: ui-monospace, Menlo, monospace">
+</sc-if>
+<div style="display: flex; gap: 8px; justify-content: flex-end">
+<button onClick="{{np.close}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid #303632; border-radius: 10px; background: transparent; color: #f2efe6">Cancel</button>
+<button onClick="{{np.create}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #a7f070; color: #11170f; font-weight: 700">{{np.cta}}</button>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{cfg.open}}" hint-placeholder-val="{{false}}">
+<div role="dialog" aria-modal="true" aria-label="Settings" style="position: absolute; inset: 0; z-index: 6; display: flex; padding: 24px; background: rgba(8, 10, 9, 0.74)">
+<div style="flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; max-width: 1040px; margin: 0 auto; border: 1px solid #3a413c; border-radius: 14px; background: #151917; overflow: hidden">
+<div style="flex: none; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid #303632">
+<div style="display: flex; flex-direction: column"><h2 style="margin: 0; font-size: 18px; font-weight: 600">Settings</h2><span style="font-size: 12px; color: #a3a49f">{{cfg.status}}</span></div>
+<button onClick="{{cfg.close}}" style="min-height: 40px; padding: 8px 14px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Done</button>
+</div>
+<div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; padding: 20px 24px 28px">
+<p style="margin: 0; font-size: 13px; color: #a3a49f">Saved as you change them, to settings.json in the factory home. A setting your environment already sets is locked here and names the variable. Changes apply from the next run: a run in progress keeps the settings it started with.</p>
+<sc-for list="{{cfg.sections}}" as="sec" hint-placeholder-count="3">
+<section style="display: flex; flex-direction: column; gap: 4px">
+<h3 style="margin: 0 0 6px; font-size: 15px; font-weight: 600">{{sec.title}}</h3>
+<sc-if value="{{sec.hasNote}}" hint-placeholder-val="{{false}}"><p style="margin: 0 0 6px; font-size: 13px; color: #ffb36b">{{sec.note}}</p></sc-if>
+<sc-for list="{{sec.fields}}" as="fd" hint-placeholder-count="3">
+<div style="display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 0; border-bottom: 1px solid #262b28">
+<div style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+<label for="{{fd.id}}" style="font-weight: 600">{{fd.label}}</label>
+<span style="font-size: 12px; color: #a3a49f">{{fd.help}}</span>
+<span style="font-size: 12px; color: {{fd.envColor}}; font-family: ui-monospace, Menlo, monospace">{{fd.envLine}}</span>
+</div>
+<div style="flex: 0 1 260px; min-width: 0; display: flex; gap: 8px; align-items: center">
+<sc-if value="{{fd.isSelect}}" hint-placeholder-val="{{false}}">
+<select id="{{fd.id}}" value="{{fd.value}}" onChange="{{fd.onChange}}" disabled="{{fd.locked}}" style="width: 100%; min-height: 40px; padding: 6px 10px; border: 1px solid #3a413c; border-radius: 9px; background: #202522; color: #f2efe6">
+<sc-for list="{{fd.options}}" as="op" hint-placeholder-count="2"><option value="{{op.v}}">{{op.label}}</option></sc-for>
+</select>
+</sc-if>
+<sc-if value="{{fd.isInput}}" hint-placeholder-val="{{true}}">
+<input id="{{fd.id}}" type="{{fd.inputType}}" value="{{fd.value}}" onChange="{{fd.onChange}}" disabled="{{fd.locked}}" min="{{fd.min}}" max="{{fd.max}}" autocomplete="off" style="width: 100%; min-height: 40px; padding: 6px 10px; border: 1px solid #3a413c; border-radius: 9px; background: #202522; color: #f2efe6">
+<sc-if value="{{fd.hasUnit}}" hint-placeholder-val="{{false}}"><span style="flex: none; font-size: 13px; color: #a3a49f">{{fd.unit}}</span></sc-if>
+</sc-if>
+<sc-if value="{{fd.isToggle}}" hint-placeholder-val="{{false}}">
+<input id="{{fd.id}}" type="checkbox" checked="{{fd.on}}" onChange="{{fd.onToggle}}" disabled="{{fd.locked}}" style="width: 22px; height: 22px; accent-color: #a7f070">
+<span style="font-size: 13px; color: #cfd0ca">{{fd.toggleText}}</span>
+</sc-if>
+</div>
+</div>
+</sc-for>
+</section>
+</sc-for>
+</div>
+</div>
+</div>
+</sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  state = {
+    pid: 'nm', panel: 'run', docName: '', draft: '', nextId: 100,
+    groupsOpen: { needs: true, running: true, queued: true, done: false }, selRun: 0, pmOpen: false, navOpen: false, rowMenu: 0, info: null, np: null, cfgOpen: false, cfgVals: {}, cfgTouched: false, extra: [], provider: {},
+    viewer: '', viewerEdit: false, vdraft: '', activeSec: -1, secDraft: '', docEdits: {}, docAdds: {}, docChat: {},
+    runs: [
+      { id: 1, pid: 'nm', kind: 'feature', title: 'Batch re-run report', state: 'building', idx: 2, trap: true, repairs: 0 },
+      { id: 11, pid: 'nm', kind: 'fix', title: 'Pattern counts round off the last decimal', state: 'queued', idx: 0, repairs: 0 },
+      { id: 13, pid: 'nm', kind: 'feature', title: 'CSV export of the results table', state: 'queued', idx: 0, repairs: 0 },
+      { id: 15, pid: 'nm', kind: 'feature', title: 'Tag transcripts by coaching client', state: 'queued', idx: 0, repairs: 0 }
+    ],
+    threads: {
+      nm: [
+        { id: 1, type: 'user', text: 'Add a batch re-run report so I can see which transcripts changed between runs.' },
+        { id: 2, type: 'pick', kind: 'feature', sent: true, ask: 'Batch re-run report', runId: 1 },
+        { id: 3, type: 'run', runId: 1 },
+        { id: 4, type: 'guide', text: 'It is with the factory. When the gates pass I will add the report to FEATURES.md and its checks to ACCEPTANCE.md. Keep going here or switch projects. Nothing stops.' },
+        { id: 10, type: 'user', text: 'Pattern counts round off the last decimal.' },
+        { id: 11, type: 'pick', kind: 'fix', sent: true, ask: 'Pattern counts round off the last decimal', runId: 11 },
+        { id: 12, type: 'run', runId: 11 },
+        { id: 13, type: 'user', text: 'Add CSV export of the results table.' },
+        { id: 14, type: 'pick', kind: 'feature', sent: true, ask: 'CSV export of the results table', runId: 13 },
+        { id: 15, type: 'run', runId: 13 },
+        { id: 16, type: 'user', text: 'Let me tag transcripts by coaching client.' },
+        { id: 17, type: 'pick', kind: 'feature', sent: true, ask: 'Tag transcripts by coaching client', runId: 15 },
+        { id: 18, type: 'run', runId: 15 },
+        { id: 19, type: 'guide', text: 'Three runs are queued behind the batch report, in the order you sent them. Each starts by itself when the one before it ships, so each builds on the last. Reorder or remove them in the Run panel.' }
+      ],
+      al: [
+        { id: 5, type: 'user', text: 'The search box drops the last word when I paste a long title.' },
+        { id: 6, type: 'pick', kind: 'fix', sent: false, ask: 'Search drops the last word of a pasted title' }
+      ],
+      mp: [
+        { id: 7, type: 'guide', text: 'Member Portal has no documents yet. Tell me what you want to build and I will start a full brief. If the app already exists in a folder, say so and I will adopt it and write the baseline from the code.' }
+      ]
+    }
+  };
+
+  componentDidMount() { this.timer = setInterval(() => this.tick(), 3500); }
+  componentWillUnmount() { clearInterval(this.timer); }
+  componentDidUpdate(prevProps, prevState) {
+    if (this.state.activeSec >= 0 && (!prevState || prevState.activeSec !== this.state.activeSec)) {
+      try { const el = document.getElementById('sec-edit'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } } catch (e) {}
+    }
+  }
+
+  projectList() {
+    return [
+      { id: 'nm', name: 'Nugget Mining', live: 'Live at 127.0.0.1:4310 · release 12', hasDocs: true, url: 'http://127.0.0.1:4310', release: 'release 12' },
+      { id: 'al', name: 'Ambient Library', live: 'Live at 127.0.0.1:4322 · release 4', hasDocs: true, url: 'http://127.0.0.1:4322', release: 'release 4' },
+      { id: 'mp', name: 'Member Portal', live: 'Not built yet', hasDocs: false }
+    ].concat((this.state && this.state.extra) || []);
+  }
+
+  kinds() {
+    return {
+      fix: { label: 'Quick fix', chipBg: '#3a2a17', chipFg: '#ffb36b', cta: 'Send to the factory', steps: ['Fix note', 'Build', 'Gates', 'Deploy', 'Update docs'] },
+      feature: { label: 'Feature', chipBg: '#1f3a21', chipFg: '#a7f070', cta: 'Send to the factory', steps: ['Feature spec', 'Plan', 'Build', 'Gates', 'Review', 'Deploy', 'Update docs'] },
+      prd: { label: 'Full brief', chipBg: '#1b2f45', chipFg: '#9cc9ff', cta: 'Start the interview', steps: ['Interview', 'PRD and plan', 'Planned features', 'Gates', 'Review', 'Deploy', 'Update docs'] }
+    };
+  }
+
+  why(kind, proj) {
+    if (!proj.hasDocs) return 'This project has no PRD.md, so there is no baseline to build on. One interview writes it. After that, small requests stay small.';
+    if (kind === 'fix') return 'FEATURES.md already describes this behavior, so it is a correction, not new scope. One rule changes. No new data, screen or flow. No interview needed.';
+    if (kind === 'feature') return 'PRD.md covers the product and its users. This adds one capability beside the existing ones, so a short feature spec is enough. I will ask only what the documents do not answer.';
+    return 'This changes what the product is for or how its data is shaped, so PRD.md itself has to change before anything is built.';
+  }
+
+  sizeUp(text, proj) {
+    if (!proj.hasDocs) return 'prd';
+    const t = text.toLowerCase();
+    if (/(fix|bug|typo|broken|wrong|crash|drops|error|fails)/.test(t)) return 'fix';
+    if (/(rebuild|redesign|from scratch|new app|version 2|v2|rewrite|multi-user|new prd)/.test(t)) return 'prd';
+    return 'feature';
+  }
+
+  slug(text) {
+    return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 26);
+  }
+
+  short(text) {
+    return text.length > 60 ? text.slice(0, 57) + '...' : text;
+  }
+
+  activeIn(runs, pid) {
+    return runs.find((r) => r.pid === pid && ['building', 'pausing', 'paused', 'stuck', 'revising'].indexOf(r.state) >= 0) || null;
+  }
+
+  startNext(runs) {
+    const out = runs.slice();
+    out.forEach((r, i) => {
+      if (r.state !== 'queued') return;
+      const slots = out.filter((x) => x.state === 'building' || x.state === 'pausing').length;
+      if (slots < 2 && !this.activeIn(out, r.pid)) out[i] = { ...r, state: 'building', idx: 0 };
+    });
+    return out;
+  }
+
+  tick() {
+    const s = this.state;
+    const K = this.kinds();
+    const notes = [];
+    let runs = s.runs.map((r) => {
+      const steps = K[r.kind].steps;
+      if (r.state === 'pausing') {
+        if (r.idx + 1 >= steps.length) { notes.push([r.pid, 'Shipped. The new release is live, and I updated the documents to match what was built.']); return { ...r, state: 'shipped', idx: steps.length }; }
+        notes.push([r.pid, 'Paused before ' + steps[r.idx + 1] + '. The work so far is committed and passing. Resume, restart from an earlier step, or cancel from the run panel.']);
+        return { ...r, state: 'paused', idx: r.idx + 1 };
+      }
+      if (r.state !== 'building') return r;
+      if (r.trap && steps[r.idx] === 'Gates') {
+        notes.push([r.pid, 'I parked the run. One check failed twice, even after a repair, so I stopped instead of burning more turns. Open the run to let me plan a different repair, restart from an earlier step, or cancel. Queued work in this project waits for your call.']);
+        return { ...r, state: 'stuck', trap: false };
+      }
+      if (r.idx + 1 >= steps.length) { notes.push([r.pid, 'Shipped. The new release is live, and I updated FEATURES.md and ACCEPTANCE.md to match what was built.']); return { ...r, state: 'shipped', idx: steps.length }; }
+      return { ...r, idx: r.idx + 1 };
+    });
+    runs = this.startNext(runs);
+    const threads = { ...s.threads };
+    let id = s.nextId;
+    notes.forEach((n) => { threads[n[0]] = threads[n[0]].concat([{ id: id++, type: 'guide', text: n[1] }]); });
+    this.setState({ runs: runs, threads: threads, nextId: id });
+  }
+
+  patchRun(id, patch) {
+    const runs = this.state.runs.map((r) => (r.id === id ? { ...r, ...patch } : r));
+    this.setState({ runs: this.startNext(runs) });
+  }
+
+  runLine(r, runs) {
+    const steps = this.kinds()[r.kind].steps;
+    const at = steps[Math.min(r.idx, steps.length - 1)];
+    if (r.state === 'queued') return this.activeIn(runs, r.pid) ? 'Queued · starts when the current run in this project finishes' : 'Queued · waiting for a free build slot';
+    if (r.state === 'building') return 'Step ' + (r.idx + 1) + ' of ' + steps.length + ' · ' + at + (r.repairs ? ' · repair in progress' : '');
+    if (r.state === 'pausing') return 'Pausing as soon as ' + at + ' finishes';
+    if (r.state === 'paused') return 'Paused before ' + at + ' · work so far is committed';
+    if (r.state === 'stuck') return 'Parked at ' + at + ' · the same check failed twice';
+    if (r.state === 'shipped') return 'Shipped · live · documents updated';
+    if (r.state === 'revising') return 'Revising the spec · nothing is building';
+    return 'Cancelled · nothing was deployed · the spec is kept';
+  }
+
+  runSegs(r) {
+    return this.kinds()[r.kind].steps.map((x, i) => ({
+      bg: r.state === 'shipped' ? '#a7f070' : r.state === 'cancelled' || r.state === 'queued' || r.state === 'revising' ? '#343b36' : i < r.idx ? '#a7f070' : i > r.idx ? '#343b36' : r.state === 'stuck' ? '#ff7d77' : r.state === 'paused' ? '#ffb36b' : '#d9f7c0'
+    }));
+  }
+
+  runCtrls(r) {
+    const plain = { bg: 'transparent', fg: '#f2efe6', border: '#3c5a3a' };
+    const main = { bg: '#a7f070', fg: '#11170f', border: '#a7f070' };
+    const risk = { bg: 'transparent', fg: '#ff9d98', border: '#6a3835' };
+    const cancel = { label: 'Cancel run', act: () => this.patchRun(r.id, { state: 'cancelled' }), ...risk };
+    const revise = { label: 'Revise the spec', act: () => this.revise(r), ...plain };
+    if (r.state === 'queued') return [{ label: 'Remove from queue', act: () => this.patchRun(r.id, { state: 'cancelled' }), ...risk }];
+    if (r.state === 'building') return [{ label: 'Pause after this step', act: () => this.patchRun(r.id, { state: 'pausing' }), ...plain }, cancel];
+    if (r.state === 'paused') return [{ label: 'Resume', act: () => this.patchRun(r.id, { state: 'building' }), ...main }, revise, cancel];
+    if (r.state === 'stuck') return [{ label: 'Let the Guide plan a repair', act: () => this.patchRun(r.id, { state: 'building', repairs: r.repairs + 1 }), ...main }, revise, cancel];
+    if (r.state === 'cancelled') return [{ ...revise, label: 'Revise and resubmit' }];
+    if (r.state === 'revising') return [{ label: 'Resubmit to the factory', act: () => this.patchRun(r.id, { state: 'queued', idx: 0, trap: false, rev: (r.rev || 1) + 1 }), ...main }, { label: 'Discard changes', act: () => this.discard(r), ...risk }];
+    return [];
+  }
+
+  showInfo(title, text) {
+    this.setState({ info: { title: title, text: text } });
+  }
+
+  moreCtrls(r) {
+    const out = [];
+    if (r.state === 'stuck' || r.state === 'paused') {
+      out.push({ label: 'Copy recovery packet', act: () => this.showInfo('Copy recovery packet', 'Copies a summary of the parked run, with its stage, error, last check output and changed files, to paste into Claude Code or Codex for help.') });
+    }
+    if (r.state === 'stuck' || r.state === 'cancelled') {
+      out.push({ label: 'Start over from scratch', act: () => {
+        const st = this.state;
+        const runs = st.runs.map((x) => (x.id === r.id ? { ...x, state: 'dismissed' } : x)).concat([{ id: st.nextId, pid: r.pid, kind: r.kind, title: r.title, state: 'queued', idx: 0, repairs: 0 }]);
+        const th = st.threads[r.pid].map((m) => (m.runId === r.id ? { ...m, runId: st.nextId } : m));
+        this.setState({ nextId: st.nextId + 1, runs: this.startNext(runs), selRun: st.nextId, threads: { ...st.threads, [r.pid]: th } });
+      } });
+    }
+    if (r.state === 'stuck' || r.state === 'paused' || r.state === 'cancelled') {
+      out.push({ label: 'Report this run', act: () => this.showInfo('Report this run', 'Opens the Feedback form with this run\'s diagnostics: version, platform, error code, failed stage, check, counts and recent event types. Never your brief, transcript, agent output or file paths. Nothing is sent until you send it.') });
+    }
+    if (r.state === 'cancelled') {
+      out.push({ label: 'Dismiss', act: () => this.patchRun(r.id, { state: 'dismissed' }) });
+    }
+    return out;
+  }
+
+  settingsDefs() {
+    const lv = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
+    return [
+      { title: 'AI and models', fields: [
+        { key: 'provider', label: 'Builds with', type: 'select', def: 'Claude Code', options: [['Claude Code', 'Claude Code'], ['Codex', 'Codex']], help: 'For new requests. You can switch one project from the Guide box.' },
+        { key: 'claudeModel', label: 'Claude: coding model', type: 'select', def: 'sonnet', options: [['sonnet', 'sonnet'], ['opus', 'opus'], ['haiku', 'haiku']], env: 'SOLOFACTORY_CLAUDE_MODEL', help: 'Writes and repairs the code.' },
+        { key: 'claudeEffort', label: 'Claude: coding effort', type: 'select', def: 'medium', options: lv, env: 'SOLOFACTORY_CLAUDE_EFFORT', help: 'More effort is slower and uses more of your subscription.' },
+        { key: 'claudeReason', label: 'Claude: planning and review model', type: 'select', def: 'opus', options: [['opus', 'opus'], ['sonnet', 'sonnet']], env: 'SOLOFACTORY_CLAUDE_REASONING_MODEL', help: 'Specification, feature plan, plan review and final review.' },
+        { key: 'claudeReasonEffort', label: 'Claude: planning and review effort', type: 'select', def: 'low', options: lv, env: 'SOLOFACTORY_CLAUDE_REASONING_EFFORT', help: '' },
+        { key: 'guideModel', label: 'Claude: Guide model', type: 'select', def: 'opus', options: [['opus', 'opus'], ['sonnet', 'sonnet']], env: 'SOLOFACTORY_CLAUDE_GUIDE_MODEL', help: 'Runs the conversation with you.' },
+        { key: 'guideEffort', label: 'Claude: Guide effort', type: 'select', def: 'medium', options: lv, env: 'SOLOFACTORY_CLAUDE_GUIDE_EFFORT', help: '' },
+        { key: 'guideAdvisor', label: 'Claude: Guide advisor', type: 'toggle', def: true, env: 'SOLOFACTORY_CLAUDE_GUIDE_ADVISOR', help: 'A second opus opinion on the Guide\'s answers. Off uses less of your subscription.' },
+        { key: 'codexModel', label: 'Codex: model', type: 'text', def: 'gpt-6.1-sol', env: 'SOLOFACTORY_CODEX_MODEL', locked: true, help: 'Used for every Codex stage.' },
+        { key: 'codexEffort', label: 'Codex: reasoning effort', type: 'select', def: 'medium', options: lv, env: 'SOLOFACTORY_CODEX_REASONING_EFFORT', help: '' }
+      ] },
+      { title: 'Capacity', fields: [
+        { key: 'maxActive', label: 'Runs building at once', type: 'number', def: '1', min: '1', max: '8', env: 'SOLOFACTORY_MAX_ACTIVE_RUNS', help: 'Across different projects. Runs in one project always go one after another. More runs at once reach your subscription limits sooner.' },
+        { key: 'featureReview', label: 'Feature review', type: 'select', def: 'all', options: [['all', 'Every feature'], ['risky', 'Risky features only']], env: 'SOLOFACTORY_FEATURE_REVIEW', help: 'Reviewing every feature is safer and slower.' }
+      ] },
+      { title: 'Run safeguards', fields: [
+        { key: 'maxRepairs', label: 'Repairs per failed check', type: 'number', def: '2', min: '0', max: '10', env: 'SOLOFACTORY_MAX_REPAIRS', help: 'Repair attempts before a feature parks and asks you.' },
+        { key: 'loop', label: 'Stop after identical failures', type: 'number', def: '3', min: '2', max: '10', env: 'SOLOFACTORY_LOOP_THRESHOLD', help: 'Parks a run when the same failure repeats on unchanged code.' },
+        { key: 'workers', label: 'Agent turns per run', type: 'number', def: '150', min: '0', max: '', env: 'SOLOFACTORY_MAX_RUN_WORKERS', help: '0 turns this cap off. A parked run can be granted more.' },
+        { key: 'tokens', label: 'Tokens per run', type: 'number', def: '40000000', min: '0', max: '', env: 'SOLOFACTORY_MAX_RUN_TOKENS', help: 'Reported tokens, cached input included. 0 turns this cap off.' },
+        { key: 'cost', label: 'Cost per run', type: 'number', def: '30', min: '0', max: '', unit: 'USD', env: 'SOLOFACTORY_MAX_RUN_COST_USD', help: 'Reported cost. 0 turns this cap off.' },
+        { key: 'progress', label: 'Progress warning', type: 'number', def: '20', min: '0', max: '240', unit: 'min', env: 'SOLOFACTORY_PROGRESS_MINUTES', help: 'Warns when no feature or plan lands for this long. It never stops a run.' },
+        { key: 'gate', label: 'Check time limit', type: 'number', def: '5', min: '1', max: '60', unit: 'min', env: 'SOLOFACTORY_GATE_MINUTES', help: 'A test or proof check that runs longer is stopped. Install gets 10 minutes.' },
+        { key: 'idle', label: 'Agent silence limit', type: 'number', def: '6', min: '1', max: '', unit: 'min', env: 'SOLOFACTORY_AGENT_IDLE_MINUTES', help: 'An agent turn with no output for this long is stopped.' },
+        { key: 'hard', label: 'Agent turn limit', type: 'number', def: '45', min: '1', max: '', unit: 'min', env: 'SOLOFACTORY_AGENT_HARD_MINUTES', help: 'The longest any one agent turn may run.' }
+      ] },
+      { title: 'Updates and feedback', fields: [
+        { key: 'updateCheck', label: 'Check for updates', type: 'toggle', def: true, env: 'SOLOFACTORY_UPDATE_CHECK', help: 'One small request on start and when you ask. No background polling. It never updates by itself.' },
+        { key: 'issues', label: 'Issue tracker', type: 'text', def: '', env: 'SOLOFACTORY_ISSUES_URL', help: 'A GitHub issues page, such as https://github.com/owner/repo/issues. Turns on Search existing issues and Open GitHub in Feedback.' }
+      ] },
+      { title: 'Folders and network', restart: true, fields: [
+        { key: 'root', label: 'Projects folder', type: 'text', def: '.solofactory/', env: 'SOLOFACTORY_ROOT', help: 'Projects live in projects/ under this folder.' },
+        { key: 'home', label: 'Factory home', type: 'text', def: '.solofactory/', env: 'SOLOFACTORY_HOME', help: 'Holds the active project, the error log and factory state.' },
+        { key: 'port', label: 'Port', type: 'number', def: '4173', min: '1024', max: '65535', env: 'PORT', help: 'Where this page is served.' },
+        { key: 'host', label: 'Address', type: 'text', def: '127.0.0.1', env: 'HOST', help: 'Loopback addresses only. Anything else is refused, because the factory has no sign-in.' }
+      ] }
+    ];
+  }
+
+  specName(r) {
+    return (r.kind === 'fix' ? 'fixes/' : 'specs/') + this.slug(r.title) + '.md';
+  }
+
+  discard(r) {
+    const st = this.state;
+    const key = r.pid + '|' + this.specName(r);
+    const edits = { ...st.docEdits }; delete edits[key];
+    const adds = { ...st.docAdds }; delete adds[key];
+    const runs = st.runs.map((x) => (x.id === r.id ? { ...x, state: r.from, change: '' } : x));
+    this.setState({ runs: this.startNext(runs), docEdits: edits, docAdds: adds, activeSec: -1, secDraft: '', viewerEdit: false });
+  }
+
+  revise(r) {
+    const runs = this.state.runs.map((x) => (x.id === r.id ? { ...x, state: 'revising', from: r.state, change: '' } : x));
+    this.setState({ runs: this.startNext(runs), viewer: this.specName(r), viewerEdit: true });
+  }
+
+  submit(text) {
+    const t = (text || '').trim();
+    if (!t) return;
+    const s = this.state;
+    const pid = s.pid;
+    const proj = this.projectList().find((p) => p.id === pid);
+    const kind = this.sizeUp(t, proj);
+    const msgs = s.threads[pid].concat([
+      { id: s.nextId, type: 'user', text: t },
+      { id: s.nextId + 1, type: 'pick', kind: kind, sent: false, ask: this.short(t) }
+    ]);
+    this.setState({ draft: '', nextId: s.nextId + 2, threads: { ...s.threads, [pid]: msgs } });
+  }
+
+  setKind(pid, id, kind) {
+    const s = this.state;
+    const msgs = s.threads[pid].map((m) => (m.id === id ? { ...m, kind: kind } : m));
+    this.setState({ threads: { ...s.threads, [pid]: msgs } });
+  }
+
+  sendPick(pid, id) {
+    const s = this.state;
+    const pick = s.threads[pid].find((m) => m.id === id);
+    if (pick.kind === 'prd') {
+      const msgs = s.threads[pid].map((m) => (m.id === id ? { ...m, sent: true } : m)).concat([{ id: s.nextId, type: 'guide', text: 'Interview started. First question: who uses this, and what should they be able to do on day one? I will skip any topic your documents already answer, and you can leave and come back; the brief saves as we go.' }]);
+      this.setState({ nextId: s.nextId + 1, threads: { ...s.threads, [pid]: msgs } });
+      return;
+    }
+    const runId = s.nextId;
+    const runs = this.startNext(s.runs.concat([{ id: runId, pid: pid, kind: pick.kind, title: pick.ask, state: 'queued', idx: 0, repairs: 0 }]));
+    const started = runs.find((r) => r.id === runId).state === 'building';
+    const msgs = s.threads[pid].map((m) => (m.id === id ? { ...m, sent: true, runId: runId } : m)).concat([
+      { id: s.nextId + 1, type: 'run', runId: runId },
+      { id: s.nextId + 2, type: 'guide', text: started ? 'It is with the factory. This card stays live, so you can watch or manage the run from here. Switch projects and send the next thing whenever you like.' : 'Queued. Runs in one project go one after another, so each builds on the last. It starts by itself when the way is clear.' }
+    ]);
+    this.setState({ nextId: s.nextId + 3, runs: runs, panel: 'run', threads: { ...s.threads, [pid]: msgs } });
+  }
+
+  baseDocs(pid) {
+    const proj = this.projectList().find((x) => x.id === pid);
+    if (!proj || !proj.hasDocs) return [];
+    const who = pid === 'nm' ? 'People mining coaching transcripts for reusable insights.' : 'One reader keeping a personal library of ambient recordings.';
+    return [
+      { name: 'PRD.md', tag: 'Product', note: 'Baseline · rewritten as built after the last release', sections: [{ h: 'Who it is for', t: who }, { h: 'What it does today', t: 'Every shipped capability, in plain language. The Guide treats this as settled and does not ask about it again.' }, { h: 'Not in scope', t: 'Things you already ruled out, so a request that crosses this line is flagged as a product change.' }] },
+      { name: 'FEATURES.md', tag: 'Feature map', note: 'One entry per capability, with screens and files', sections: [{ h: 'Purpose', t: 'The map the Guide uses to tell a fix from a feature. If a request lands inside an entry, it is a fix. If it lands beside the entries, it is a feature.' }, { h: 'Entries', t: 'Ingest · Patterns · Search · Dashboard · Re-run' }] },
+      { name: 'ACCEPTANCE.md', tag: 'Checks', note: 'Every check the gates prove on each run', sections: [{ h: 'Purpose', t: 'One observable scenario per capability. A fix adds or corrects one check. A feature adds a few. A full brief rewrites the set.' }] },
+      { name: '.aai/context.md', tag: 'Context', note: 'Yours to edit · read on every turn', sections: [{ h: 'Purpose', t: 'Standing rules and preferences for this project, so you never repeat them in a request.' }] }
+    ];
+  }
+
+  docsFor(pid) {
+    const K = this.kinds();
+    const extra = this.state.threads[pid]
+      .filter((m) => m.type === 'pick' && m.sent && m.kind !== 'prd')
+      .map((m) => ({
+        name: (m.kind === 'fix' ? 'fixes/' : 'specs/') + this.slug(m.ask) + '.md',
+        tag: m.kind === 'fix' ? 'Fix note' : 'Feature spec',
+        note: 'Written by the Guide from this conversation',
+        sections: [
+          { h: 'Request', t: m.ask },
+          { h: 'Size', t: K[m.kind].label + '. Steps: ' + K[m.kind].steps.join(', ') + '.' },
+          { h: 'Builds on', t: 'PRD.md and FEATURES.md as they stand. Nothing already decided there was asked again.' },
+          { h: 'After the run', t: 'FEATURES.md and ACCEPTANCE.md are updated to the behavior that actually shipped.' }
+        ]
+      }));
+    return extra.reverse().concat(this.baseDocs(pid));
+  }
+
+  renderVals() {
+    const s = this.state;
+    const K = this.kinds();
+    const list = this.projectList();
+    const current = list.find((p) => p.id === s.pid);
+    const tones = { run: '#a7f070', ask: '#ffb36b', idle: '#7d807a' };
+    const shownRun = (pid) => {
+      const mine = s.runs.filter((r) => r.pid === pid && r.state !== 'dismissed');
+      return this.activeIn(s.runs, pid) || mine[mine.length - 1] || null;
+    };
+    const statusOf = (p) => {
+      const act = this.activeIn(s.runs, p.id);
+      const th = s.threads[p.id];
+      if (act && act.state === 'stuck') return { t: 'Needs you · run parked at Gates', tone: 'ask' };
+      if (act && act.state === 'paused') return { t: 'Paused · waiting for you', tone: 'ask' };
+      if (act && act.state === 'revising') return { t: 'Revising a spec', tone: 'ask' };
+      if (th.some((m) => m.type === 'pick' && !m.sent)) return { t: 'Needs you · confirm the plan', tone: 'ask' };
+      if (th.some((m) => m.type === 'pick' && m.sent && m.kind === 'prd')) return { t: 'Needs you · interview in progress', tone: 'ask' };
+      if (act) return { t: 'Building · step ' + (act.idx + 1) + ' of ' + K[act.kind].steps.length, tone: 'run' };
+      return { t: p.hasDocs ? 'Idle · live' : 'New · no documents yet', tone: 'idle' };
+    };
+    const building = s.runs.filter((r) => r.state === 'building' || r.state === 'pausing').length;
+
+    const projects = list.map((p) => {
+      const on = p.id === s.pid;
+      const run = this.activeIn(s.runs, p.id);
+      const st0 = statusOf(p);
+      const waiting = s.runs.filter((x) => x.pid === p.id && x.state === 'queued').length;
+      const st = waiting ? { ...st0, t: st0.t + ' · ' + waiting + ' queued' } : st0;
+      const n = this.docsFor(p.id).length;
+      return {
+        name: p.name, status: st.t, dot: tones[st.tone],
+        pressed: on ? 'true' : 'false',
+        bg: on ? '#202522' : 'transparent', border: on ? '#3a413c' : 'transparent',
+        border2: on ? '#3c5a3a' : '#303632',
+        goLabel: on ? 'You are here' : 'Open',
+        go: () => this.setState({ pid: p.id, docName: '', viewer: '', selRun: 0, pmOpen: false, rowMenu: 0 }),
+        weight: on ? '700' : '500',
+        hasRun: !!run && run.state !== 'revising',
+        segs: run ? this.runSegs(run) : [],
+        docsLine: n ? n + ' documents the Guide reads before it answers' : 'No documents yet · the first brief writes them'
+      };
+    });
+
+    const stateWord = { queued: 'Queued', building: 'Building', pausing: 'Pausing', paused: 'Paused', stuck: 'Parked · needs you', revising: 'Revising the spec', shipped: 'Shipped', cancelled: 'Cancelled' };
+    const qList = s.runs.filter((x) => x.pid === s.pid && x.state === 'queued').map((x) => x.id);
+    const ordinal = (k) => k + (k === 1 ? 'st' : k === 2 ? 'nd' : k === 3 ? 'rd' : 'th');
+    const work = s.threads[s.pid].filter((m) => m.type === 'pick').map((m) => {
+      const run = s.runs.find((r) => r.id === m.runId);
+      return {
+        title: m.ask, kind: K[m.kind].label, chipBg: K[m.kind].chipBg, chipFg: K[m.kind].chipFg,
+        state: !m.sent ? 'Draft · waiting for you' : m.kind === 'prd' ? 'Interview' : run && run.state === 'queued' ? 'Queued · ' + ordinal(qList.indexOf(run.id) + 1) + ' in line' : run ? stateWord[run.state] : 'Sent'
+      };
+    }).reverse();
+
+    const messages = s.threads[s.pid].map((m) => {
+      const run = m.type === 'run' ? s.runs.find((r) => r.id === m.runId) : null;
+      const kind = run ? run.kind : m.kind;
+      const k = kind ? K[kind] : null;
+      const v = { isUser: m.type === 'user', isGuide: m.type === 'guide', isPick: m.type === 'pick', isRun: m.type === 'run', text: m.text };
+      if (k) { v.kindLabel = k.label; v.chipBg = k.chipBg; v.chipFg = k.chipFg; }
+      if (m.type === 'pick') {
+        v.read = current.hasDocs ? ['PRD.md', 'FEATURES.md', 'ACCEPTANCE.md'] : ['no documents found'];
+        v.why = this.why(m.kind, current);
+        v.steps = k.steps.map((label, i) => ({ n: i + 1, label: label }));
+        v.cta = k.cta;
+        v.open = !m.sent; v.sent = m.sent;
+        v.sentLine = m.kind === 'prd' ? 'Confirmed as a full brief. The interview continues below.' : 'Sent to the factory as a ' + k.label.toLowerCase() + '.';
+        v.send = () => this.sendPick(s.pid, m.id);
+        v.alts = Object.keys(K).filter((key) => key !== m.kind).map((key) => ({ label: 'Make it a ' + K[key].label.toLowerCase(), set: () => this.setKind(s.pid, m.id, key) }));
+      }
+      if (run) {
+        v.title = run.title; v.line = this.runLine(run, s.runs);
+        v.segs = this.runSegs(run);
+        v.ctrls = this.runCtrls(run);
+        v.openRun = () => this.setState({ panel: 'run' });
+        v.openSpec = () => this.setState({ viewer: this.specName(run), viewerEdit: false });
+      }
+      return v;
+    }).reverse();
+
+    const tab = (id, label) => {
+      const on = s.panel === id;
+      return { label: label, pressed: on ? 'true' : 'false', bg: on ? '#1f3a21' : 'transparent', fg: on ? '#c9f7a4' : '#f2efe6', border: on ? '#3c5a3a' : '#303632', toggle: () => this.setState({ panel: on ? '' : id }) };
+    };
+
+    const docsRaw = this.docsFor(s.pid);
+    const docs = docsRaw.map((d) => {
+      const on = d.name === s.docName;
+      return { name: d.name, tag: d.tag, note: d.note, pressed: on ? 'true' : 'false', bg: on ? '#202522' : '#191d1b', border: on ? '#3c5a3a' : '#303632', open: () => this.setState({ viewer: d.name, viewerEdit: false }) };
+    });
+    const doc = null;
+    const key = s.pid + '|' + s.viewer;
+    const vRaw = s.viewer ? docsRaw.find((d) => d.name === s.viewer) || null : null;
+    const vRun = vRaw ? s.runs.filter((x) => x.pid === s.pid && this.specName(x) === vRaw.name).pop() || null : null;
+    const canEdit = !!vRaw && (!vRun || vRun.state === 'revising' || vRun.state === 'shipped');
+    const editing = canEdit && (s.viewerEdit || (!!vRun && vRun.state === 'revising'));
+    const edits = s.docEdits[key] || {};
+    const vAdds = s.docAdds[key] || {};
+    const reword = (t) => {
+      let r = t.trim().replace(/^(please|can you|could you|i want to|i would like to|i'd like to|let's|lets|we should|it should)\s+/i, '').replace(/[.!?]+$/, '');
+      r = r.charAt(0).toUpperCase() + r.slice(1);
+      return r + '.';
+    };
+    const pickSec = (t) => {
+      const hs = vRaw.sections.map((x) => x.h.toLowerCase());
+      const want = /(check|test|prove|proof|accept|gate)/i.test(t) ? ['proof', 'after the run', 'purpose'] : ['request', 'what changes', 'what it does today', 'purpose'];
+      for (let w = 0; w < want.length; w++) { const at = hs.indexOf(want[w]); if (at >= 0) return at; }
+      return 0;
+    };
+    const vsend = () => {
+      const t = (this.state.vdraft || '').trim();
+      if (!t || !vRaw) return;
+      const st = this.state;
+      const chat = (st.docChat[key] || []).concat([{ who: 'you', text: t }]);
+      const locked = vRun && ['building', 'pausing', 'queued'].indexOf(vRun.state) >= 0;
+      if (locked) {
+        this.setState({ vdraft: '', docChat: { ...st.docChat, [key]: chat.concat([{ who: 'guide', text: 'This spec is with the factory right now, so I will not change it under the run. Pause or cancel the run and I will reopen it, or send this as a new request and I will queue it as a follow-up.' }]) } });
+        return;
+      }
+      const at = pickSec(t);
+      const where = '"' + vRaw.sections[at].h + '"';
+      const mine = st.docAdds[key] || {};
+      const next = { vdraft: '', activeSec: -1, secDraft: '', docAdds: { ...st.docAdds, [key]: { ...mine, [at]: (mine[at] || []).concat([reword(t)]) } } };
+      let reply = 'Done. I rewrote ' + where + ' to cover that. My change is highlighted. Click the section to adjust my wording.';
+      if (vRun && vRun.state !== 'revising' && vRun.state !== 'shipped') {
+        next.runs = this.startNext(st.runs.map((x) => (x.id === vRun.id ? { ...x, state: 'revising', from: vRun.state, change: '' } : x)));
+        next.viewerEdit = true;
+        reply = 'I reopened the spec as a draft of the next revision and rewrote ' + where + ' to cover that. My change is highlighted. Nothing is building. Resubmit when it reads right.';
+      } else if (vRun && vRun.state === 'revising') {
+        reply = 'Done. I rewrote ' + where + ' to cover that. My change is highlighted. Click the section to adjust my wording, then resubmit.';
+      }
+      next.docChat = { ...st.docChat, [key]: chat.concat([{ who: 'guide', text: reply }]) };
+      this.setState(next);
+    };
+    const vw = vRaw ? {
+      open: true, name: vRaw.name, tag: vRaw.tag,
+      hasLine: !!vRun, line: vRun ? 'Run: ' + this.runLine(vRun, s.runs) : '',
+      revising: !!vRun && vRun.state === 'revising',
+      revTitle: vRun ? 'Draft of revision ' + ((vRun.rev || 1) + 1) + ' · nothing is building' : '',
+      ctrls: vRun ? this.runCtrls(vRun).filter((c) => /Revis|Resubmit|Discard/.test(c.label)) : [],
+      modes: canEdit && !(vRun && vRun.state === 'revising') ? [['Read', false], ['Edit', true]].map((m) => {
+        const on = editing === m[1];
+        return { label: m[0], pressed: on ? 'true' : 'false', bg: on ? '#1f3a21' : 'transparent', fg: on ? '#c9f7a4' : '#f2efe6', border: on ? '#3c5a3a' : '#303632', set: () => this.setState({ viewerEdit: m[1] }) };
+      }) : [],
+      hasNotes: false, notes: [],
+      sections: vRaw.sections.map((x, n) => {
+        const text = edits[n] !== undefined ? edits[n] : x.t;
+        const added = (vAdds[n] || []).join(' ');
+        const whole = added ? text + ' ' + added : text;
+        const active = editing && s.activeSec === n;
+        const keep = () => {
+          const st = this.state;
+          if (st.activeSec !== n) return;
+          const next = { activeSec: -1, secDraft: '' };
+          if (st.secDraft.trim() && st.secDraft !== whole) {
+            next.docEdits = { ...st.docEdits, [key]: { ...(st.docEdits[key] || {}), [n]: st.secDraft } };
+            next.docAdds = { ...st.docAdds, [key]: { ...(st.docAdds[key] || {}), [n]: [] } };
+          }
+          this.setState(next);
+        };
+        return {
+          h: x.h + (added ? ' · changed by the Guide' : edits[n] !== undefined ? ' · edited' : ''), label: 'Edit ' + x.h, t: text, added: added, hasAdd: !!added,
+          view: !editing, click: editing && !active, edit: active, draft: s.secDraft,
+          start: () => this.setState({ activeSec: n, secDraft: whole }),
+          onChange: (e) => this.setState({ secDraft: e.target.value }),
+          keep: keep,
+          onKey: (e) => {
+            if (e.key === 'Escape') { e.preventDefault(); this.setState({ activeSec: -1, secDraft: '' }); }
+            else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); keep(); }
+          }
+        };
+      }),
+      footer: editing ? 'Click any section to edit it. Click away or press Cmd/Ctrl+Enter to keep the edit. Escape cancels. Each edit saves at once, and the Guide checks it before anything is built.' : canEdit ? 'Read only. Press Edit to change it, or ask the Guide.' : 'Read only while the run is active. Use Revise the spec on a parked or cancelled run, or ask the Guide.',
+      chat: [{ mine: false, guide: true, text: 'I have ' + vRaw.name + ' open with you. Tell me what to change and I will edit it, or edit it yourself and I will check your changes against the rest of the project documents.' }]
+        .concat((s.docChat[key] || []).map((m) => ({ mine: m.who === 'you', guide: m.who === 'guide', text: m.text }))).reverse(),
+      draft: s.vdraft,
+      onDraft: (e) => this.setState({ vdraft: e.target.value }),
+      onKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); vsend(); } },
+      send: vsend,
+      close: () => this.setState({ viewer: '', viewerEdit: false, activeSec: -1, secDraft: '' })
+    } : { open: false, name: '', tag: '', hasLine: false, line: '', revising: false, revTitle: '', ctrls: [], modes: [], hasNotes: false, notes: [], sections: [], footer: '', chat: [], draft: '' };
+
+    const r = s.runs.find((x) => x.id === s.selRun && x.pid === s.pid && x.state !== 'dismissed') || shownRun(s.pid);
+    const parked = r && (r.state === 'paused' || r.state === 'stuck');
+    const run = r ? {
+      title: r.title, line: this.runLine(r, s.runs), kindLabel: K[r.kind].label, chipBg: K[r.kind].chipBg, chipFg: K[r.kind].chipFg,
+      ctrls: this.runCtrls(r), stuck: r.state === 'stuck',
+      openSpec: () => this.setState({ viewer: this.specName(r), viewerEdit: false }),
+      more: this.moreCtrls(r), hasMore: this.moreCtrls(r).length > 0,
+      revising: r.state === 'revising', change: r.change || '', fieldId: 'revise-a', revTitle: 'Spec reopened · draft of revision ' + ((r.rev || 1) + 1),
+      onChange: (e) => this.patchRun(r.id, { change: e.target.value }),
+      note: parked ? 'A parked run keeps everything that already passed. Use Restart from here on any finished step to redo the work from that point.' : 'The last stop rewrites the project documents to match what was built, so the next request starts from the truth.',
+      stops: K[r.kind].steps.map((label, i) => {
+        const idle = ['queued', 'cancelled', 'revising'].indexOf(r.state) >= 0;
+        const done = r.state === 'shipped' || (!idle && i < r.idx);
+        const now = !done && !idle && i === r.idx;
+        const bad = now && r.state === 'stuck';
+        const held = now && r.state === 'paused';
+        return {
+          n: i + 1, label: label,
+          state: done ? 'Done' : bad ? 'Failed twice' : held ? 'Paused here' : now ? 'Now' : 'To do',
+          bg: done ? '#1f3a21' : bad ? '#ff7d77' : held ? '#ffb36b' : now ? '#a7f070' : 'transparent',
+          fg: done ? '#a7f070' : now ? '#11170f' : '#a3a49f',
+          ring: bad ? '#ff7d77' : held ? '#ffb36b' : done || now ? '#a7f070' : '#3a413c',
+          text: done || now ? '#f2efe6' : '#a3a49f',
+          canRestart: parked && i < r.idx,
+          restart: () => this.patchRun(r.id, { state: 'building', idx: i })
+        };
+      })
+    } : null;
+    const qRuns = s.runs.filter((q) => q.pid === s.pid && q.state === 'queued');
+    const queue = qRuns.map((q, k) => ({
+      pos: k + 1, title: q.title, kindLabel: K[q.kind].label, chipBg: K[q.kind].chipBg, chipFg: K[q.kind].chipFg,
+      canUp: k > 0, upLabel: 'Move ' + q.title + ' up',
+      up: () => {
+        const prev = qRuns[k - 1];
+        const arr = this.state.runs.slice();
+        const a = arr.findIndex((x) => x.id === prev.id);
+        const b = arr.findIndex((x) => x.id === q.id);
+        arr[a] = q; arr[b] = prev;
+        this.setState({ runs: arr });
+      },
+      remove: () => this.patchRun(q.id, { state: 'cancelled' })
+    }));
+    const blocked = r && (r.state === 'stuck' || r.state === 'paused' || r.state === 'revising');
+
+    const suggestions = (current.hasDocs
+      ? ['Fix the date format on the dashboard', 'Add CSV export to the results table', 'Rebuild it for multi-user sign in']
+      : ['Build a portal where members see their coaching notes', 'Adopt the app in my existing folder']
+    ).map((text) => ({ text: text, use: () => this.setState({ draft: text }) }));
+
+    const pickRows = s.threads[s.pid].filter((m) => m.type === 'pick').map((m) => {
+      const rr = s.runs.find((x) => x.id === m.runId);
+      if (rr && rr.state === 'dismissed') return null;
+      let g = 'done';
+      let st = 'Sent';
+      let order = 0;
+      if (!m.sent) { g = 'needs'; st = 'Plan waiting for you in the chat'; }
+      else if (m.kind === 'prd') { g = 'needs'; st = 'Interview in progress'; }
+      else if (rr && ['paused', 'stuck', 'revising'].indexOf(rr.state) >= 0) { g = 'needs'; st = stateWord[rr.state]; }
+      else if (rr && (rr.state === 'building' || rr.state === 'pausing')) { g = 'running'; st = this.runLine(rr, s.runs); order = -1; }
+      else if (rr && rr.state === 'queued') { g = 'queued'; order = qList.indexOf(rr.id); st = ordinal(order + 1) + ' in line' + (this.activeIn(s.runs, s.pid) ? '' : ' · waiting for a build slot'); }
+      else if (rr) { st = stateWord[rr.state]; }
+      const qi = rr ? queue.findIndex((q, k) => qRuns[k].id === rr.id) : -1;
+      const picked = !!rr && !!r && rr.id === r.id && s.panel === 'run';
+      const swapWith = (other) => {
+        const arr = this.state.runs.slice();
+        const a = arr.findIndex((x) => x.id === other.id);
+        const b = arr.findIndex((x) => x.id === rr.id);
+        arr[a] = rr; arr[b] = other;
+        this.setState({ runs: arr });
+      };
+      return {
+        g: g, order: order,
+        title: m.ask, kind: K[m.kind].label, chipBg: K[m.kind].chipBg, chipFg: K[m.kind].chipFg, state: st,
+        aria: rr ? 'Open the run: ' + m.ask : m.ask + ', in the chat',
+        bg: picked ? '#202522' : 'transparent', weight: g === 'needs' ? '600' : '500',
+        menuOpen: qi >= 0 && s.rowMenu === rr.id, menuExpanded: qi >= 0 && s.rowMenu === rr.id ? 'true' : 'false',
+        menuLabel: 'Queue actions for ' + m.ask,
+        toggleMenu: () => this.setState({ rowMenu: this.state.rowMenu === (rr && rr.id) ? 0 : rr.id }),
+        noUp: qi <= 0, noDown: qi < 0 || qi >= qRuns.length - 1,
+        upOpacity: qi > 0 ? '1' : '0.35', downOpacity: qi >= 0 && qi < qRuns.length - 1 ? '1' : '0.35',
+        down: () => { if (qi >= 0 && qi < qRuns.length - 1) swapWith(qRuns[qi + 1]); },
+        open: () => (rr ? this.setState({ panel: 'run', selRun: rr.id }) : this.setState({ panel: '' })),
+        queued: qi >= 0, canUp: qi > 0, upLabel: qi >= 0 ? queue[qi].upLabel : '',
+        up: () => { if (qi > 0) swapWith(qRuns[qi - 1]); }, remove: qi >= 0 ? () => { this.setState({ rowMenu: 0 }); queue[qi].remove(); } : null
+      };
+    }).filter((x) => x);
+    const gdefs = [['needs', 'Needs you', 'Nothing needs you right now.'], ['running', 'Running', 'Nothing is building.'], ['queued', 'Queued', 'Nothing is waiting.'], ['done', 'Done', 'Nothing finished yet.']];
+    const groups = gdefs.map((d) => {
+      let items = pickRows.filter((x) => x.g === d[0]);
+      if (d[0] === 'queued') items = items.slice().sort((a, b) => a.order - b.order);
+      else items = items.slice().reverse();
+      const open = !!s.groupsOpen[d[0]];
+      const hot = d[0] === 'needs' && items.length > 0;
+      return {
+        label: d[1], count: items.length, items: items, open: open, empty: items.length === 0, emptyText: d[2],
+        expanded: open ? 'true' : 'false', chev: open ? '▾' : '▸',
+        color: hot ? '#ffb36b' : '#f2efe6', countBg: hot ? '#3a2a17' : '#202522', countFg: hot ? '#ffb36b' : '#cfd0ca',
+        toggle: () => this.setState({ groupsOpen: { ...this.state.groupsOpen, [d[0]]: !open } })
+      };
+    });
+
+    const closeNav = (fn) => () => { this.setState({ navOpen: false }); fn(); };
+    const railLinks = [
+      { label: '+ New project', hasBadge: false, badge: '', act: closeNav(() => this.setState({ np: { name: '', mode: 'empty', folder: '' } })) },
+      { label: 'Settings', hasBadge: false, badge: '', act: closeNav(() => this.setState({ cfgOpen: true })) },
+      { label: 'Manual', hasBadge: false, badge: '', act: closeNav(() => this.showInfo('Manual', 'Opens the illustrated user manual, served at /manual.')) },
+      { label: 'Feedback', hasBadge: false, badge: '', act: closeNav(() => this.showInfo('Feedback', 'Opens the Feedback form: Problem or Improvement, a preview of the report, Copy and open email, and optional run diagnostics. Nothing is sent until you send it.')) },
+      { label: 'Updates', hasBadge: true, badge: 'Update available', act: closeNav(() => this.showInfo('Update available', 'Shows your version, the latest version, and the prompt to paste into Claude Code or Codex when you are ready. It never updates by itself.')) }
+    ];
+
+    const app = current.url ? {
+      none: false, live: true, url: current.url, release: current.release,
+      relaunch: () => this.showInfo('Relaunch', 'Restarts the live app on the same port, then checks its health again.'),
+      stats: [{ label: 'Requests', value: '—' }, { label: 'Errors', value: '—' }, { label: 'Average response', value: '—' }, { label: 'Uptime', value: '—' }]
+    } : { none: true, live: false, url: '', release: '', stats: [] };
+
+    const provider = s.provider[s.pid] || s.cfgVals.provider || 'Claude Code';
+
+    const npv = s.np ? {
+      open: true, name: s.np.name, folder: s.np.folder, adopt: s.np.mode === 'adopt',
+      cta: s.np.mode === 'adopt' ? 'Adopt the app' : 'Create project',
+      onName: (e) => this.setState({ np: { ...this.state.np, name: e.target.value } }),
+      onFolder: (e) => this.setState({ np: { ...this.state.np, folder: e.target.value } }),
+      modes: [['empty', 'Start empty', 'The Guide starts with a full interview.'], ['adopt', 'Adopt an existing app', 'Copies a folder in, never touching the original, and writes the baseline documents from its code.']].map((o) => {
+        const on = s.np.mode === o[0];
+        return { label: o[1], help: o[2], checked: on ? 'true' : 'false', bg: on ? '#1f3a21' : 'transparent', border: on ? '#3c5a3a' : '#303632', pick: () => this.setState({ np: { ...this.state.np, mode: o[0] } }) };
+      }),
+      close: () => this.setState({ np: null }),
+      create: () => {
+        const st = this.state;
+        const name = (st.np.name || '').trim();
+        if (!name) return;
+        const id = 'x' + st.nextId;
+        const adopt = st.np.mode === 'adopt';
+        const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const text = adopt
+          ? 'I will copy ' + (st.np.folder || 'that folder') + ' into projects/' + slug + '/, never touching the original. Then I read the code and tests and write PRD.md, FEATURES.md and ACCEPTANCE.md from what is there. You review that baseline before anything new is built.'
+          : name + ' has no documents yet. Tell me what you want to build and I will start a full brief.';
+        this.setState({
+          nextId: st.nextId + 1, pid: id, np: null, viewer: '', selRun: 0,
+          extra: (st.extra || []).concat([{ id: id, name: name, live: adopt ? 'Adopting · not built here yet' : 'Not built yet', hasDocs: false }]),
+          threads: { ...st.threads, [id]: [{ id: st.nextId, type: 'guide', text: text }] }
+        });
+      }
+    } : { open: false, name: '', folder: '', adopt: false, cta: '', modes: [] };
+
+    const defs = this.settingsDefs();
+    const valOf = (fd) => (s.cfgVals[fd.key] !== undefined ? s.cfgVals[fd.key] : fd.def);
+    const setVal = (key, v) => this.setState({ cfgVals: { ...this.state.cfgVals, [key]: v }, cfgTouched: true });
+    const cfg = {
+      open: s.cfgOpen,
+      status: s.cfgTouched ? 'All changes saved' : 'Showing the defaults',
+      close: () => this.setState({ cfgOpen: false }),
+      sections: defs.map((sec) => {
+        const changed = sec.restart && sec.fields.some((fd) => s.cfgVals[fd.key] !== undefined && String(s.cfgVals[fd.key]) !== String(fd.def));
+        return {
+          title: sec.title + (sec.restart ? ' (applies after a restart)' : ''),
+          hasNote: !!changed, note: 'Restart the factory to apply these changes. Pause active runs first; they resume where they stopped.',
+          fields: sec.fields.map((fd) => {
+            const v = valOf(fd);
+            return {
+              id: 'cfg-' + fd.key, label: fd.label, help: fd.help,
+              envLine: fd.locked ? 'Set by ' + fd.env + ' in your environment' : (fd.env || ''),
+              envColor: fd.locked ? '#ffb36b' : '#a3a49f',
+              locked: !!fd.locked,
+              isSelect: fd.type === 'select', isInput: fd.type === 'number' || fd.type === 'text', isToggle: fd.type === 'toggle',
+              inputType: fd.type === 'number' ? 'number' : 'text', min: fd.min || '', max: fd.max || '',
+              hasUnit: !!fd.unit, unit: fd.unit || '',
+              value: String(v), on: !!v, toggleText: v ? 'On' : 'Off',
+              options: (fd.options || []).map((o) => ({ v: o[0], label: o[1] })),
+              onChange: (e) => setVal(fd.key, e.target.value),
+              onToggle: (e) => setVal(fd.key, !!e.target.checked)
+            };
+          })
+        };
+      })
+    };
+
+    const titles = { app: 'Live app · ' + current.name, docs: 'Documents · ' + current.name, run: 'Run · ' + current.name };
+
+    return {
+      projects: projects, current: current, work: work, noWork: work.length === 0,
+      slots: building + ' of 2 build slots in use',
+      messages: messages, suggestions: suggestions,
+      draft: s.draft,
+      placeholder: 'Tell the Guide what ' + current.name + ' needs',
+      onDraft: (e) => this.setState({ draft: e.target.value }),
+      onKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.submit(this.state.draft); } },
+      onSend: () => this.submit(this.state.draft),
+      panelTabs: [tab('run', 'Run'), tab('docs', 'Documents'), tab('app', 'Live app')],
+      panelOpen: s.panel !== '', panelTitle: titles[s.panel] || '',
+      closePanel: () => this.setState({ panel: '' }),
+      showDocs: s.panel === 'docs', showRun: s.panel === 'run', showApp: s.panel === 'app', app: app,
+      groups: groups, railLinks: railLinks,
+      nav: { open: s.navOpen, expanded: s.navOpen ? 'true' : 'false', hint: 'Update available', toggle: () => this.setState({ navOpen: !this.state.navOpen, pmOpen: false }) },
+      pm: (() => {
+        const others = projects.filter((p) => p.pressed === 'false' && /^Needs you|Paused|Revising/.test(p.status)).length;
+        return {
+          open: s.pmOpen, expanded: s.pmOpen ? 'true' : 'false', others: others > 0,
+          othersText: others === 1 ? '1 other project needs you' : others + ' other projects need you',
+          aria: 'Switch project. Now ' + current.name + (others ? '. ' + others + ' other projects need you.' : ''),
+          toggle: () => this.setState({ pmOpen: !this.state.pmOpen, navOpen: false }),
+          newProject: () => this.setState({ pmOpen: false, np: { name: '', mode: 'empty', folder: '' } })
+        };
+      })(), np: npv, cfg: cfg,
+      info: s.info ? { open: true, title: s.info.title, text: s.info.text, close: () => this.setState({ info: null }) } : { open: false, title: '', text: '' },
+      provider: provider, providerAria: 'Builds with ' + provider + '. Switch the AI for this project.',
+      toggleProvider: () => this.setState({ provider: { ...this.state.provider, [this.state.pid]: provider === 'Codex' ? 'Claude Code' : 'Codex' } }),
+      onAttach: () => this.showInfo('Attach', 'Drops a spec or notes into the conversation (markdown, text, JSON, YAML, CSV) or lets the Guide look at a mockup or screenshot (png, jpg, gif, webp). Images are saved under the project\'s .factory/uploads/.'),
+      vw: vw,
+      docs: docs, noDocs: docsRaw.length === 0, hasDoc: !!doc, doc: doc || { name: '', sections: [], ctrls: [], hasLine: false, line: '', revising: false, change: '', revTitle: '' },
+      closeDoc: () => this.setState({ docName: '' }),
+      hasRun: !!run, noRun: !run, run: run || { more: [], hasMore: false, title: '', line: '', kindLabel: '', chipBg: '#202522', chipFg: '#f2efe6', stops: [], ctrls: [], stuck: false, note: '', revising: false, change: '', fieldId: 'revise-a', revTitle: '' },
+      queue: queue, hasQueue: queue.length > 0,
+      queueTitle: queue.length + ' queued behind it',
+      queueNote: blocked ? 'Waiting for your call on the run above. Nothing here starts until it is resolved.' : 'They start one at a time, top first, each building on the last.'
+    };
+  }
+}
+</script>
+</body>
+</html>

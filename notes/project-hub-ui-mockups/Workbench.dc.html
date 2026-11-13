@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SoloFactory, Workbench</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+*{box-sizing:border-box}
+button{font:inherit;cursor:pointer}
+input{font:inherit}
+button:focus-visible,input:focus-visible{outline:2px solid #a7f070;outline-offset:2px}
+a{color:#a7f070}a:hover{color:#c9f7a4}
+</style>
+</helmet>
+<div style="display: flex; flex-direction: column; height: 100vh; min-height: 600px; background: #111413; color: #f2efe6; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 14px; line-height: 1.45">
+
+<header style="flex: none; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding: 10px 18px 0; border-bottom: 1px solid #303632; background: #151917">
+<span style="display: grid; place-items: center; width: 34px; height: 34px; margin-bottom: 9px; border-radius: 10px; background: #a7f070; color: #0c110d; font-size: 11px; font-weight: 700">SF</span>
+<div role="tablist" aria-label="Projects" style="flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: 4px">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="3">
+<button role="tab" aria-selected="{{t.selected}}" onClick="{{t.go}}" style="display: flex; gap: 9px; align-items: flex-start; min-width: 190px; min-height: 52px; padding: 8px 14px; border: 1px solid {{t.border}}; border-bottom: 0; border-radius: 10px 10px 0 0; background: {{t.bg}}; color: #f2efe6; text-align: left">
+<span aria-hidden="true" style="flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 99px; background: {{t.dot}}"></span>
+<span style="display: flex; flex-direction: column"><span style="font-weight: 600">{{t.name}}</span><span style="font-size: 12px; color: #a3a49f">{{t.status}}</span></span>
+</button>
+</sc-for>
+</div>
+<span style="margin-bottom: 14px; font-size: 13px; color: #a3a49f">{{slotsLine}}</span>
+</header>
+
+<div style="flex: 1 1 0; min-height: 0; display: flex; flex-wrap: wrap; overflow: auto">
+
+<nav aria-label="Work and documents" style="flex: 1 1 250px; max-width: 300px; min-width: 0; display: flex; flex-direction: column; gap: 20px; padding: 18px 12px; border-right: 1px solid #303632; overflow-y: auto">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h2 style="margin: 0 0 2px 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a3a49f">Work</h2>
+<sc-for list="{{work}}" as="w" hint-placeholder-count="2">
+<button onClick="{{w.open}}" aria-pressed="{{w.pressed}}" style="display: flex; flex-direction: column; gap: 4px; width: 100%; min-height: 52px; padding: 8px 10px; border: 1px solid {{w.border}}; border-radius: 10px; background: {{w.bg}}; color: #f2efe6; text-align: left">
+<span style="max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{w.title}}</span>
+<span style="display: flex; gap: 8px; align-items: center; font-size: 12px; color: #a3a49f"><span style="padding: 1px 7px; border-radius: 99px; background: {{w.chipBg}}; color: {{w.chipFg}}; font-weight: 600">{{w.kindLabel}}</span>{{w.state}}</span>
+</button>
+</sc-for>
+<sc-if value="{{noWork}}" hint-placeholder-val="{{false}}">
+<p style="margin: 0 6px; font-size: 12px; color: #a3a49f">Nothing yet. Ask the Guide for something.</p>
+</sc-if>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h2 style="margin: 0 0 2px 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a3a49f">Documents</h2>
+<sc-for list="{{docs}}" as="d" hint-placeholder-count="4">
+<button onClick="{{d.open}}" aria-pressed="{{d.pressed}}" style="display: flex; flex-direction: column; gap: 2px; width: 100%; min-height: 48px; padding: 7px 10px; border: 1px solid {{d.border}}; border-radius: 10px; background: {{d.bg}}; color: #f2efe6; text-align: left">
+<span style="font-family: ui-monospace, Menlo, monospace; font-size: 13px">{{d.name}}</span>
+<span style="font-size: 12px; color: #a3a49f">{{d.tag}}</span>
+</button>
+</sc-for>
+<sc-if value="{{noDocs}}" hint-placeholder-val="{{false}}">
+<p style="margin: 0 6px; font-size: 12px; color: #a3a49f">None yet. The first brief writes them.</p>
+</sc-if>
+</div>
+</nav>
+
+<main style="flex: 999 1 460px; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-y: auto">
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 16px 28px 12px">
+<div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+<span style="font-size: 12px; color: #a3a49f">{{view.eyebrow}}</span>
+<h1 style="margin: 0; font-family: 'Iowan Old Style', Charter, Georgia, serif; font-size: 24px; font-weight: 500; letter-spacing: -0.01em">{{view.title}}</h1>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<sc-if value="{{view.canQueue}}" hint-placeholder-val="{{false}}">
+<button onClick="{{view.queue}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #a7f070; color: #11170f; font-weight: 700">{{view.cta}}</button>
+</sc-if>
+<sc-if value="{{view.hasPill}}" hint-placeholder-val="{{true}}">
+<span style="padding: 7px 12px; border: 1px solid #303632; border-radius: 99px; font-size: 13px; color: #cfd0ca">{{view.pill}}</span>
+</sc-if>
+<sc-for list="{{view.ctrls}}" as="c" hint-placeholder-count="2">
+<button onClick="{{c.act}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid {{c.border}}; border-radius: 10px; background: {{c.bg}}; color: {{c.fg}}; font-size: 13px; font-weight: 600">{{c.label}}</button>
+</sc-for>
+<sc-if value="{{guideClosed}}" hint-placeholder-val="{{false}}">
+<button onClick="{{toggleGuide}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid #3c5a3a; border-radius: 10px; background: #1f3a21; color: #c9f7a4; font-weight: 600">Show the Guide</button>
+</sc-if>
+</div>
+</div>
+
+<sc-if value="{{view.isWork}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; flex-direction: column; gap: 12px; padding: 0 28px 14px">
+<sc-if value="{{view.canResize}}" hint-placeholder-val="{{false}}">
+<div role="group" aria-label="Size of this request" style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+<span style="font-size: 13px; color: #a3a49f">The Guide sized this as</span>
+<sc-for list="{{view.sizes}}" as="z" hint-placeholder-count="3">
+<button onClick="{{z.set}}" aria-pressed="{{z.pressed}}" style="min-height: 40px; padding: 7px 13px; border: 1px solid {{z.border}}; border-radius: 99px; background: {{z.bg}}; color: {{z.fg}}; font-size: 13px; font-weight: 600">{{z.label}}</button>
+</sc-for>
+</div>
+</sc-if>
+<ol aria-label="Lifecycle for this size" style="display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none">
+<sc-for list="{{view.stops}}" as="s" hint-placeholder-count="5">
+<li style="flex: 1 1 110px; display: flex; flex-direction: column; gap: 6px; padding: 9px 10px; border: 1px solid {{s.border}}; border-radius: 10px; background: {{s.bg}}">
+<span style="display: flex; gap: 7px; align-items: center"><span style="display: grid; place-items: center; width: 22px; height: 22px; border-radius: 99px; background: {{s.numBg}}; color: {{s.numFg}}; font-size: 12px; font-weight: 700">{{s.n}}</span><span style="font-size: 12px; color: #a3a49f">{{s.state}}</span></span>
+<span style="font-size: 13px; font-weight: 600; color: {{s.text}}">{{s.label}}</span>
+<sc-if value="{{s.canRestart}}" hint-placeholder-val="{{false}}">
+<button onClick="{{s.restart}}" style="min-height: 36px; padding: 5px 8px; border: 1px solid #3a413c; border-radius: 8px; background: transparent; color: #f2efe6; font-size: 12px">Restart from here</button>
+</sc-if>
+</li>
+</sc-for>
+</ol>
+<sc-if value="{{view.stuck}}" hint-placeholder-val="{{false}}">
+<div role="status" style="display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid #6a3835; border-radius: 12px; background: #2a1817">
+<strong style="font-weight: 600; color: #ffb3ae">This run needs you</strong>
+<span style="color: #e6e3da">One check failed twice, so the factory stopped instead of spending more turns. Nothing was deployed and the last release is still live. Choose a repair, restart from a finished stop, or cancel. Queued work in this project waits for your call.</span>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<div style="padding: 0 28px 28px">
+<article style="display: flex; flex-direction: column; gap: 18px; max-width: 760px; margin: 0 auto; padding: 34px 40px; border-radius: 6px; background: #f4efe2; color: #23261f">
+<sc-if value="{{view.revising}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid #c9bf9f; border-radius: 6px; background: #fbf8ee">
+<strong style="font-weight: 600; color: #6b4a12">{{view.revTitle}}</strong>
+<span style="color: #23261f">Nothing is building. The spec is open again. Type what should change, or tell the Guide in plain words and it edits the spec for you.</span>
+<label for="{{view.fieldId}}" style="font-size: 12px; font-weight: 600; color: #23261f">What should change in this revision</label>
+<textarea id="{{view.fieldId}}" value="{{view.change}}" onChange="{{view.onChange}}" rows="3" placeholder="For example: compare by transcript id, not by file name" style="width: 100%; padding: 10px 12px; border-radius: 10px; font: inherit; resize: vertical; border: 1px solid #a89f80; background: #ffffff; color: #23261f"></textarea>
+<span style="font-size: 13px; color: #23261f">Resubmit runs a short Guide review of the changed spec, then replaces this run. Work the change does not touch is reused. Discard changes throws this draft away and puts the run back as it was.</span>
+</div>
+</sc-if>
+<sc-for list="{{view.sections}}" as="s" hint-placeholder-count="4">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #4c5a2c">{{s.h}}</h2>
+<p style="margin: 0; font-family: 'Iowan Old Style', Charter, Georgia, serif; font-size: 16px; line-height: 1.55">{{s.t}}</p>
+</div>
+</sc-for>
+</article>
+</div>
+</main>
+
+<sc-if value="{{guideOpen}}" hint-placeholder-val="{{true}}">
+<aside aria-label="Guide" style="flex: 1 1 340px; max-width: 400px; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid #303632; background: #151917">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #303632">
+<div style="display: flex; flex-direction: column; min-width: 0">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">Guide</h2>
+<span style="font-size: 12px; color: #a3a49f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">Looking at: {{view.title}}</span>
+</div>
+<button onClick="{{toggleGuide}}" style="flex: none; min-height: 40px; padding: 8px 12px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Hide</button>
+</div>
+<div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column-reverse; gap: 12px; padding: 16px">
+<sc-for list="{{chat}}" as="m" hint-placeholder-count="2">
+<div style="display: flex; flex-direction: column">
+<sc-if value="{{m.mine}}" hint-placeholder-val="{{false}}">
+<p style="align-self: flex-end; max-width: 88%; margin: 0; padding: 9px 12px; border-radius: 12px 12px 4px 12px; background: #a7f070; color: #11170f">{{m.text}}</p>
+</sc-if>
+<sc-if value="{{m.guide}}" hint-placeholder-val="{{true}}">
+<p style="max-width: 94%; margin: 0; padding: 9px 12px; border: 1px solid #303632; border-radius: 12px 12px 12px 4px; background: #202522; color: #e6e3da">{{m.text}}</p>
+</sc-if>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 16px; border-top: 1px solid #303632">
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<sc-for list="{{suggestions}}" as="s" hint-placeholder-count="2">
+<button onClick="{{s.use}}" style="min-height: 36px; padding: 6px 11px; border: 1px solid #303632; border-radius: 99px; background: transparent; color: #cfd0ca; font-size: 12px; text-align: left">{{s.text}}</button>
+</sc-for>
+</div>
+<div style="display: flex; gap: 8px; align-items: center; padding: 5px 5px 5px 12px; border: 1px solid #3a413c; border-radius: 12px; background: #202522">
+<label for="guide-c" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0)">Message the Guide</label>
+<input id="guide-c" type="text" value="{{draft}}" onChange="{{onDraft}}" onKeyDown="{{onKey}}" placeholder="Ask for a fix, a feature or a rebuild" autocomplete="off" style="flex: 1 1 auto; min-width: 0; min-height: 44px; border: 0; outline-offset: 4px; background: transparent; color: #f2efe6">
+<button onClick="{{onSend}}" style="flex: none; min-height: 44px; padding: 10px 14px; border: 0; border-radius: 9px; background: #a7f070; color: #11170f; font-weight: 700">Send</button>
+</div>
+</div>
+</aside>
+</sc-if>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  state = {
+    pid: 'nm', guideOpen: true, draft: '', nextId: 100,
+    sel: { nm: { t: 'work', id: 1 }, al: { t: 'work', id: 2 }, mp: { t: 'none' } },
+    items: {
+      nm: [
+        { id: 1, title: 'Batch re-run report', kind: 'feature', state: 'building', idx: 2, trap: true, repairs: 0 },
+        { id: 3, title: 'Offset rounding in pattern counts', kind: 'fix', state: 'shipped', idx: 9, repairs: 0 }
+      ],
+      al: [{ id: 2, title: 'Search drops the last word of a pasted title', kind: 'fix', state: 'draft', idx: -1, repairs: 0 }],
+      mp: []
+    },
+    chat: {
+      nm: [{ who: 'guide', text: 'The batch re-run report is building. The stops above the spec show where it is, and the buttons beside the title manage it. Ask for the next thing whenever you like; it queues behind this run.' }],
+      al: [
+        { who: 'you', text: 'The search box drops the last word when I paste a long title.' },
+        { who: 'guide', text: 'FEATURES.md already covers search, so I drafted this as a quick fix: no interview, five steps. Check the note in the middle and queue it when it reads right.' }
+      ],
+      mp: [{ who: 'guide', text: 'Member Portal has no documents yet. Tell me what you want to build and I will start a full brief. If the app already exists in a folder, say so and I will adopt it and write the baseline from the code.' }]
+    }
+  };
+
+  componentDidMount() { this.timer = setInterval(() => this.tick(), 3500); }
+  componentWillUnmount() { clearInterval(this.timer); }
+
+  projectList() {
+    return [
+      { id: 'nm', name: 'Nugget Mining', hasDocs: true },
+      { id: 'al', name: 'Ambient Library', hasDocs: true },
+      { id: 'mp', name: 'Member Portal', hasDocs: false }
+    ];
+  }
+
+  kinds() {
+    return {
+      fix: { label: 'Quick fix', chipBg: '#3a2a17', chipFg: '#ffb36b', cta: 'Queue for the factory', steps: ['Fix note', 'Build', 'Gates', 'Deploy', 'Update docs'] },
+      feature: { label: 'Feature', chipBg: '#1f3a21', chipFg: '#a7f070', cta: 'Queue for the factory', steps: ['Feature spec', 'Plan', 'Build', 'Gates', 'Review', 'Deploy', 'Update docs'] },
+      prd: { label: 'Full brief', chipBg: '#1b2f45', chipFg: '#9cc9ff', cta: 'Start the interview', steps: ['Interview', 'PRD and plan', 'Planned features', 'Gates', 'Review', 'Deploy', 'Update docs'] }
+    };
+  }
+
+  docList(pid) {
+    if (pid === 'mp') return [];
+    return [
+      { name: 'PRD.md', tag: 'Product baseline', sections: [{ h: 'What this is', t: 'What the app does today, who uses it and what is out of scope. Rewritten as built after every release, so the Guide never asks about it twice.' }, { h: 'How the Guide uses it', t: 'A request that stays inside this contract is a fix or a feature. A request that changes it is a full brief.' }] },
+      { name: 'FEATURES.md', tag: 'Feature map', sections: [{ h: 'What this is', t: 'One entry per capability, with its screens and the files that implement it.' }, { h: 'How the Guide uses it', t: 'A request that lands inside an entry is a quick fix. A request that lands beside the entries is a feature.' }] },
+      { name: 'ACCEPTANCE.md', tag: 'Checks', sections: [{ h: 'What this is', t: 'One observable scenario per capability, proven offline by the gates on every run.' }, { h: 'How runs change it', t: 'A fix corrects one check. A feature adds a few. A full brief rewrites the set.' }] },
+      { name: '.aai/context.md', tag: 'Your standing rules', sections: [{ h: 'What this is', t: 'Preferences and rules for this project. Yours to edit. Read on every Guide turn, so you never repeat them in a request.' }] }
+    ];
+  }
+
+  specSections(item, proj) {
+    let out;
+    if (item.kind === 'fix') out = [
+      { h: 'Request', t: item.title },
+      { h: 'Taken from your documents', t: 'FEATURES.md already lists this behavior, and ACCEPTANCE.md holds the check that should have caught it. Nothing was asked again.' },
+      { h: 'What changes', t: 'One rule. No new data, screen or flow.' },
+      { h: 'Proof', t: 'One corrected check, proven offline by the gates.' },
+      { h: 'Documents updated after the run', t: 'ACCEPTANCE.md gets the corrected check. The fix note is filed under fixes/.' }
+    ];
+    else if (item.kind === 'feature') out = [
+      { h: 'Request', t: item.title },
+      { h: 'Taken from your documents', t: 'Users, data and stack come from PRD.md. Neighbouring capabilities come from FEATURES.md. None of that was asked again.' },
+      { h: 'What changes', t: 'One new capability, planned as one to three build steps.' },
+      { h: 'Still to ask', t: 'Only what the documents cannot answer. The Guide asks in the dock before this is queued.' },
+      { h: 'Documents updated after the run', t: 'A new entry in FEATURES.md, new checks in ACCEPTANCE.md, and this spec marked as built.' }
+    ];
+    else out = [
+      { h: 'Request', t: item.title },
+      { h: 'Taken from your documents', t: proj.hasDocs ? 'The current PRD.md is the starting draft. The interview covers only what changes.' : 'Nothing to reuse yet. This project has no PRD.md, so the interview starts from the beginning.' },
+      { h: 'What changes', t: 'The product contract itself: who it is for, what it keeps, what it must never do.' },
+      { h: 'Documents written by the run', t: 'PRD.md, PLAN.md, FEATURES.md and ACCEPTANCE.md.' }
+    ];
+    if (item.state === 'shipped') out = [{ h: 'As built', t: 'Shipped and live. Every check passed, and the project documents now describe this behavior.' }].concat(out);
+    return out;
+  }
+
+  sizeUp(text, proj) {
+    if (!proj.hasDocs) return 'prd';
+    const t = text.toLowerCase();
+    if (/(fix|bug|typo|broken|wrong|crash|drops|error|fails)/.test(t)) return 'fix';
+    if (/(rebuild|redesign|from scratch|new app|version 2|v2|rewrite|multi-user|new prd)/.test(t)) return 'prd';
+    return 'feature';
+  }
+
+  isActive(i) {
+    return ['building', 'pausing', 'paused', 'stuck', 'revising'].indexOf(i.state) >= 0;
+  }
+
+  startNext(items) {
+    const out = { ...items };
+    Object.keys(out).forEach((pid) => {
+      if (out[pid].some((i) => this.isActive(i))) return;
+      let slots = 0;
+      Object.keys(out).forEach((k) => { slots += out[k].filter((i) => i.state === 'building' || i.state === 'pausing').length; });
+      if (slots >= 2) return;
+      const waiting = out[pid].filter((i) => i.state === 'queued');
+      const first = waiting[waiting.length - 1];
+      if (first) out[pid] = out[pid].map((i) => (i.id === first.id ? { ...i, state: 'building', idx: 0 } : i));
+    });
+    return out;
+  }
+
+  tick() {
+    const s = this.state;
+    const K = this.kinds();
+    const chat = { ...s.chat };
+    const say = (pid, text) => { chat[pid] = chat[pid].concat([{ who: 'guide', text: text }]); };
+    const items = {};
+    Object.keys(s.items).forEach((pid) => {
+      items[pid] = s.items[pid].map((r) => {
+        const steps = K[r.kind].steps;
+        if (r.state === 'pausing') {
+          if (r.idx + 1 >= steps.length) { say(pid, 'Shipped. It is live, and I updated the documents to match what was built.'); return { ...r, state: 'shipped', idx: steps.length }; }
+          say(pid, 'Paused before ' + steps[r.idx + 1] + '. The work so far is committed and passing.');
+          return { ...r, state: 'paused', idx: r.idx + 1 };
+        }
+        if (r.state !== 'building') return r;
+        if (r.trap && steps[r.idx] === 'Gates') { say(pid, 'I parked "' + r.title + '". One check failed twice, even after a repair, so I stopped instead of burning more turns. Use the buttons beside the title: let me plan a different repair, restart from an earlier stop, or cancel.'); return { ...r, state: 'stuck', trap: false }; }
+        if (r.idx + 1 >= steps.length) { say(pid, 'Shipped "' + r.title + '". It is live, and I updated FEATURES.md and ACCEPTANCE.md to match what was built.'); return { ...r, state: 'shipped', idx: steps.length }; }
+        return { ...r, idx: r.idx + 1 };
+      });
+    });
+    this.setState({ items: this.startNext(items), chat: chat });
+  }
+
+  submit(text) {
+    const t = (text || '').trim();
+    if (!t) return;
+    const s = this.state;
+    const pid = s.pid;
+    const proj = this.projectList().find((p) => p.id === pid);
+    const kind = this.sizeUp(t, proj);
+    const K = this.kinds()[kind];
+    const title = t.length > 60 ? t.slice(0, 57) + '...' : t;
+    const item = { id: s.nextId, title: title, kind: kind, state: 'draft', idx: -1, repairs: 0 };
+    const reason = !proj.hasDocs ? 'There is no PRD.md here yet, so it starts with the interview.' : kind === 'fix' ? 'FEATURES.md already describes this behavior, so no interview.' : kind === 'feature' ? 'PRD.md covers the product, so a short feature spec is enough.' : 'It changes the product contract, so PRD.md has to change first.';
+    this.setState({
+      draft: '', nextId: s.nextId + 1,
+      items: { ...s.items, [pid]: [item].concat(s.items[pid]) },
+      sel: { ...s.sel, [pid]: { t: 'work', id: item.id } },
+      chat: { ...s.chat, [pid]: s.chat[pid].concat([{ who: 'you', text: t }, { who: 'guide', text: 'I drafted this as a ' + K.label.toLowerCase() + '. ' + reason + ' The draft is open in the middle. Change the size if I got it wrong.' }]) }
+    });
+  }
+
+  patchItem(pid, id, patch, say) {
+    const s = this.state;
+    const items = { ...s.items, [pid]: s.items[pid].map((i) => (i.id === id ? { ...i, ...patch } : i)) };
+    const next = { items: this.startNext(items) };
+    if (say) next.chat = { ...s.chat, [pid]: s.chat[pid].concat([{ who: 'guide', text: say }]) };
+    this.setState(next);
+  }
+
+  queue(pid, item) {
+    if (item.kind === 'prd') {
+      this.patchItem(pid, item.id, { state: 'interview', idx: 0 }, 'Interview started. First question: who uses this, and what should they be able to do on day one? I skip any topic your documents already answer.');
+      return;
+    }
+    const busy = this.state.items[pid].some((i) => this.isActive(i));
+    this.patchItem(pid, item.id, { state: 'queued', idx: 0 }, busy
+      ? 'Queued. It starts by itself when the run in this project finishes, so it builds on that work. Other projects can start right away.'
+      : 'It is with the factory. The stops above the spec light up as it moves. Switch tabs and send the next thing; I will update the documents when this passes.');
+  }
+
+  ctrls(pid, r) {
+    const plain = { bg: 'transparent', fg: '#f2efe6', border: '#3c5a3a' };
+    const main = { bg: '#a7f070', fg: '#11170f', border: '#a7f070' };
+    const risk = { bg: 'transparent', fg: '#ff9d98', border: '#6a3835' };
+    const cancel = { label: 'Cancel run', act: () => this.patchItem(pid, r.id, { state: 'cancelled' }), ...risk };
+    const revise = { label: 'Revise the spec', act: () => this.patchItem(pid, r.id, { state: 'revising', from: r.state, change: '' }), ...plain };
+    if (r.state === 'queued') return [{ label: 'Remove from queue', act: () => this.patchItem(pid, r.id, { state: 'cancelled' }), ...risk }];
+    if (r.state === 'building') return [{ label: 'Pause after this step', act: () => this.patchItem(pid, r.id, { state: 'pausing' }), ...plain }, cancel];
+    if (r.state === 'paused') return [{ label: 'Resume', act: () => this.patchItem(pid, r.id, { state: 'building' }), ...main }, revise, cancel];
+    if (r.state === 'stuck') return [{ label: 'Let the Guide plan a repair', act: () => this.patchItem(pid, r.id, { state: 'building', repairs: r.repairs + 1 }, 'I will try a different repair and run the gates again.'), ...main }, revise, cancel];
+    if (r.state === 'cancelled') return [{ ...revise, label: 'Revise and resubmit' }];
+    if (r.state === 'revising') return [{ label: 'Resubmit to the factory', act: () => this.patchItem(pid, r.id, { state: 'queued', idx: 0, trap: false, rev: (r.rev || 1) + 1 }), ...main }, { label: 'Discard changes', act: () => this.patchItem(pid, r.id, { state: r.from, change: '' }), ...risk }];
+    return [];
+  }
+
+  renderVals() {
+    const s = this.state;
+    const K = this.kinds();
+    const list = this.projectList();
+    const proj = list.find((p) => p.id === s.pid);
+    const stateLabel = { draft: 'Draft · waiting for you', interview: 'Interview in progress', queued: 'Queued', building: 'Building', pausing: 'Pausing', paused: 'Paused', stuck: 'Parked · needs you', revising: 'Revising the spec', shipped: 'Shipped', cancelled: 'Cancelled · spec kept' };
+
+    const tabs = list.map((p) => {
+      const items = s.items[p.id];
+      const on = p.id === s.pid;
+      const building = items.some((i) => i.state === 'building' || i.state === 'pausing');
+      const parked = items.some((i) => i.state === 'stuck' || i.state === 'paused');
+      const waiting = parked || items.some((i) => i.state === 'draft' || i.state === 'interview' || i.state === 'revising');
+      return {
+        name: p.name, selected: on ? 'true' : 'false',
+        status: parked ? 'Run parked · needs you' : building ? 'Building' : waiting ? 'Needs you' : p.hasDocs ? 'Idle' : 'New',
+        dot: waiting ? '#ffb36b' : building ? '#a7f070' : '#7d807a',
+        bg: on ? '#111413' : 'transparent', border: on ? '#303632' : 'transparent',
+        go: () => this.setState({ pid: p.id })
+      };
+    });
+    let slots = 0;
+    list.forEach((p) => { slots += s.items[p.id].filter((i) => i.state === 'building' || i.state === 'pausing').length; });
+
+    const sel = s.sel[s.pid];
+    const work = s.items[s.pid].map((i) => {
+      const on = sel.t === 'work' && sel.id === i.id;
+      return {
+        title: i.title, kindLabel: K[i.kind].label, chipBg: K[i.kind].chipBg, chipFg: K[i.kind].chipFg, state: stateLabel[i.state],
+        pressed: on ? 'true' : 'false', bg: on ? '#202522' : 'transparent', border: on ? '#3a413c' : 'transparent',
+        open: () => this.setState({ sel: { ...s.sel, [s.pid]: { t: 'work', id: i.id } } })
+      };
+    });
+    const docsRaw = this.docList(s.pid);
+    const docs = docsRaw.map((d) => {
+      const on = sel.t === 'doc' && sel.id === d.name;
+      return {
+        name: d.name, tag: d.tag, pressed: on ? 'true' : 'false', bg: on ? '#202522' : 'transparent', border: on ? '#3a413c' : 'transparent',
+        open: () => this.setState({ sel: { ...s.sel, [s.pid]: { t: 'doc', id: d.name } } })
+      };
+    });
+
+    let view = {
+      eyebrow: proj.name, title: 'No documents yet', isWork: false, canQueue: false, canResize: false, hasPill: false, pill: '', cta: '', sizes: [], stops: [], ctrls: [], stuck: false, revising: false, change: '', fieldId: 'revise-c', revTitle: '',
+      sections: [
+        { h: 'Start here', t: 'Tell the Guide what you want to build. With no PRD.md to build on, it runs one full interview and writes the baseline documents.' },
+        { h: 'Already have the app?', t: 'Point the Guide at the folder. It copies the app in, reads the code and tests, and writes PRD.md, FEATURES.md and ACCEPTANCE.md from what is there.' },
+        { h: 'After that', t: 'Small requests stay small. The Guide reads the documents first and only runs the steps the request needs.' }
+      ]
+    };
+    const item = sel.t === 'work' ? s.items[s.pid].find((i) => i.id === sel.id) : null;
+    const doc = sel.t === 'doc' ? docsRaw.find((d) => d.name === sel.id) : null;
+    if (item) {
+      const k = K[item.kind];
+      const draft = item.state === 'draft';
+      const parked = item.state === 'paused' || item.state === 'stuck';
+      const live = ['building', 'pausing', 'paused', 'stuck', 'interview'].indexOf(item.state) >= 0;
+      const at = k.steps[Math.min(Math.max(item.idx, 0), k.steps.length - 1)];
+      const pill = item.state === 'building' ? 'Building · step ' + (item.idx + 1) + ' of ' + k.steps.length
+        : item.state === 'pausing' ? 'Pausing as soon as ' + at + ' finishes'
+        : item.state === 'paused' ? 'Paused before ' + at
+        : item.state === 'stuck' ? 'Parked at ' + at
+        : item.state === 'queued' ? 'Queued · starts by itself'
+        : item.state === 'revising' ? 'Spec reopened · nothing is building'
+        : stateLabel[item.state];
+      view = {
+        eyebrow: proj.name + ' · ' + k.label, title: item.title, isWork: true,
+        canQueue: draft, cta: k.cta, queue: () => this.queue(s.pid, item),
+        hasPill: !draft, pill: pill,
+        ctrls: this.ctrls(s.pid, item), stuck: item.state === 'stuck',
+        revising: item.state === 'revising', change: item.change || '', fieldId: 'revise-c', revTitle: 'Draft of revision ' + ((item.rev || 1) + 1),
+        onChange: (e) => this.patchItem(s.pid, item.id, { change: e.target.value }),
+        canResize: draft,
+        sizes: Object.keys(K).map((key) => {
+          const on = key === item.kind;
+          return { label: K[key].label, pressed: on ? 'true' : 'false', bg: on ? K[key].chipBg : 'transparent', fg: on ? K[key].chipFg : '#f2efe6', border: on ? K[key].chipFg : '#303632', set: () => this.patchItem(s.pid, item.id, { kind: key }) };
+        }),
+        stops: k.steps.map((label, i) => {
+          const done = item.state === 'shipped' || (live && i < item.idx);
+          const now = live && i === item.idx;
+          const bad = now && item.state === 'stuck';
+          const held = now && item.state === 'paused';
+          return {
+            n: i + 1, label: label, state: done ? 'Done' : bad ? 'Failed twice' : held ? 'Paused here' : now ? 'Now' : 'To do',
+            bg: now ? '#162119' : 'transparent', border: bad ? '#6a3835' : held ? '#5a4424' : now ? '#3c5a3a' : '#303632',
+            numBg: done ? '#1f3a21' : bad ? '#ff7d77' : held ? '#ffb36b' : now ? '#a7f070' : '#202522', numFg: done ? '#a7f070' : now ? '#11170f' : '#a3a49f',
+            text: done || now ? '#f2efe6' : '#cfd0ca',
+            canRestart: parked && i < item.idx,
+            restart: () => this.patchItem(s.pid, item.id, { state: 'building', idx: i }, 'Restarting from ' + label + '. Everything before it is kept.')
+          };
+        }),
+        sections: this.specSections(item, proj)
+      };
+    } else if (doc) {
+      view = { ...view, eyebrow: proj.name + ' · ' + doc.tag, title: doc.name, hasPill: true, pill: 'Kept current by the factory', sections: doc.sections };
+    }
+
+    const chat = s.chat[s.pid].map((m) => ({ mine: m.who === 'you', guide: m.who === 'guide', text: m.text })).reverse();
+    const suggestions = (proj.hasDocs
+      ? ['Fix the date format on the dashboard', 'Add CSV export to the results table', 'Rebuild it for multi-user sign in']
+      : ['Build a portal where members see their coaching notes']
+    ).map((text) => ({ text: text, use: () => this.setState({ draft: text }) }));
+
+    return {
+      tabs: tabs, slotsLine: slots + ' of 2 build slots in use',
+      work: work, noWork: work.length === 0, docs: docs, noDocs: docs.length === 0,
+      view: view,
+      guideOpen: s.guideOpen, guideClosed: !s.guideOpen,
+      toggleGuide: () => this.setState({ guideOpen: !s.guideOpen }),
+      chat: chat, suggestions: suggestions, draft: s.draft,
+      onDraft: (e) => this.setState({ draft: e.target.value }),
+      onKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.submit(this.state.draft); } },
+      onSend: () => this.submit(this.state.draft)
+    };
+  }
+}
+</script>
+</body>
+</html>

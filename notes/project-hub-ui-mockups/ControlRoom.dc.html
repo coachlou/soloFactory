@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SoloFactory, Control room</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+*{box-sizing:border-box}
+button{font:inherit;cursor:pointer}
+input{font:inherit}
+button:focus-visible,input:focus-visible{outline:2px solid #a7f070;outline-offset:2px}
+a{color:#a7f070}a:hover{color:#c9f7a4}
+</style>
+</helmet>
+<div style="display: flex; flex-direction: column; height: 100vh; min-height: 600px; background: #111413; color: #f2efe6; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 14px; line-height: 1.45">
+
+<header style="flex: none; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 14px 28px; border-bottom: 1px solid #303632">
+<div style="display: flex; align-items: center; gap: 10px">
+<span style="display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: #a7f070; color: #0c110d; font-size: 11px; font-weight: 700">SF</span>
+<h1 style="margin: 0; font-family: 'Iowan Old Style', Charter, Georgia, serif; font-size: 22px; font-weight: 500">Factory floor</h1>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<span style="padding: 5px 11px; border: 1px solid #303632; border-radius: 99px; font-size: 13px; color: #cfd0ca">{{slotsLine}}</span>
+<span style="padding: 5px 11px; border: 1px solid {{needBorder}}; border-radius: 99px; font-size: 13px; color: {{needFg}}">{{needLine}}</span>
+</div>
+</header>
+
+<main style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding: 22px 28px">
+
+<sc-if value="{{hasNeeds}}" hint-placeholder-val="{{true}}">
+<section aria-label="Needs you" style="display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #ffb36b">Needs you</h2>
+<div style="display: flex; flex-wrap: wrap; gap: 10px">
+<sc-for list="{{needs}}" as="n" hint-placeholder-count="2">
+<button onClick="{{n.go}}" style="flex: 1 1 320px; max-width: 520px; display: flex; flex-direction: column; gap: 2px; min-height: 56px; padding: 10px 14px; border: 1px solid #5a4424; border-radius: 12px; background: #221b12; color: #f2efe6; text-align: left">
+<span style="font-size: 12px; color: #ffb36b; font-weight: 600">{{n.project}}</span>
+<span>{{n.text}}</span>
+</button>
+</sc-for>
+</div>
+</section>
+</sc-if>
+
+<section aria-label="Projects" style="display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; flex-wrap: wrap; gap: 16px; padding: 0 16px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a3a49f">
+<span style="flex: 1 1 200px">Project</span>
+<span style="flex: 1.6 1 280px">Building now</span>
+<span style="flex: 1.2 1 220px">Next up</span>
+<span style="flex: 1.2 1 220px">Shipped, documents updated</span>
+</div>
+<sc-for list="{{lanes}}" as="l" hint-placeholder-count="3">
+<article style="display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid {{l.border}}; border-radius: 14px; background: #191d1b">
+<div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+
+<div style="flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; flex-direction: column">
+<h3 style="margin: 0; font-size: 16px; font-weight: 600">{{l.name}}</h3>
+<span style="font-size: 12px; color: #a3a49f">{{l.live}}</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<button onClick="{{l.talk}}" aria-pressed="{{l.pressed}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid {{l.talkBorder}}; border-radius: 9px; background: {{l.talkBg}}; color: {{l.talkFg}}; font-size: 13px; font-weight: 600">{{l.talkLabel}}</button>
+<button onClick="{{l.toggleDocs}}" aria-expanded="{{l.docsOpenAttr}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">{{l.docsLabel}}</button>
+</div>
+</div>
+
+<div style="flex: 1.6 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+<sc-if value="{{l.hasNow}}" hint-placeholder-val="{{true}}">
+<span style="display: flex; gap: 8px; align-items: center; min-width: 0"><span style="flex: none; padding: 2px 9px; border-radius: 99px; background: {{l.now.chipBg}}; color: {{l.now.chipFg}}; font-size: 12px; font-weight: 700">{{l.now.kindLabel}}</span><strong style="font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{l.now.title}}</strong></span>
+<div aria-hidden="true" style="display: flex; gap: 4px">
+<sc-for list="{{l.now.segs}}" as="g" hint-placeholder-count="5">
+<span style="flex: 1 1 0; height: 8px; border-radius: 4px; background: {{g.bg}}"></span>
+</sc-for>
+</div>
+<span style="font-size: 13px; color: #cfd0ca">{{l.now.line}}</span>
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<sc-for list="{{l.now.ctrls}}" as="c" hint-placeholder-count="2">
+<button onClick="{{c.act}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid {{c.border}}; border-radius: 9px; background: {{c.bg}}; color: {{c.fg}}; font-size: 13px; font-weight: 600">{{c.label}}</button>
+</sc-for>
+<button onClick="{{l.now.toggleDetail}}" aria-expanded="{{l.now.detailAttr}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #303632; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">{{l.now.detailLabel}}</button>
+</div>
+</sc-if>
+<sc-if value="{{l.idle}}" hint-placeholder-val="{{false}}">
+<span style="color: #a3a49f">{{l.idleLine}}</span>
+</sc-if>
+</div>
+
+<div style="flex: 1.2 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+<sc-for list="{{l.next}}" as="q" hint-placeholder-count="1">
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 7px 10px; border-radius: 9px; background: #202522">
+<span style="display: flex; gap: 8px; align-items: center; min-width: 0"><span style="flex: none; padding: 1px 7px; border-radius: 99px; background: {{q.chipBg}}; color: {{q.chipFg}}; font-size: 12px; font-weight: 600">{{q.kindLabel}}</span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{q.title}}</span></span>
+<span style="display: flex; gap: 8px; align-items: center; justify-content: space-between"><span style="font-size: 12px; color: #a3a49f">{{q.wait}}</span><button onClick="{{q.remove}}" style="flex: none; min-height: 36px; padding: 5px 10px; border: 1px solid #6a3835; border-radius: 8px; background: transparent; color: #ff9d98; font-size: 12px">Remove</button></span>
+</div>
+</sc-for>
+<sc-for list="{{l.dropped}}" as="q" hint-placeholder-count="0">
+<div style="display: flex; flex-direction: column; gap: 4px; padding: 7px 10px; border: 1px dashed #3a413c; border-radius: 9px">
+<span style="display: flex; gap: 8px; align-items: center; min-width: 0"><span style="flex: none; padding: 1px 7px; border-radius: 99px; background: {{q.chipBg}}; color: {{q.chipFg}}; font-size: 12px; font-weight: 600">{{q.kindLabel}}</span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{q.title}}</span></span>
+<span style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between"><span style="font-size: 12px; color: #a3a49f">Cancelled · spec kept</span><button onClick="{{q.revise}}" style="flex: none; min-height: 36px; padding: 5px 10px; border: 1px solid #3c5a3a; border-radius: 8px; background: transparent; color: #f2efe6; font-size: 12px">Revise and resubmit</button></span>
+</div>
+</sc-for>
+<sc-if value="{{l.noNext}}" hint-placeholder-val="{{false}}">
+<span style="color: #a3a49f">Nothing queued</span>
+</sc-if>
+</div>
+
+<div style="flex: 1.2 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+<sc-for list="{{l.shipped}}" as="d" hint-placeholder-count="2">
+<span style="display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 13px; color: #cfd0ca"><span style="flex: none; padding: 1px 7px; border-radius: 99px; background: {{d.chipBg}}; color: {{d.chipFg}}; font-size: 12px; font-weight: 600">{{d.kindLabel}}</span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{d.title}}</span></span>
+</sc-for>
+<sc-if value="{{l.noShipped}}" hint-placeholder-val="{{false}}">
+<span style="color: #a3a49f">Nothing shipped yet</span>
+</sc-if>
+</div>
+</div>
+
+<sc-if value="{{l.detailOpen}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid #303632">
+<sc-if value="{{l.stuck}}" hint-placeholder-val="{{false}}">
+<div role="status" style="display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid #6a3835; border-radius: 12px; background: #2a1817">
+<strong style="font-weight: 600; color: #ffb3ae">This run needs you</strong>
+<span style="color: #e6e3da">One check failed twice, so the factory stopped instead of spending more turns. Nothing was deployed and the last release is still live. Choose a repair above, restart from a finished step below, or cancel. Queued work in this project waits for your call.</span>
+</div>
+</sc-if>
+<sc-if value="{{l.revising}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid #5a4424; border-radius: 12px; background: #221b12">
+<strong style="font-weight: 600; color: #ffb36b">{{l.revTitle}}</strong>
+<span style="color: #e6e3da">Nothing is building. The spec is open again. Type what should change, or tell the Guide in plain words and it edits the spec for you.</span>
+<label for="{{l.fieldId}}" style="font-size: 12px; font-weight: 600; color: #e6e3da">What should change in this revision</label>
+<textarea id="{{l.fieldId}}" value="{{l.change}}" onChange="{{l.onChange}}" rows="3" placeholder="For example: compare by transcript id, not by file name" style="width: 100%; padding: 10px 12px; border-radius: 10px; font: inherit; resize: vertical; border: 1px solid #5a4424; background: #151917; color: #f2efe6"></textarea>
+<span style="font-size: 13px; color: #e6e3da">Resubmit runs a short Guide review of the changed spec, then replaces this run. Work the change does not touch is reused. Discard changes throws this draft away and puts the run back as it was.</span>
+</div>
+</sc-if>
+<ol aria-label="Steps of this run" style="display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none">
+<sc-for list="{{l.stops}}" as="s" hint-placeholder-count="5">
+<li style="flex: 1 1 130px; display: flex; flex-direction: column; gap: 6px; padding: 9px 10px; border: 1px solid {{s.border}}; border-radius: 10px; background: {{s.bg}}">
+<span style="display: flex; gap: 7px; align-items: center"><span style="display: grid; place-items: center; width: 22px; height: 22px; border-radius: 99px; background: {{s.numBg}}; color: {{s.numFg}}; font-size: 12px; font-weight: 700">{{s.n}}</span><span style="font-size: 12px; color: #a3a49f">{{s.state}}</span></span>
+<span style="font-size: 13px; font-weight: 600">{{s.label}}</span>
+<sc-if value="{{s.canRestart}}" hint-placeholder-val="{{false}}">
+<button onClick="{{s.restart}}" style="min-height: 36px; padding: 5px 8px; border: 1px solid #3a413c; border-radius: 8px; background: transparent; color: #f2efe6; font-size: 12px">Restart from here</button>
+</sc-if>
+</li>
+</sc-for>
+</ol>
+</div>
+</sc-if>
+
+<sc-if value="{{l.docsOpen}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 12px; border-top: 1px solid #303632">
+<span style="font-size: 12px; color: #a3a49f">{{l.docsIntro}}</span>
+<sc-for list="{{l.docs}}" as="d" hint-placeholder-count="4">
+<span style="padding: 3px 9px; border-radius: 6px; background: #f4efe2; color: #23261f; font-family: ui-monospace, Menlo, monospace; font-size: 12px">{{d}}</span>
+</sc-for>
+</div>
+</sc-if>
+</article>
+</sc-for>
+</section>
+</main>
+
+<section aria-label="Guide" style="flex: none; display: flex; flex-direction: column; gap: 12px; padding: 14px 28px 18px; border-top: 1px solid #3a413c; background: #151917">
+
+<sc-if value="{{trayPick}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-direction: column; gap: 10px; max-width: 1040px; width: 100%; margin: 0 auto; padding: 14px 16px; border: 1px solid #303632; border-radius: 14px; background: #191d1b">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a7f070">Guide · {{scopeName}}</span>
+<span style="color: #a3a49f; font-size: 13px">read</span>
+<sc-for list="{{tray.read}}" as="d" hint-placeholder-count="3">
+<span style="padding: 2px 8px; border: 1px solid #303632; border-radius: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #cfd0ca">{{d}}</span>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline">
+<strong style="font-weight: 600">{{tray.ask}}</strong>
+<span style="padding: 3px 11px; border-radius: 99px; background: {{tray.chipBg}}; color: {{tray.chipFg}}; font-weight: 700">{{tray.kindLabel}}</span>
+</div>
+<p style="margin: 0; color: #e6e3da">{{tray.why}}</p>
+<ol aria-label="Steps this run will take" style="display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none">
+<sc-for list="{{tray.steps}}" as="s" hint-placeholder-count="5">
+<li style="display: flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 7px; background: #202522; font-size: 12px; color: #cfd0ca"><span style="color: #a3a49f">{{s.n}}</span>{{s.label}}</li>
+</sc-for>
+</ol>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<button onClick="{{tray.confirm}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #a7f070; color: #11170f; font-weight: 700">{{tray.cta}}</button>
+<sc-for list="{{tray.alts}}" as="a" hint-placeholder-count="2">
+<button onClick="{{a.set}}" style="min-height: 44px; padding: 10px 12px; border: 1px solid #303632; border-radius: 10px; background: transparent; color: #f2efe6; font-size: 13px">{{a.label}}</button>
+</sc-for>
+<button onClick="{{clearTray}}" style="min-height: 44px; margin-left: auto; padding: 10px 12px; border: 1px solid #303632; border-radius: 10px; background: transparent; color: #cfd0ca; font-size: 13px">Drop it</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{trayNote}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; max-width: 1040px; width: 100%; margin: 0 auto; padding: 12px 16px; border: 1px solid #2c4a2c; border-radius: 14px; background: #162119">
+<div style="flex: 1 1 420px; display: flex; flex-direction: column; gap: 3px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a7f070">Guide · {{scopeName}}</span>
+<span style="color: #e6e3da">{{tray.note}}</span>
+</div>
+<button onClick="{{clearTray}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #3c5a3a; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Done</button>
+</div>
+</sc-if>
+
+<div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; max-width: 1040px; width: 100%; margin: 0 auto">
+<div role="group" aria-label="Send to project" style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+<span style="font-size: 13px; color: #a3a49f">To</span>
+<sc-for list="{{scopes}}" as="p" hint-placeholder-count="3">
+<button onClick="{{p.pick}}" aria-pressed="{{p.pressed}}" style="min-height: 40px; padding: 7px 12px; border: 1px solid {{p.border}}; border-radius: 99px; background: {{p.bg}}; color: {{p.fg}}; font-size: 13px; font-weight: 600">{{p.name}}</button>
+</sc-for>
+</div>
+<div style="flex: 1 1 380px; display: flex; gap: 8px; align-items: center; padding: 6px 6px 6px 14px; border: 1px solid #3a413c; border-radius: 14px; background: #202522">
+<label for="guide-b" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0)">Message the Guide</label>
+<input id="guide-b" type="text" value="{{draft}}" onChange="{{onDraft}}" onKeyDown="{{onKey}}" placeholder="{{placeholder}}" autocomplete="off" style="flex: 1 1 auto; min-width: 0; min-height: 44px; border: 0; outline-offset: 4px; background: transparent; color: #f2efe6">
+<button onClick="{{onSend}}" style="flex: none; min-height: 44px; padding: 10px 18px; border: 0; border-radius: 10px; background: #a7f070; color: #11170f; font-weight: 700">Send</button>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px; max-width: 1040px; width: 100%; margin: 0 auto">
+<sc-for list="{{suggestions}}" as="s" hint-placeholder-count="3">
+<button onClick="{{s.use}}" style="min-height: 36px; padding: 6px 11px; border: 1px solid #303632; border-radius: 99px; background: transparent; color: #cfd0ca; font-size: 12px">{{s.text}}</button>
+</sc-for>
+</div>
+</section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  state = {
+    scope: 'al', draft: '', docsOpen: {}, detail: { nm: true }, nextId: 100,
+    runs: [{ id: 1, pid: 'nm', kind: 'feature', title: 'Batch re-run report', state: 'building', idx: 2, trap: true, repairs: 0 }],
+    tray: {
+      al: { stage: 'pick', ask: 'Search drops the last word of a pasted title', kind: 'fix' }
+    }
+  };
+
+  componentDidMount() { this.timer = setInterval(() => this.tick(), 3500); }
+  componentWillUnmount() { clearInterval(this.timer); }
+
+  projectList() {
+    return [
+      { id: 'nm', name: 'Nugget Mining', live: 'Live · release 12', hasDocs: true, docs: ['PRD.md', 'FEATURES.md', 'ACCEPTANCE.md', 'specs/batch-re-run-report.md', 'fixes/offset-rounding.md', '.aai/context.md'], shipped: [{ title: 'Offset rounding in pattern counts', kind: 'fix' }, { title: 'Folder ingest for markdown transcripts', kind: 'feature' }] },
+      { id: 'al', name: 'Ambient Library', live: 'Live · release 4', hasDocs: true, docs: ['PRD.md', 'FEATURES.md', 'ACCEPTANCE.md', 'specs/tag-filter.md', '.aai/context.md'], shipped: [{ title: 'Tag filter on the shelf view', kind: 'feature' }, { title: 'First release from the full brief', kind: 'prd' }] },
+      { id: 'mp', name: 'Member Portal', live: 'Not built yet', hasDocs: false, docs: [], shipped: [] }
+    ];
+  }
+
+  kinds() {
+    return {
+      fix: { label: 'Quick fix', chipBg: '#3a2a17', chipFg: '#ffb36b', cta: 'Send to the factory', steps: ['Fix note', 'Build', 'Gates', 'Deploy', 'Update docs'] },
+      feature: { label: 'Feature', chipBg: '#1f3a21', chipFg: '#a7f070', cta: 'Send to the factory', steps: ['Feature spec', 'Plan', 'Build', 'Gates', 'Review', 'Deploy', 'Update docs'] },
+      prd: { label: 'Full brief', chipBg: '#1b2f45', chipFg: '#9cc9ff', cta: 'Start the interview', steps: ['Interview', 'PRD and plan', 'Planned features', 'Gates', 'Review', 'Deploy', 'Update docs'] }
+    };
+  }
+
+  questions() {
+    return [
+      'Interview started. Question 1: who uses this, and what should they be able to do on day one? Answer in the bar below.',
+      'Question 2: what data does it keep, and where does that data come from?',
+      'Question 3: what must never happen? Name the failure you would be embarrassed by.',
+      'That is as far as this mockup goes. In the real app the Guide continues until every topic is covered, skips what your documents already answer, then queues the brief.'
+    ];
+  }
+
+  why(kind, proj) {
+    if (!proj.hasDocs) return 'This project has no PRD.md, so there is no baseline to build on. One interview writes it. After that, small requests stay small.';
+    if (kind === 'fix') return 'FEATURES.md already describes this behavior, so it is a correction, not new scope. No interview needed.';
+    if (kind === 'feature') return 'PRD.md covers the product. This adds one capability beside the existing ones, so a short feature spec is enough.';
+    return 'This changes what the product is for or how its data is shaped, so PRD.md itself has to change first.';
+  }
+
+  sizeUp(text, proj) {
+    if (!proj.hasDocs) return 'prd';
+    const t = text.toLowerCase();
+    if (/(fix|bug|typo|broken|wrong|crash|drops|error|fails)/.test(t)) return 'fix';
+    if (/(rebuild|redesign|from scratch|new app|version 2|v2|rewrite|multi-user|new prd)/.test(t)) return 'prd';
+    return 'feature';
+  }
+
+  short(text) {
+    return text.length > 60 ? text.slice(0, 57) + '...' : text;
+  }
+
+  activeIn(runs, pid) {
+    return runs.find((r) => r.pid === pid && ['building', 'pausing', 'paused', 'stuck', 'revising'].indexOf(r.state) >= 0) || null;
+  }
+
+  startNext(runs) {
+    const out = runs.slice();
+    out.forEach((r, i) => {
+      if (r.state !== 'queued') return;
+      const slots = out.filter((x) => x.state === 'building' || x.state === 'pausing').length;
+      if (slots < 2 && !this.activeIn(out, r.pid)) out[i] = { ...r, state: 'building', idx: 0 };
+    });
+    return out;
+  }
+
+  tick() {
+    const s = this.state;
+    const K = this.kinds();
+    const detail = { ...s.detail };
+    let runs = s.runs.map((r) => {
+      const steps = K[r.kind].steps;
+      if (r.state === 'pausing') {
+        if (r.idx + 1 >= steps.length) return { ...r, state: 'shipped', idx: steps.length };
+        return { ...r, state: 'paused', idx: r.idx + 1 };
+      }
+      if (r.state !== 'building') return r;
+      if (r.trap && steps[r.idx] === 'Gates') { detail[r.pid] = true; return { ...r, state: 'stuck', trap: false }; }
+      if (r.idx + 1 >= steps.length) return { ...r, state: 'shipped', idx: steps.length };
+      return { ...r, idx: r.idx + 1 };
+    });
+    this.setState({ runs: this.startNext(runs), detail: detail });
+  }
+
+  patchRun(id, patch) {
+    const runs = this.state.runs.map((r) => (r.id === id ? { ...r, ...patch } : r));
+    this.setState({ runs: this.startNext(runs) });
+  }
+
+  runLine(r) {
+    const steps = this.kinds()[r.kind].steps;
+    const at = steps[Math.min(r.idx, steps.length - 1)];
+    if (r.state === 'revising') return 'Revising the spec · nothing is building';
+    if (r.state === 'building') return 'Step ' + (r.idx + 1) + ' of ' + steps.length + ' · ' + at + (r.repairs ? ' · repair in progress' : '');
+    if (r.state === 'pausing') return 'Pausing as soon as ' + at + ' finishes';
+    if (r.state === 'paused') return 'Paused before ' + at + ' · work so far is committed';
+    return 'Parked at ' + at + ' · the same check failed twice';
+  }
+
+  runCtrls(r) {
+    const plain = { bg: 'transparent', fg: '#f2efe6', border: '#3c5a3a' };
+    const main = { bg: '#a7f070', fg: '#11170f', border: '#a7f070' };
+    const risk = { bg: 'transparent', fg: '#ff9d98', border: '#6a3835' };
+    const cancel = { label: 'Cancel', act: () => this.patchRun(r.id, { state: 'cancelled' }), ...risk };
+    const revise = { label: 'Revise the spec', act: () => this.patchRun(r.id, { state: 'revising', from: r.state, change: '' }), ...plain };
+    if (r.state === 'building') return [{ label: 'Pause after this step', act: () => this.patchRun(r.id, { state: 'pausing' }), ...plain }, cancel];
+    if (r.state === 'paused') return [{ label: 'Resume', act: () => this.patchRun(r.id, { state: 'building' }), ...main }, revise, cancel];
+    if (r.state === 'stuck') return [{ label: 'Let the Guide plan a repair', act: () => this.patchRun(r.id, { state: 'building', repairs: r.repairs + 1 }), ...main }, revise, cancel];
+    if (r.state === 'cancelled') return [{ ...revise, label: 'Revise and resubmit' }];
+    if (r.state === 'revising') return [{ label: 'Resubmit to the factory', act: () => this.patchRun(r.id, { state: 'queued', idx: 0, trap: false, rev: (r.rev || 1) + 1 }), ...main }, { label: 'Discard changes', act: () => this.patchRun(r.id, { state: r.from, change: '' }), ...risk }];
+    return [];
+  }
+
+  submit(text) {
+    const t = (text || '').trim();
+    if (!t) return;
+    const s = this.state;
+    const pid = s.scope;
+    const cur = s.tray[pid];
+    if (cur && cur.stage === 'interview') {
+      const q = Math.min(cur.q + 1, this.questions().length - 1);
+      this.setState({ draft: '', tray: { ...s.tray, [pid]: { ...cur, q: q } } });
+      return;
+    }
+    const proj = this.projectList().find((p) => p.id === pid);
+    this.setState({ draft: '', tray: { ...s.tray, [pid]: { stage: 'pick', ask: this.short(t), kind: this.sizeUp(t, proj) } } });
+  }
+
+  confirm() {
+    const s = this.state;
+    const pid = s.scope;
+    const t = s.tray[pid];
+    const K = this.kinds()[t.kind];
+    if (t.kind === 'prd') {
+      this.setState({ tray: { ...s.tray, [pid]: { ...t, stage: 'interview', q: 0 } } });
+      return;
+    }
+    const waitsOnProject = !!this.activeIn(s.runs, pid);
+    const runs = this.startNext(s.runs.concat([{ id: s.nextId, pid: pid, kind: t.kind, title: t.ask, state: 'queued', idx: 0, repairs: 0 }]));
+    const started = runs.find((r) => r.id === s.nextId).state === 'building';
+    const note = started
+      ? 'Started now as a ' + K.label.toLowerCase() + '. Watch it in the lane above, or pick another project and send the next thing.'
+      : 'Queued as a ' + K.label.toLowerCase() + '. ' + (waitsOnProject ? 'It starts by itself after the current run in this project.' : 'It starts by itself when a build slot is free.');
+    this.setState({ nextId: s.nextId + 1, runs: runs, tray: { ...s.tray, [pid]: { stage: 'sent', note: note } } });
+  }
+
+  renderVals() {
+    const s = this.state;
+    const K = this.kinds();
+    const list = this.projectList();
+    const scopeProj = list.find((p) => p.id === s.scope);
+    const chip = (kind) => ({ kindLabel: K[kind].label, chipBg: K[kind].chipBg, chipFg: K[kind].chipFg });
+    const busy = s.runs.filter((r) => r.state === 'building' || r.state === 'pausing').length;
+
+    const needs = [];
+    list.forEach((p) => {
+      const t = s.tray[p.id];
+      const act = this.activeIn(s.runs, p.id);
+      const go = () => this.setState({ scope: p.id });
+      if (act && act.state === 'stuck') needs.push({ project: p.name, text: 'Run parked at Gates: ' + act.title, go: () => this.setState({ detail: { ...s.detail, [p.id]: true } }) });
+      if (act && act.state === 'revising') needs.push({ project: p.name, text: 'Spec reopened for revision: ' + act.title, go: () => this.setState({ detail: { ...s.detail, [p.id]: true } }) });
+      if (act && act.state === 'paused') needs.push({ project: p.name, text: 'Run paused, waiting for you: ' + act.title, go: () => this.setState({ detail: { ...s.detail, [p.id]: true } }) });
+      if (t && t.stage === 'pick') needs.push({ project: p.name, text: 'Confirm the plan: ' + t.ask, go: go });
+      else if (t && t.stage === 'interview') needs.push({ project: p.name, text: 'The Guide is waiting on an interview answer', go: go });
+      else if (!p.hasDocs && !t) needs.push({ project: p.name, text: 'No documents yet. Start a brief, or adopt an existing folder.', go: go });
+    });
+
+    const lanes = list.map((p) => {
+      const on = p.id === s.scope;
+      const open = !!s.docsOpen[p.id];
+      const r = this.activeIn(s.runs, p.id);
+      const detailOpen = !!r && (!!s.detail[p.id] || r.state === 'revising');
+      const dropped = s.runs.filter((q) => q.pid === p.id && q.state === 'cancelled');
+      const parked = !!r && (r.state === 'paused' || r.state === 'stuck');
+      const queued = s.runs.filter((q) => q.pid === p.id && q.state === 'queued');
+      const done = s.runs.filter((q) => q.pid === p.id && q.state === 'shipped').reverse().concat(p.shipped);
+      return {
+        name: p.name, live: p.live, border: r && r.state === 'stuck' ? '#6a3835' : on ? '#3c5a3a' : '#303632',
+        pressed: on ? 'true' : 'false',
+        talkLabel: on ? 'Guide is listening' : 'Send work here',
+        talkBg: on ? '#1f3a21' : 'transparent', talkFg: on ? '#c9f7a4' : '#f2efe6', talkBorder: on ? '#3c5a3a' : '#303632',
+        talk: () => this.setState({ scope: p.id }),
+        docsLabel: (open ? 'Hide documents' : 'Documents') + ' (' + p.docs.length + ')',
+        docsOpenAttr: open ? 'true' : 'false',
+        toggleDocs: () => this.setState({ docsOpen: { ...s.docsOpen, [p.id]: !open } }),
+        docsOpen: open,
+        docsIntro: p.docs.length ? 'The Guide reads these before it sizes a request, and rewrites them after each run:' : 'No documents yet. The first brief writes PRD.md, FEATURES.md and ACCEPTANCE.md.',
+        docs: p.docs,
+        hasNow: !!r, idle: !r,
+        idleLine: p.hasDocs ? 'Idle · free to start a run' : 'Nothing to build until there is a brief',
+        now: r ? {
+          ...chip(r.kind), title: r.title, line: this.runLine(r), ctrls: this.runCtrls(r),
+          detailLabel: detailOpen ? 'Hide steps' : 'Show steps',
+          detailAttr: detailOpen ? 'true' : 'false',
+          toggleDetail: () => this.setState({ detail: { ...s.detail, [p.id]: !detailOpen } }),
+          segs: K[r.kind].steps.map((x, i) => ({ bg: r.state === 'revising' ? '#343b36' : i < r.idx ? '#a7f070' : i > r.idx ? '#343b36' : r.state === 'stuck' ? '#ff7d77' : r.state === 'paused' ? '#ffb36b' : '#d9f7c0' }))
+        } : { kindLabel: '', chipBg: '#202522', chipFg: '#f2efe6', title: '', line: '', segs: [], ctrls: [], detailLabel: '', detailAttr: 'false' },
+        detailOpen: detailOpen,
+        stuck: !!r && r.state === 'stuck',
+        revising: !!r && r.state === 'revising', change: r ? r.change || '' : '', fieldId: 'revise-' + p.id, revTitle: r ? 'Spec reopened · draft of revision ' + ((r.rev || 1) + 1) : '',
+        onChange: (e) => this.patchRun(r.id, { change: e.target.value }),
+        dropped: dropped.map((q) => ({ ...chip(q.kind), title: q.title, revise: () => this.patchRun(q.id, { state: 'revising', from: 'cancelled', change: '' }) })),
+        stops: r ? K[r.kind].steps.map((label, i) => {
+          const isDone = r.state !== 'revising' && i < r.idx;
+          const now = r.state !== 'revising' && i === r.idx;
+          const bad = now && r.state === 'stuck';
+          const held = now && r.state === 'paused';
+          return {
+            n: i + 1, label: label,
+            state: isDone ? 'Done' : bad ? 'Failed twice' : held ? 'Paused here' : now ? 'Now' : 'To do',
+            bg: now ? '#162119' : 'transparent', border: bad ? '#6a3835' : held ? '#5a4424' : now ? '#3c5a3a' : '#303632',
+            numBg: isDone ? '#1f3a21' : bad ? '#ff7d77' : held ? '#ffb36b' : now ? '#a7f070' : '#202522',
+            numFg: isDone ? '#a7f070' : now ? '#11170f' : '#a3a49f',
+            canRestart: parked && isDone,
+            restart: () => this.patchRun(r.id, { state: 'building', idx: i })
+          };
+        }) : [],
+        next: queued.map((q) => ({ ...chip(q.kind), title: q.title, wait: r ? 'Starts after the current run' : 'Waiting for a free build slot', remove: () => this.patchRun(q.id, { state: 'cancelled' }) })),
+        noNext: queued.length === 0 && dropped.length === 0,
+        shipped: done.slice(0, 3).map((d) => ({ ...chip(d.kind), title: d.title })),
+        noShipped: done.length === 0
+      };
+    });
+
+    const t = s.tray[s.scope];
+    let tray = { read: [], ask: '', kindLabel: '', chipBg: '#202522', chipFg: '#f2efe6', why: '', steps: [], cta: '', alts: [], note: '' };
+    if (t && t.stage === 'pick') {
+      tray = {
+        ...chip(t.kind), ask: t.ask,
+        read: scopeProj.hasDocs ? ['PRD.md', 'FEATURES.md', 'ACCEPTANCE.md'] : ['no documents found'],
+        why: this.why(t.kind, scopeProj),
+        steps: K[t.kind].steps.map((label, i) => ({ n: i + 1, label: label })),
+        cta: K[t.kind].cta,
+        confirm: () => this.confirm(),
+        alts: Object.keys(K).filter((k) => k !== t.kind).map((k) => ({ label: 'Make it a ' + K[k].label.toLowerCase(), set: () => this.setState({ tray: { ...s.tray, [s.scope]: { ...t, kind: k } } }) })),
+        note: ''
+      };
+    } else if (t) {
+      tray = { ...tray, note: t.stage === 'interview' ? this.questions()[t.q] : t.note };
+    }
+
+    const scopes = list.map((p) => {
+      const on = p.id === s.scope;
+      return { name: p.name, pressed: on ? 'true' : 'false', bg: on ? '#a7f070' : 'transparent', fg: on ? '#11170f' : '#f2efe6', border: on ? '#a7f070' : '#303632', pick: () => this.setState({ scope: p.id }) };
+    });
+
+    const suggestions = (scopeProj.hasDocs
+      ? ['Fix the date format on the dashboard', 'Add CSV export to the results table', 'Rebuild it for multi-user sign in']
+      : ['Build a portal where members see their coaching notes', 'Adopt the app in my existing folder']
+    ).map((text) => ({ text: text, use: () => this.setState({ draft: text }) }));
+
+    const clear = () => {
+      const copy = { ...s.tray };
+      delete copy[s.scope];
+      this.setState({ tray: copy });
+    };
+
+    return {
+      slotsLine: busy + ' of 2 build slots in use',
+      needLine: needs.length ? needs.length + ' need you' : 'Nothing needs you',
+      needFg: needs.length ? '#ffb36b' : '#cfd0ca', needBorder: needs.length ? '#5a4424' : '#303632',
+      hasNeeds: needs.length > 0, needs: needs,
+      lanes: lanes, scopes: scopes, scopeName: scopeProj.name,
+      trayPick: !!t && t.stage === 'pick', trayNote: !!t && t.stage !== 'pick', tray: tray, clearTray: clear,
+      suggestions: suggestions, draft: s.draft,
+      placeholder: 'Tell the Guide what ' + scopeProj.name + ' needs',
+      onDraft: (e) => this.setState({ draft: e.target.value }),
+      onKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.submit(this.state.draft); } },
+      onSend: () => this.submit(this.state.draft)
+    };
+  }
+}
+</script>
+</body>
+</html>
