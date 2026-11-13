@@ -14,15 +14,15 @@ body{margin:0}
 *{box-sizing:border-box}
 button{font:inherit;cursor:pointer}
 input{font:inherit}
-button:focus-visible,input:focus-visible{outline:2px solid #a7f070;outline-offset:2px}
-a{color:#a7f070}a:hover{color:#c9f7a4}
+button:focus-visible,input:focus-visible{outline:2px solid #f2efe6;outline-offset:2px}
+a{color:#f2efe6}a:hover{color:#ffffff}
 </style>
 </helmet>
 <div style="position: relative; display: flex; flex-wrap: wrap; height: 100vh; min-height: 600px; overflow: auto; background: #111413; color: #f2efe6; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 14px; line-height: 1.45">
 
 <nav aria-label="Projects" style="flex: 1 1 248px; max-width: 300px; min-width: 0; display: flex; flex-direction: column; gap: 22px; padding: 18px 14px; border-right: 1px solid #303632; background: #151917; overflow-y: auto">
 <div style="display: flex; align-items: center; gap: 10px; padding: 0 4px">
-<span style="display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: #a7f070; color: #0c110d; font-size: 11px; font-weight: 700">SF</span>
+<span style="display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: #f2efe6; color: #0c110d; font-size: 11px; font-weight: 700">SF</span>
 <span style="display: flex; flex-direction: column"><strong style="font-weight: 600">SoloFactory</strong><span style="font-size: 12px; color: #a3a49f">{{slots}}</span></span>
 </div>
 
@@ -112,12 +112,12 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 <div style="display: flex; flex-direction: column; max-width: 720px; width: 100%; margin: 0 auto">
 
 <sc-if value="{{m.isUser}}" hint-placeholder-val="{{false}}">
-<p style="align-self: flex-end; max-width: 82%; margin: 0; padding: 11px 14px; border-radius: 14px 14px 4px 14px; background: #a7f070; color: #11170f">{{m.text}}</p>
+<p style="align-self: flex-end; max-width: 82%; margin: 0; padding: 11px 14px; border-radius: 14px 14px 4px 14px; background: #262b28; color: #f2efe6">{{m.text}}</p>
 </sc-if>
 
 <sc-if value="{{m.isGuide}}" hint-placeholder-val="{{true}}">
 <div style="display: flex; flex-direction: column; gap: 4px; max-width: 88%">
-<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a7f070">Guide</span>
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8a8d87">Guide</span>
 <p style="margin: 0; color: #e6e3da">{{m.text}}</p>
 </div>
 </sc-if>
@@ -125,7 +125,7 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 <sc-if value="{{m.isPick}}" hint-placeholder-val="{{false}}">
 <section aria-label="Guide plan" style="display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid #303632; border-radius: 14px; background: #191d1b">
 <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
-<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a7f070">Guide</span>
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8a8d87">Guide</span>
 <span style="color: #a3a49f; font-size: 13px">read</span>
 <sc-for list="{{m.read}}" as="d" hint-placeholder-count="3">
 <span style="padding: 2px 8px; border: 1px solid #303632; border-radius: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #cfd0ca">{{d}}</span>
@@ -133,7 +133,7 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 </div>
 <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline">
 <span style="font-size: 13px; color: #a3a49f">I would treat this as a</span>
-<span style="padding: 3px 11px; border-radius: 99px; background: {{m.chipBg}}; color: {{m.chipFg}}; font-weight: 700">{{m.kindLabel}}</span>
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #f2efe6">{{m.kindLabel}}</span>
 </div>
 <sc-if value="{{m.open}}" hint-placeholder-val="{{true}}">
 <p style="margin: 0; color: #e6e3da">{{m.why}}</p>
@@ -145,7 +145,7 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 </sc-if>
 <sc-if value="{{m.open}}" hint-placeholder-val="{{true}}">
 <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 4px">
-<button onClick="{{m.send}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #a7f070; color: #11170f; font-weight: 700">{{m.cta}}</button>
+<button onClick="{{m.send}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #f2efe6; color: #11170f; font-weight: 700">{{m.cta}}</button>
 <span style="margin-left: 6px; font-size: 12px; color: #a3a49f">Wrong size?</span>
 <sc-for list="{{m.alts}}" as="a" hint-placeholder-count="2">
 <button onClick="{{a.set}}" style="min-height: 44px; padding: 10px 12px; border: 1px solid #303632; border-radius: 10px; background: transparent; color: #f2efe6; font-size: 13px">{{a.label}}</button>
@@ -159,10 +159,10 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 </sc-if>
 
 <sc-if value="{{m.isRun}}" hint-placeholder-val="{{false}}">
-<section aria-label="Run" style="display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid #2c4a2c; border-radius: 14px; background: #162119">
+<section aria-label="Run" style="display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid #303632; border-radius: 14px; background: #191d1b">
 <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between">
-<span style="display: flex; gap: 8px; align-items: center; min-width: 0"><span style="padding: 2px 9px; border-radius: 99px; background: {{m.chipBg}}; color: {{m.chipFg}}; font-size: 12px; font-weight: 700">{{m.kindLabel}}</span><strong style="font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{m.title}}</strong></span>
-<button onClick="{{m.openRun}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #3c5a3a; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Open the run</button>
+<span style="display: flex; gap: 8px; align-items: center; min-width: 0"><span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a3a49f">{{m.kindLabel}}</span><strong style="font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{m.title}}</strong></span>
+<button onClick="{{m.openRun}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid #5a605b; border-radius: 9px; background: transparent; color: #f2efe6; font-size: 13px">Open the run</button>
 </div>
 <div aria-hidden="true" style="display: flex; gap: 4px">
 <sc-for list="{{m.segs}}" as="g" hint-placeholder-count="5">
@@ -193,7 +193,7 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 <button onClick="{{onAttach}}" aria-label="Attach a file" style="flex: none; min-height: 40px; padding: 6px 10px; border: 1px solid #3a413c; border-radius: 9px; background: transparent; color: #cfd0ca; font-size: 13px">Attach</button>
 <label for="guide-a" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0)">Message the Guide</label>
 <input id="guide-a" type="text" value="{{draft}}" onChange="{{onDraft}}" onKeyDown="{{onKey}}" placeholder="{{placeholder}}" autocomplete="off" style="flex: 1 1 auto; min-width: 0; min-height: 44px; border: 0; outline-offset: 4px; background: transparent; color: #f2efe6">
-<button onClick="{{onSend}}" style="flex: none; min-height: 44px; padding: 10px 18px; border: 0; border-radius: 10px; background: #a7f070; color: #11170f; font-weight: 700">Send</button>
+<button onClick="{{onSend}}" style="flex: none; min-height: 44px; padding: 10px 18px; border: 0; border-radius: 10px; background: #f2efe6; color: #11170f; font-weight: 700">Send</button>
 </div>
 <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; max-width: 720px; width: 100%; margin: 0 auto; font-size: 12px; color: #a3a49f">
 <span>The Guide reads this project's documents first. Do not paste passwords, tokens or private customer data.</span>
@@ -258,12 +258,12 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 </sc-if>
 <sc-if value="{{app.live}}" hint-placeholder-val="{{true}}">
 <div style="display: flex; flex-direction: column; gap: 4px">
-<span style="display: flex; gap: 8px; align-items: center"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 99px; background: #a7f070"></span><strong style="font-weight: 600">Live · {{app.release}}</strong></span>
+<span style="display: flex; gap: 8px; align-items: center"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 99px; background: #f2efe6"></span><strong style="font-weight: 600">Live · {{app.release}}</strong></span>
 <span style="font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: #cfd0ca">{{app.url}}</span>
 </div>
 <div style="display: flex; flex-wrap: wrap; gap: 8px">
-<a href="{{app.url}}" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; min-height: 44px; padding: 10px 14px; border-radius: 10px; background: #a7f070; color: #11170f; font-size: 13px; font-weight: 700; text-decoration: none">Open the app</a>
-<button onClick="{{app.relaunch}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid #3c5a3a; border-radius: 10px; background: transparent; color: #f2efe6; font-size: 13px; font-weight: 600">Relaunch</button>
+<a href="{{app.url}}" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; min-height: 44px; padding: 10px 14px; border-radius: 10px; background: #f2efe6; color: #11170f; font-size: 13px; font-weight: 700; text-decoration: none">Open the app</a>
+<button onClick="{{app.relaunch}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid #5a605b; border-radius: 10px; background: transparent; color: #f2efe6; font-size: 13px; font-weight: 600">Relaunch</button>
 </div>
 <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
 <sc-for list="{{app.stats}}" as="t" hint-placeholder-count="4">
@@ -285,7 +285,7 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 <span style="font-size: 13px; color: #a3a49f">{{run.line}}</span>
 </div>
 <sc-if value="{{run.stuck}}" hint-placeholder-val="{{false}}">
-<div role="status" style="display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid #6a3835; border-radius: 12px; background: #2a1817">
+<div role="status" style="display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid #3a413c; border-radius: 12px; background: #2a1817">
 <strong style="font-weight: 600; color: #ffb3ae">This run needs you</strong>
 <span style="color: #e6e3da">One check failed twice, so the factory stopped instead of spending more turns. Nothing was deployed and the last release is still live. Choose a repair, restart from an earlier step, or cancel.</span>
 </div>
@@ -381,14 +381,14 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 </div>
 <aside aria-label="Guide for this document" style="flex: 1 1 340px; max-width: 420px; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid #303632">
 <div style="flex: none; display: flex; flex-direction: column; padding: 12px 16px; border-bottom: 1px solid #303632">
-<strong style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #a7f070">Guide</strong>
+<strong style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8a8d87">Guide</strong>
 <span style="font-size: 12px; color: #a3a49f">Working on this document with you</span>
 </div>
 <div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column-reverse; gap: 12px; padding: 16px">
 <sc-for list="{{vw.chat}}" as="m" hint-placeholder-count="1">
 <div style="display: flex; flex-direction: column">
 <sc-if value="{{m.mine}}" hint-placeholder-val="{{false}}">
-<p style="align-self: flex-end; max-width: 88%; margin: 0; padding: 9px 12px; border-radius: 12px 12px 4px 12px; background: #a7f070; color: #11170f">{{m.text}}</p>
+<p style="align-self: flex-end; max-width: 88%; margin: 0; padding: 9px 12px; border-radius: 12px 12px 4px 12px; background: #f2efe6; color: #11170f">{{m.text}}</p>
 </sc-if>
 <sc-if value="{{m.guide}}" hint-placeholder-val="{{true}}">
 <p style="max-width: 94%; margin: 0; padding: 9px 12px; border: 1px solid #303632; border-radius: 12px 12px 12px 4px; background: #202522; color: #e6e3da">{{m.text}}</p>
@@ -399,7 +399,7 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 <div style="flex: none; display: flex; gap: 8px; align-items: center; margin: 12px 16px 16px; padding: 5px 5px 5px 12px; border: 1px solid #3a413c; border-radius: 12px; background: #202522">
 <label for="guide-doc" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0)">Ask the Guide about this document</label>
 <input id="guide-doc" type="text" value="{{vw.draft}}" onChange="{{vw.onDraft}}" onKeyDown="{{vw.onKey}}" placeholder="Tell the Guide what to change" autocomplete="off" style="flex: 1 1 auto; min-width: 0; min-height: 44px; border: 0; outline-offset: 4px; background: transparent; color: #f2efe6">
-<button onClick="{{vw.send}}" style="flex: none; min-height: 44px; padding: 10px 14px; border: 0; border-radius: 9px; background: #a7f070; color: #11170f; font-weight: 700">Send</button>
+<button onClick="{{vw.send}}" style="flex: none; min-height: 44px; padding: 10px 14px; border: 0; border-radius: 9px; background: #f2efe6; color: #11170f; font-weight: 700">Send</button>
 </div>
 </aside>
 </div>
@@ -413,7 +413,7 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 <h2 style="margin: 0; font-size: 18px; font-weight: 600">{{info.title}}</h2>
 <p style="margin: 0; color: #e6e3da">{{info.text}}</p>
 <p style="margin: 0; font-size: 13px; color: #a3a49f">Same as today's version. This mockup only shows where it lives.</p>
-<button onClick="{{info.close}}" style="align-self: flex-end; min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #a7f070; color: #11170f; font-weight: 700">OK</button>
+<button onClick="{{info.close}}" style="align-self: flex-end; min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #f2efe6; color: #11170f; font-weight: 700">OK</button>
 </div>
 </div>
 </sc-if>
@@ -446,7 +446,7 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 </div>
 <div style="display: flex; gap: 8px; justify-content: flex-end">
 <button onClick="{{np.close}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid #303632; border-radius: 10px; background: transparent; color: #f2efe6">Cancel</button>
-<button onClick="{{np.create}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #a7f070; color: #11170f; font-weight: 700">{{np.cta}}</button>
+<button onClick="{{np.create}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #f2efe6; color: #11170f; font-weight: 700">{{np.cta}}</button>
 </div>
 </div>
 </div>
@@ -464,7 +464,7 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 <sc-for list="{{cfg.sections}}" as="sec" hint-placeholder-count="3">
 <section style="display: flex; flex-direction: column; gap: 4px">
 <h3 style="margin: 0 0 6px; font-size: 15px; font-weight: 600">{{sec.title}}</h3>
-<sc-if value="{{sec.hasNote}}" hint-placeholder-val="{{false}}"><p style="margin: 0 0 6px; font-size: 13px; color: #ffb36b">{{sec.note}}</p></sc-if>
+<sc-if value="{{sec.hasNote}}" hint-placeholder-val="{{false}}"><p style="margin: 0 0 6px; font-size: 13px; color: #cfd0ca">{{sec.note}}</p></sc-if>
 <sc-for list="{{sec.fields}}" as="fd" hint-placeholder-count="3">
 <div style="display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 0; border-bottom: 1px solid #262b28">
 <div style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 2px">
@@ -483,7 +483,7 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 <sc-if value="{{fd.hasUnit}}" hint-placeholder-val="{{false}}"><span style="flex: none; font-size: 13px; color: #a3a49f">{{fd.unit}}</span></sc-if>
 </sc-if>
 <sc-if value="{{fd.isToggle}}" hint-placeholder-val="{{false}}">
-<input id="{{fd.id}}" type="checkbox" checked="{{fd.on}}" onChange="{{fd.onToggle}}" disabled="{{fd.locked}}" style="width: 22px; height: 22px; accent-color: #a7f070">
+<input id="{{fd.id}}" type="checkbox" checked="{{fd.on}}" onChange="{{fd.onToggle}}" disabled="{{fd.locked}}" style="width: 22px; height: 22px; accent-color: #f2efe6">
 <span style="font-size: 13px; color: #cfd0ca">{{fd.toggleText}}</span>
 </sc-if>
 </div>
@@ -555,9 +555,9 @@ class Component extends DCLogic {
 
   kinds() {
     return {
-      fix: { label: 'Quick fix', chipBg: '#3a2a17', chipFg: '#ffb36b', cta: 'Send to the factory', steps: ['Fix note', 'Build', 'Gates', 'Deploy', 'Update docs'] },
-      feature: { label: 'Feature', chipBg: '#1f3a21', chipFg: '#a7f070', cta: 'Send to the factory', steps: ['Feature spec', 'Plan', 'Build', 'Gates', 'Review', 'Deploy', 'Update docs'] },
-      prd: { label: 'Full brief', chipBg: '#1b2f45', chipFg: '#9cc9ff', cta: 'Start the interview', steps: ['Interview', 'PRD and plan', 'Planned features', 'Gates', 'Review', 'Deploy', 'Update docs'] }
+      fix: { label: 'Quick fix', chipBg: '#202522', chipFg: '#cfd0ca', cta: 'Send to the factory', steps: ['Fix note', 'Build', 'Gates', 'Deploy', 'Update docs'] },
+      feature: { label: 'Feature', chipBg: '#262b28', chipFg: '#f2efe6', cta: 'Send to the factory', steps: ['Feature spec', 'Plan', 'Build', 'Gates', 'Review', 'Deploy', 'Update docs'] },
+      prd: { label: 'Full brief', chipBg: '#202522', chipFg: '#cfd0ca', cta: 'Start the interview', steps: ['Interview', 'PRD and plan', 'Planned features', 'Gates', 'Review', 'Deploy', 'Update docs'] }
     };
   }
 
@@ -644,14 +644,14 @@ class Component extends DCLogic {
 
   runSegs(r) {
     return this.kinds()[r.kind].steps.map((x, i) => ({
-      bg: r.state === 'shipped' ? '#a7f070' : r.state === 'cancelled' || r.state === 'queued' || r.state === 'revising' ? '#343b36' : i < r.idx ? '#a7f070' : i > r.idx ? '#343b36' : r.state === 'stuck' ? '#ff7d77' : r.state === 'paused' ? '#ffb36b' : '#d9f7c0'
+      bg: r.state === 'shipped' ? '#8a8d87' : r.state === 'cancelled' || r.state === 'queued' || r.state === 'revising' ? '#2a2f2c' : i < r.idx ? '#8a8d87' : i > r.idx ? '#2a2f2c' : '#f2efe6'
     }));
   }
 
   runCtrls(r) {
-    const plain = { bg: 'transparent', fg: '#f2efe6', border: '#3c5a3a' };
-    const main = { bg: '#a7f070', fg: '#11170f', border: '#a7f070' };
-    const risk = { bg: 'transparent', fg: '#ff9d98', border: '#6a3835' };
+    const plain = { bg: 'transparent', fg: '#f2efe6', border: '#5a605b' };
+    const main = { bg: '#f2efe6', fg: '#11170f', border: '#f2efe6' };
+    const risk = { bg: 'transparent', fg: '#f2efe6', border: '#3a413c' };
     const cancel = { label: 'Cancel run', act: () => this.patchRun(r.id, { state: 'cancelled' }), ...risk };
     const revise = { label: 'Revise the spec', act: () => this.revise(r), ...plain };
     if (r.state === 'queued') return [{ label: 'Remove from queue', act: () => this.patchRun(r.id, { state: 'cancelled' }), ...risk }];
@@ -823,7 +823,7 @@ class Component extends DCLogic {
     const K = this.kinds();
     const list = this.projectList();
     const current = list.find((p) => p.id === s.pid);
-    const tones = { run: '#a7f070', ask: '#ffb36b', idle: '#7d807a' };
+    const tones = { run: '#f2efe6', ask: '#cfd0ca', idle: '#7d807a' };
     const shownRun = (pid) => {
       const mine = s.runs.filter((r) => r.pid === pid && r.state !== 'dismissed');
       return this.activeIn(s.runs, pid) || mine[mine.length - 1] || null;
@@ -852,7 +852,7 @@ class Component extends DCLogic {
         name: p.name, status: st.t, dot: tones[st.tone],
         pressed: on ? 'true' : 'false',
         bg: on ? '#202522' : 'transparent', border: on ? '#3a413c' : 'transparent',
-        border2: on ? '#3c5a3a' : '#303632',
+        border2: on ? '#5a605b' : '#303632',
         goLabel: on ? 'You are here' : 'Open',
         go: () => this.setState({ pid: p.id, docName: '', viewer: '', selRun: 0, pmOpen: false, rowMenu: 0 }),
         weight: on ? '700' : '500',
@@ -901,13 +901,13 @@ class Component extends DCLogic {
 
     const tab = (id, label) => {
       const on = s.panel === id;
-      return { label: label, pressed: on ? 'true' : 'false', bg: on ? '#1f3a21' : 'transparent', fg: on ? '#c9f7a4' : '#f2efe6', border: on ? '#3c5a3a' : '#303632', toggle: () => this.setState({ panel: on ? '' : id }) };
+      return { label: label, pressed: on ? 'true' : 'false', bg: on ? '#262b28' : 'transparent', fg: on ? '#f2efe6' : '#f2efe6', border: on ? '#5a605b' : '#303632', toggle: () => this.setState({ panel: on ? '' : id }) };
     };
 
     const docsRaw = this.docsFor(s.pid);
     const docs = docsRaw.map((d) => {
       const on = d.name === s.docName;
-      return { name: d.name, tag: d.tag, note: d.note, pressed: on ? 'true' : 'false', bg: on ? '#202522' : '#191d1b', border: on ? '#3c5a3a' : '#303632', open: () => this.setState({ viewer: d.name, viewerEdit: false }) };
+      return { name: d.name, tag: d.tag, note: d.note, pressed: on ? 'true' : 'false', bg: on ? '#202522' : '#191d1b', border: on ? '#5a605b' : '#303632', open: () => this.setState({ viewer: d.name, viewerEdit: false }) };
     });
     const doc = null;
     const key = s.pid + '|' + s.viewer;
@@ -961,7 +961,7 @@ class Component extends DCLogic {
       ctrls: vRun ? this.runCtrls(vRun).filter((c) => /Revis|Resubmit|Discard/.test(c.label)) : [],
       modes: canEdit && !(vRun && vRun.state === 'revising') ? [['Read', false], ['Edit', true]].map((m) => {
         const on = editing === m[1];
-        return { label: m[0], pressed: on ? 'true' : 'false', bg: on ? '#1f3a21' : 'transparent', fg: on ? '#c9f7a4' : '#f2efe6', border: on ? '#3c5a3a' : '#303632', set: () => this.setState({ viewerEdit: m[1] }) };
+        return { label: m[0], pressed: on ? 'true' : 'false', bg: on ? '#262b28' : 'transparent', fg: on ? '#f2efe6' : '#f2efe6', border: on ? '#5a605b' : '#303632', set: () => this.setState({ viewerEdit: m[1] }) };
       }) : [],
       hasNotes: false, notes: [],
       sections: vRaw.sections.map((x, n) => {
@@ -1020,9 +1020,9 @@ class Component extends DCLogic {
         return {
           n: i + 1, label: label,
           state: done ? 'Done' : bad ? 'Failed twice' : held ? 'Paused here' : now ? 'Now' : 'To do',
-          bg: done ? '#1f3a21' : bad ? '#ff7d77' : held ? '#ffb36b' : now ? '#a7f070' : 'transparent',
-          fg: done ? '#a7f070' : now ? '#11170f' : '#a3a49f',
-          ring: bad ? '#ff7d77' : held ? '#ffb36b' : done || now ? '#a7f070' : '#3a413c',
+          bg: done ? '#262b28' : bad ? '#f2efe6' : held ? '#cfd0ca' : now ? '#f2efe6' : 'transparent',
+          fg: done ? '#f2efe6' : now ? '#11170f' : '#a3a49f',
+          ring: bad ? '#f2efe6' : held ? '#cfd0ca' : done || now ? '#f2efe6' : '#3a413c',
           text: done || now ? '#f2efe6' : '#a3a49f',
           canRestart: parked && i < r.idx,
           restart: () => this.patchRun(r.id, { state: 'building', idx: i })
@@ -1097,7 +1097,7 @@ class Component extends DCLogic {
       return {
         label: d[1], count: items.length, items: items, open: open, empty: items.length === 0, emptyText: d[2],
         expanded: open ? 'true' : 'false', chev: open ? '▾' : '▸',
-        color: hot ? '#ffb36b' : '#f2efe6', countBg: hot ? '#3a2a17' : '#202522', countFg: hot ? '#ffb36b' : '#cfd0ca',
+        color: hot ? '#cfd0ca' : '#f2efe6', countBg: hot ? '#202522' : '#202522', countFg: hot ? '#cfd0ca' : '#cfd0ca',
         toggle: () => this.setState({ groupsOpen: { ...this.state.groupsOpen, [d[0]]: !open } })
       };
     });
@@ -1129,13 +1129,13 @@ class Component extends DCLogic {
       onRepo: (e) => this.setState({ np: { ...this.state.np, repo: e.target.value } }),
       repoModes: [['default', "In SoloFactory's projects folder", npDefault(s.np.name), 'ui-monospace, Menlo, monospace'], ['custom', 'Somewhere else', 'Pick any folder on this computer.', 'inherit']].map((o) => {
         const on = (s.np.where || 'default') === o[0];
-        return { label: o[1], help: o[2], font: o[3], checked: on ? 'true' : 'false', bg: on ? '#1f3a21' : 'transparent', border: on ? '#3c5a3a' : '#303632', pick: () => this.setState({ np: { ...this.state.np, where: o[0] } }) };
+        return { label: o[1], help: o[2], font: o[3], checked: on ? 'true' : 'false', bg: on ? '#262b28' : 'transparent', border: on ? '#5a605b' : '#303632', pick: () => this.setState({ np: { ...this.state.np, where: o[0] } }) };
       }),
       onName: (e) => this.setState({ np: { ...this.state.np, name: e.target.value } }),
       onFolder: (e) => this.setState({ np: { ...this.state.np, folder: e.target.value } }),
       modes: [['empty', 'Start empty', 'The Guide starts with a full interview.'], ['adopt', 'Adopt an existing app', 'Copies a folder in, never touching the original, and writes the baseline documents from its code.']].map((o) => {
         const on = s.np.mode === o[0];
-        return { label: o[1], help: o[2], checked: on ? 'true' : 'false', bg: on ? '#1f3a21' : 'transparent', border: on ? '#3c5a3a' : '#303632', pick: () => this.setState({ np: { ...this.state.np, mode: o[0] } }) };
+        return { label: o[1], help: o[2], checked: on ? 'true' : 'false', bg: on ? '#262b28' : 'transparent', border: on ? '#5a605b' : '#303632', pick: () => this.setState({ np: { ...this.state.np, mode: o[0] } }) };
       }),
       close: () => this.setState({ np: null }),
       create: () => {
@@ -1175,7 +1175,7 @@ class Component extends DCLogic {
             return {
               id: 'cfg-' + fd.key, label: fd.label, help: fd.help,
               envLine: fd.locked ? 'Set by ' + fd.env + ' in your environment' : (fd.env || ''),
-              envColor: fd.locked ? '#ffb36b' : '#a3a49f',
+              envColor: fd.locked ? '#cfd0ca' : '#a3a49f',
               locked: !!fd.locked,
               isSelect: fd.type === 'select', isInput: fd.type === 'number' || fd.type === 'text', isToggle: fd.type === 'toggle',
               inputType: fd.type === 'number' ? 'number' : 'text', min: fd.min || '', max: fd.max || '',
