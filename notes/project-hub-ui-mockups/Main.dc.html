@@ -433,6 +433,17 @@ a{color:#a7f070}a:hover{color:#c9f7a4}
 <label for="np-folder" style="font-size: 13px; font-weight: 600">Folder on this computer</label>
 <input id="np-folder" type="text" value="{{np.folder}}" onChange="{{np.onFolder}}" placeholder="/Users/you/code/my-app" autocomplete="off" style="min-height: 44px; padding: 8px 12px; border: 1px solid #3a413c; border-radius: 10px; background: #202522; color: #f2efe6; font-family: ui-monospace, Menlo, monospace">
 </sc-if>
+<div role="radiogroup" aria-label="Where the repo lives" style="display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 13px; font-weight: 600">Where the repo lives</span>
+<sc-for list="{{np.repoModes}}" as="o" hint-placeholder-count="2">
+<button role="radio" aria-checked="{{o.checked}}" onClick="{{o.pick}}" style="display: flex; flex-direction: column; gap: 2px; width: 100%; min-height: 48px; padding: 8px 12px; border: 1px solid {{o.border}}; border-radius: 10px; background: {{o.bg}}; color: #f2efe6; text-align: left"><strong style="font-weight: 600">{{o.label}}</strong><span style="font-size: 12px; color: #a3a49f; font-family: {{o.font}}">{{o.help}}</span></button>
+</sc-for>
+<sc-if value="{{np.custom}}" hint-placeholder-val="{{false}}">
+<label for="np-repo" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Repo folder</label>
+<input id="np-repo" type="text" value="{{np.repo}}" onChange="{{np.onRepo}}" placeholder="/Users/you/code/client-portal" autocomplete="off" style="min-height: 44px; padding: 8px 12px; border: 1px solid #3a413c; border-radius: 10px; background: #202522; color: #f2efe6; font-family: ui-monospace, Menlo, monospace">
+<span style="font-size: 12px; color: #a3a49f">SoloFactory makes this folder a git repo if it is not one yet, and lists the project here as usual. An empty folder is best.</span>
+</sc-if>
+</div>
 <div style="display: flex; gap: 8px; justify-content: flex-end">
 <button onClick="{{np.close}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid #303632; border-radius: 10px; background: transparent; color: #f2efe6">Cancel</button>
 <button onClick="{{np.create}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: #a7f070; color: #11170f; font-weight: 700">{{np.cta}}</button>
@@ -1049,7 +1060,7 @@ class Component extends DCLogic {
       else if (m.kind === 'prd') { g = 'needs'; st = 'Interview in progress'; }
       else if (rr && ['paused', 'stuck', 'revising'].indexOf(rr.state) >= 0) { g = 'needs'; st = stateWord[rr.state]; }
       else if (rr && (rr.state === 'building' || rr.state === 'pausing')) { g = 'running'; st = this.runLine(rr, s.runs); order = -1; }
-      else if (rr && rr.state === 'queued') { g = 'queued'; order = qList.indexOf(rr.id); st = ordinal(order + 1) + ' in line' + (this.activeIn(s.runs, s.pid) ? '' : ' · waiting for a build slot'); }
+      else if (rr && rr.state === 'queued') { g = 'queued'; order = qList.indexOf(rr.id); const act = this.activeIn(s.runs, s.pid); st = ordinal(order + 1) + ' in line' + (!act ? ' · waiting for a build slot' : act.state === 'building' || act.state === 'pausing' ? '' : ' · held until you resolve the run above'); }
       else if (rr) { st = stateWord[rr.state]; }
       const qi = rr ? queue.findIndex((q, k) => qRuns[k].id === rr.id) : -1;
       const picked = !!rr && !!r && rr.id === r.id && s.panel === 'run';
@@ -1093,7 +1104,7 @@ class Component extends DCLogic {
 
     const closeNav = (fn) => () => { this.setState({ navOpen: false }); fn(); };
     const railLinks = [
-      { label: '+ New project', hasBadge: false, badge: '', act: closeNav(() => this.setState({ np: { name: '', mode: 'empty', folder: '' } })) },
+      { label: '+ New project', hasBadge: false, badge: '', act: closeNav(() => this.setState({ np: { name: '', mode: 'empty', folder: '', where: 'default', repo: '' } })) },
       { label: 'Settings', hasBadge: false, badge: '', act: closeNav(() => this.setState({ cfgOpen: true })) },
       { label: 'Manual', hasBadge: false, badge: '', act: closeNav(() => this.showInfo('Manual', 'Opens the illustrated user manual, served at /manual.')) },
       { label: 'Feedback', hasBadge: false, badge: '', act: closeNav(() => this.showInfo('Feedback', 'Opens the Feedback form: Problem or Improvement, a preview of the report, Copy and open email, and optional run diagnostics. Nothing is sent until you send it.')) },
@@ -1108,9 +1119,18 @@ class Component extends DCLogic {
 
     const provider = s.provider[s.pid] || s.cfgVals.provider || 'Claude Code';
 
+    const npSlug = (n) => (n || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || '<name>';
+    const npRoot = (s.cfgVals.root !== undefined ? s.cfgVals.root : '.solofactory/').replace(/\/?$/, '/');
+    const npDefault = (n) => npRoot + 'projects/' + npSlug(n) + '/';
     const npv = s.np ? {
       open: true, name: s.np.name, folder: s.np.folder, adopt: s.np.mode === 'adopt',
       cta: s.np.mode === 'adopt' ? 'Adopt the app' : 'Create project',
+      custom: s.np.where === 'custom', repo: s.np.repo,
+      onRepo: (e) => this.setState({ np: { ...this.state.np, repo: e.target.value } }),
+      repoModes: [['default', "In SoloFactory's projects folder", npDefault(s.np.name), 'ui-monospace, Menlo, monospace'], ['custom', 'Somewhere else', 'Pick any folder on this computer.', 'inherit']].map((o) => {
+        const on = (s.np.where || 'default') === o[0];
+        return { label: o[1], help: o[2], font: o[3], checked: on ? 'true' : 'false', bg: on ? '#1f3a21' : 'transparent', border: on ? '#3c5a3a' : '#303632', pick: () => this.setState({ np: { ...this.state.np, where: o[0] } }) };
+      }),
       onName: (e) => this.setState({ np: { ...this.state.np, name: e.target.value } }),
       onFolder: (e) => this.setState({ np: { ...this.state.np, folder: e.target.value } }),
       modes: [['empty', 'Start empty', 'The Guide starts with a full interview.'], ['adopt', 'Adopt an existing app', 'Copies a folder in, never touching the original, and writes the baseline documents from its code.']].map((o) => {
@@ -1125,16 +1145,18 @@ class Component extends DCLogic {
         const id = 'x' + st.nextId;
         const adopt = st.np.mode === 'adopt';
         const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const custom = st.np.where === 'custom' && (st.np.repo || '').trim();
+        const repo = custom ? st.np.repo.trim().replace(/\/?$/, '/') : npDefault(name);
         const text = adopt
-          ? 'I will copy ' + (st.np.folder || 'that folder') + ' into projects/' + slug + '/, never touching the original. Then I read the code and tests and write PRD.md, FEATURES.md and ACCEPTANCE.md from what is there. You review that baseline before anything new is built.'
-          : name + ' has no documents yet. Tell me what you want to build and I will start a full brief.';
+          ? 'I will copy ' + (st.np.folder || 'that folder') + ' into ' + repo + ', never touching the original. Then I read the code and tests and write PRD.md, FEATURES.md and ACCEPTANCE.md from what is there. You review that baseline before anything new is built.'
+          : name + ' lives in ' + repo + ' and has no documents yet. Tell me what you want to build and I will start a full brief.';
         this.setState({
           nextId: st.nextId + 1, pid: id, np: null, viewer: '', selRun: 0,
-          extra: (st.extra || []).concat([{ id: id, name: name, live: adopt ? 'Adopting · not built here yet' : 'Not built yet', hasDocs: false }]),
+          extra: (st.extra || []).concat([{ id: id, name: name, repo: repo, live: adopt ? 'Adopting · not built here yet' : 'Not built yet', hasDocs: false }]),
           threads: { ...st.threads, [id]: [{ id: st.nextId, type: 'guide', text: text }] }
         });
       }
-    } : { open: false, name: '', folder: '', adopt: false, cta: '', modes: [] };
+    } : { open: false, name: '', folder: '', adopt: false, cta: '', modes: [], custom: false, repo: '', repoModes: [] };
 
     const defs = this.settingsDefs();
     const valOf = (fd) => (s.cfgVals[fd.key] !== undefined ? s.cfgVals[fd.key] : fd.def);
@@ -1192,7 +1214,7 @@ class Component extends DCLogic {
           othersText: others === 1 ? '1 other project needs you' : others + ' other projects need you',
           aria: 'Switch project. Now ' + current.name + (others ? '. ' + others + ' other projects need you.' : ''),
           toggle: () => this.setState({ pmOpen: !this.state.pmOpen, navOpen: false }),
-          newProject: () => this.setState({ pmOpen: false, np: { name: '', mode: 'empty', folder: '' } })
+          newProject: () => this.setState({ pmOpen: false, np: { name: '', mode: 'empty', folder: '', where: 'default', repo: '' } })
         };
       })(), np: npv, cfg: cfg,
       info: s.info ? { open: true, title: s.info.title, text: s.info.text, close: () => this.setState({ info: null }) } : { open: false, title: '', text: '' },
