@@ -806,7 +806,7 @@ cd "<SF>" && bash start.sh
 Check two things on the page yourself, through what they report:
 
 1. The page loads and shows a provider as signed in (if not, **C2**).
-2. The header shows a **project selector** with their existing projects in it. Every
+2. The project name at the top of the page opens a **project switcher** with their existing projects in it. Every
    project they built before is still there — the update changes nothing inside
    `projects/`.
 
@@ -872,7 +872,7 @@ could change or remove them:
 
 **If they were below 0.10.15 before the update**, say in one breath that the factory now tells them itself when a newer version is out, so they don't need to wait for an email. What you need to know yourself:
 
-- The top bar has a *Check for updates* button next to *Manual*. When a newer version exists it turns into a green *Update available* pill; clicking it shows both versions and the paste-in update prompt with a **Copy prompt** button. Nothing covers their work and nothing updates on its own.
+- The foot of the left rail has a *Check for updates* button next to *Menu* (which holds *Manual* and *Feedback*). When a newer version exists it turns into a green *Update available* pill; clicking it shows both versions and the paste-in update prompt with a **Copy prompt** button. Nothing covers their work and nothing updates on its own.
 - It checks only at startup, on page load and on a click (3-second timeout, no background polling) by reading `version` from the public soloFactory `package.json`. Offline, a manual check says *Couldn't check*. `SOLOFACTORY_UPDATE_CHECK=0` turns it off.
 - Screenshots for the owner: https://github.com/coachlou/soloFactory/blob/main/docs/update-notice.md
 - Nothing to migrate by hand.
@@ -944,7 +944,7 @@ Work these yourself. Do not read this table out loud.
 | Run parks as *Repeated failure despite code changes* | Repairs kept changing the code but the same check failed the same way `SOLOFACTORY_SYMPTOM_THRESHOLD` times (default 4) | Read the failure with the owner. If the card offers **Prepare repair plan**, choose it. Otherwise fix the cause or the inputs, then **Resume** reruns the checks. Raise the threshold only if the owner wants more of the same repairs |
 | Run parks with `agent_turn_cap` (*used its step limit for one turn*) | One Claude turn took `SOLOFACTORY_AGENT_MAX_TURNS` tool steps (default 150) without finishing, which usually means it was going round in circles | Read the turn's log with the owner. **Resume** starts a fresh turn from the preserved files. If the work is genuinely large, raise the limit first |
 | Run parks as *Repair budget exhausted* and also shows **Waive BUG-n (faulty test)** | The review's own test, not the app, looks wrong | Read the note under the button. If the test really is wrong, type why in the box above and choose **Waive**, then Resume. Otherwise choose **Prepare repair plan** |
-| Run fails with `prompt_too_large` ("over SoloFactory's 200000-character prompt limit") | A factory defect: the input cannot fit, so retrying cannot help and no agent was started | Do not retry. Have the owner use **Report this run** (or Feedback) in the top bar |
+| Run fails with `prompt_too_large` ("over SoloFactory's 200000-character prompt limit") | A factory defect: the input cannot fit, so retrying cannot help and no agent was started | Do not retry. Have the owner use **Report this run** (or Menu → Feedback) |
 | `Port 4173 is in use by another app` | Another app already uses port 4173 | Start with a different port: `cd "<SF>" && PORT=5000 bash start.sh`, then use `http://127.0.0.1:5000` everywhere this guide says 4173 |
 | `start.sh` prints its banner, then returns to the prompt with no *SoloFactory is ready* line | Before 0.11.0-alpha.1, the server quietly skipped starting when the install folder was reached through a symlink (for example `/tmp` on a Mac) | Update SoloFactory; until then, `cd` to the real folder (`cd "$(cd "<SF>" && pwd -P)"`) and run `bash start.sh` there |
 | `SoloFactory is already running at …` | A factory from an earlier window is still running | Open that address; don't start a second one |
@@ -979,7 +979,7 @@ yourself; do not ask the owner to confirm them.
 4. `<SF>/start.sh` exists.
 5. `bash start.sh` prints the `SoloFactory → http://127.0.0.1:4173` line and keeps running.
 6. The owner has loaded that address in their browser and seen the page, with the project
-   selector in the header.
+   name at the top and the Work list on the left.
 7. The page shows a provider as signed in — not "Select an authenticated subscription
    provider."
 8. The owner has been given the restart command, in a copy/paste box.

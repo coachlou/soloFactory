@@ -8,100 +8,60 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="brief-mode">
-    <div class="shell">
+    <div class="hub" id="hub" data-panel="docs">
       <div id="update-pop" class="update-pop" popover>
         <strong id="update-text"></strong>
         <p>Update when it suits you; nothing changes until you do. Open Claude Code (or Codex) on this computer (on Windows, in the Ubuntu window) and paste:</p>
         <pre id="update-prompt"></pre>
         <button id="update-copy" class="button small" type="button">Copy prompt</button>
       </div>
-      <header class="topbar">
+      <nav class="hub-nav" aria-label="Work">
         <a class="brand" href="/" aria-label="SoloFactory home">
           <span class="brand-mark" aria-hidden="true">SF</span>
-          <span><strong>SoloFactory</strong><small>idea to working app</small></span>
+          <span><strong>SoloFactory</strong><small id="system-status">Checking factory</small></span>
         </a>
-        <div class="top-right">
-          <label class="sr-only" for="project-select">Project</label>
-          <select id="project-select" class="sdlc-select project-select" aria-label="Project"></select>
-          <label class="sr-only" for="run-select">Run</label>
-          <select id="run-select" class="sdlc-select project-select" aria-label="Run"></select>
-          <button id="board-button" class="button ghost small" type="button" aria-pressed="false">Factory</button>
-          <button id="feedback-button" class="button ghost small" type="button">Feedback</button>
-          <a class="button ghost small" href="/manual">Manual</a>
+        <p class="nav-label">Work <span id="work-capacity" class="work-capacity"></span></p>
+        <div id="work" class="work"></div>
+        <div class="nav-foot">
           <button id="update-button" class="button ghost small" type="button">Check for updates</button>
-          <div class="top-status"><span class="pulse"></span><span id="system-status">Checking factory</span></div>
-        </div>
-      </header>
-
-      <main class="workspace">
-        <aside class="rail" aria-label="Factory progress">
-          <p class="eyebrow">Factory run</p>
-          <ol class="stages" id="stages">
-            <li class="active" data-stage="interview"><span>01</span><div><strong>Interview</strong><small>Shape the brief</small></div></li>
-            <li data-stage="specifying"><span>02</span><div><strong>Specify</strong><small>PRD + plan + proof</small></div></li>
-            <li data-stage="building"><span>03</span><div><strong>Build</strong><small>Working product</small></div></li>
-            <li data-stage="verifying"><span>04</span><div><strong>Verify</strong><small>Tests + production build</small></div></li>
-            <li data-stage="reviewing"><span>05</span><div><strong>Review</strong><small>Contract audit</small></div></li>
-            <li data-stage="deploying"><span>06</span><div><strong>Deploy</strong><small>Health + telemetry</small></div></li>
-          </ol>
-          <div class="rail-note">
-            <span>Local-first</span>
-            <p>Your subscription does the AI work. No API key is requested or stored.</p>
+          <button id="nav-menu-button" class="button ghost small" type="button" popovertarget="nav-menu">Menu</button>
+          <div id="nav-menu" class="menu" popover>
+            <button id="new-project-button" type="button">New project</button>
+            <button id="feedback-button" type="button">Feedback</button>
+            <a href="/manual">Manual</a>
           </div>
-        </aside>
-
-        <section class="main-panel">
-          <div id="notice" class="notice hidden" role="alert"></div>
+        </div>
+      </nav>
+      <div class="hub-body">
+        <header class="hub-head">
+          <button id="project-button" class="project-button" type="button" popovertarget="project-menu"><span id="project-label">Project</span> <span aria-hidden="true">▾</span></button>
+          <div id="project-menu" class="menu" popover></div>
           <div id="attention-banner" class="background-banner attention hidden" role="alert">
             <span id="attention-text"></span>
             <button id="attention-view-button" class="button small" type="button">Open</button>
           </div>
+          <span class="spacer"></span>
+          <button id="theme-button" class="button ghost small" type="button" popovertarget="theme-menu">Theme</button>
+          <div id="theme-menu" class="menu" popover>
+            <button type="button" data-theme-choice="auto">Auto</button>
+            <button type="button" data-theme-choice="light">Light</button>
+            <button type="button" data-theme-choice="dark">Dark</button>
+          </div>
+          <div class="tabs" role="group" aria-label="Panel">
+            <button type="button" data-panel="run" aria-pressed="false">Run</button>
+            <button type="button" data-panel="docs" aria-pressed="true">Documents</button>
+            <button type="button" data-panel="app" aria-pressed="false">Live app</button>
+            <button type="button" data-panel="" aria-label="Close panel">✕</button>
+          </div>
+        </header>
+        <div class="hub-cols">
+          <main class="hub-main">
+          <div id="notice" class="notice hidden" role="alert"></div>
           <div id="background-banner" class="background-banner hidden" role="status">
             <span id="background-text"></span>
             <button id="background-view-button" class="button ghost small" type="button">View</button>
           </div>
-
-          <section id="board-view" class="view hidden">
-            <div class="view-heading">
-              <div><p class="eyebrow">Factory</p><h1>Every run, at a glance.</h1></div>
-              <p id="board-capacity" class="board-capacity"></p>
-            </div>
-            <div id="board-columns" class="board"></div>
-          </section>
-
-          <!-- Brief workspace: the brief as a document, the Guide in a sidebar beside it. One page for a new idea,
-               an unfinished interview, a ready brief, and a revision of a past run. -->
-          <section id="brief-view" class="brief-view">
-            <div class="brief-bar">
-              <div class="brief-crumb">
-                <span id="brief-project" class="lg"></span><span class="lg" aria-hidden="true">/</span><strong>Brief</strong>
-                <span id="revising-pill" class="revising-pill hidden"></span>
-                <span id="brief-status" class="brief-status lg" role="status"></span>
-              </div>
-              <div class="brief-bar-actions">
-                <span id="change-count" class="change-count lg hidden"></span>
-                <div class="mode-toggle" role="group" aria-label="Mode">
-                  <button id="mode-view" type="button" aria-pressed="true">View</button>
-                  <button id="mode-edit" type="button" aria-pressed="false">Edit</button>
-                </div>
-                <button id="start-button" class="button primary queue-button" type="button" disabled>Brief not ready</button>
-              </div>
-            </div>
-
-            <div class="brief-ws">
-              <div class="doc">
-                <div class="doc-in">
-                  <p id="doc-eyebrow" class="doc-eyebrow">Product brief · draft</p>
-                  <h1 id="doc-title" class="doc-title">Untitled idea</h1>
-                  <div id="brief-notices" class="doc-notices hidden"></div>
-                  <article id="brief" class="doc-body" aria-live="polite"></article>
-                  <div id="doc-foot" class="doc-foot hidden">
-                    <p><strong>Ready to run.</strong> The factory writes the PRD and plan, builds, tests, reviews, launches and checks the app. Every run gets its feature plan reviewed before any code is written. You can close this tab and come back later.</p>
-                    <small id="queue-hint" class="queue-hint hidden"></small>
-                  </div>
-                </div>
-              </div>
-
+            <section id="brief-view" class="brief-view">
               <aside id="guide-side" class="guide-side" aria-label="Guide">
                 <button id="guide-rail" class="guide-rail" type="button" aria-expanded="false" aria-controls="guide-panel"><span>Guide</span><i aria-hidden="true"></i></button>
                 <div id="guide-panel" class="guide-panel">
@@ -135,10 +95,21 @@
                   </form>
                 </div>
               </aside>
-            </div>
-          </section>
-
-          <section id="run-view" class="view hidden">
+            </section>
+            <section id="run-card" class="run-card run-only"></section>
+          </main>
+          <aside class="hub-aside">
+            <section class="panel-run">
+              <p class="eyebrow">Factory run</p>
+          <ol class="stages" id="stages">
+            <li class="active" data-stage="interview"><span>01</span><div><strong>Interview</strong><small>Shape the brief</small></div></li>
+            <li data-stage="specifying"><span>02</span><div><strong>Specify</strong><small>PRD + plan + proof</small></div></li>
+            <li data-stage="building"><span>03</span><div><strong>Build</strong><small>Working product</small></div></li>
+            <li data-stage="verifying"><span>04</span><div><strong>Verify</strong><small>Tests + production build</small></div></li>
+            <li data-stage="reviewing"><span>05</span><div><strong>Review</strong><small>Contract audit</small></div></li>
+            <li data-stage="deploying"><span>06</span><div><strong>Deploy</strong><small>Health + telemetry</small></div></li>
+          </ol>
+              <section id="run-view" class="view hidden">
             <div class="run-heading">
               <div><p class="eyebrow" id="run-id">Factory run</p><h1 id="run-title">Building your app</h1><p id="run-subtitle">The controller is preparing the workspace.</p><ul id="run-notices" class="hidden muted"></ul></div>
               <div class="run-actions">
@@ -152,7 +123,6 @@
                 <button id="report-run-button" class="button ghost hidden">Report this run</button>
               </div>
             </div>
-
             <section id="recovery-card" class="recovery-card hidden" aria-live="polite">
               <div>
                 <p class="eyebrow">Recovery checkpoint</p>
@@ -169,8 +139,6 @@
                 <div id="recovery-restart-buttons" class="recovery-restart-buttons"></div>
               </div>
             </section>
-
-            <div class="dashboard-grid">
               <section class="run-map panel">
                 <div class="panel-head"><p class="eyebrow" id="map-title">Run map</p><button id="health" class="health-pill" type="button" aria-describedby="stop"><i></i><span id="health-text">Checking</span></button></div>
                 <svg id="metro" class="metro" viewBox="0 0 680 80" role="group" aria-label="Run stops in build order"></svg>
@@ -181,7 +149,49 @@
                   <div id="events" class="events"></div>
                 </div>
               </section>
-
+              </section>
+            </section>
+            <section class="panel-docs">
+              <div class="brief-only">
+            <div class="brief-bar">
+              <div class="brief-crumb">
+                <span id="brief-project" class="lg"></span><span class="lg" aria-hidden="true">/</span><strong>Brief</strong>
+                <span id="revising-pill" class="revising-pill hidden"></span>
+                <span id="brief-status" class="brief-status lg" role="status"></span>
+              </div>
+              <div class="brief-bar-actions">
+                <span id="change-count" class="change-count lg hidden"></span>
+                <div class="mode-toggle" role="group" aria-label="Mode">
+                  <button id="mode-view" type="button" aria-pressed="true">View</button>
+                  <button id="mode-edit" type="button" aria-pressed="false">Edit</button>
+                </div>
+                <button id="start-button" class="button primary queue-button" type="button" disabled>Brief not ready</button>
+              </div>
+            </div>
+              <div class="doc">
+                <div class="doc-in">
+                  <p id="doc-eyebrow" class="doc-eyebrow">Product brief · draft</p>
+                  <h1 id="doc-title" class="doc-title">Untitled idea</h1>
+                  <div id="brief-notices" class="doc-notices hidden"></div>
+                  <article id="brief" class="doc-body" aria-live="polite"></article>
+                  <div id="doc-foot" class="doc-foot hidden">
+                    <p><strong>Ready to run.</strong> The factory writes the PRD and plan, builds, tests, reviews, launches and checks the app. Every run gets its feature plan reviewed before any code is written. You can close this tab and come back later.</p>
+                    <small id="queue-hint" class="queue-hint hidden"></small>
+                  </div>
+                </div>
+              </div>
+              </div>
+              <div class="run-only">
+              <section class="artifacts-card panel">
+                <div class="panel-head"><p class="eyebrow">Artifacts</p></div>
+                <div id="artifacts" class="artifact-list"><p>Artifacts appear after specification.</p></div>
+                <button id="relaunch-button" class="button primary wide hidden">Relaunch app</button>
+                <a id="open-app" class="button primary wide hidden" href="#" target="_blank" rel="noreferrer">Open working app <span>↗</span></a>
+              </section>
+              </div>
+            </section>
+            <section class="panel-app">
+              <div class="run-only">
               <section class="app-card panel">
                 <div class="panel-head"><p class="eyebrow">Live app activity</p><span id="app-live" class="state-pill muted">Waiting</span></div>
                 <p id="app-url" class="app-url hidden"></p>
@@ -193,17 +203,12 @@
                 </div>
                 <div id="route-list" class="route-list"><p>No app traffic yet.</p></div>
               </section>
-
-              <section class="artifacts-card panel">
-                <div class="panel-head"><p class="eyebrow">Artifacts</p></div>
-                <div id="artifacts" class="artifact-list"><p>Artifacts appear after specification.</p></div>
-                <button id="relaunch-button" class="button primary wide hidden">Relaunch app</button>
-                <a id="open-app" class="button primary wide hidden" href="#" target="_blank" rel="noreferrer">Open working app <span>↗</span></a>
-              </section>
-            </div>
-          </section>
-        </section>
-      </main>
+              </div>
+              <p class="brief-only placeholder">The live app appears once a run deploys.</p>
+            </section>
+          </aside>
+        </div>
+      </div>
     </div>
     <dialog id="project-dialog" class="feedback-dialog" aria-labelledby="project-heading">
       <form id="project-form" class="feedback-form" method="dialog">

@@ -238,7 +238,7 @@ export async function createSoloFactoryServer(options = {}) {
           state: job.state,
           stage: job.stage ?? null,
           startedAt: job.startedAt ?? null,
-          elapsedMs: job.startedAt ? new Date(job.stageHistory?.at(-1)?.endedAt ?? Date.now()) - new Date(job.startedAt) : null,
+          elapsedMs: job.startedAt ? new Date(job.stageHistory?.at(-1)?.endedAt ?? job.completedAt ?? Date.now()) - new Date(job.startedAt) : null,
         };
         if (job.sdlc === "slices") {
           const total = (job.slicePlanIds ?? []).length;

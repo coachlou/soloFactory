@@ -72,19 +72,28 @@ Filled in by driving an isolated fixture server (temporary home, seeded projects
 
 | # | Function | Result |
 |---|---|---|
-| 1 | Page loads with no console errors, dark theme | |
-| 2 | WORK rail groups runs (Needs you / Running / Queued / Done) across projects | |
-| 3 | Clicking a rail item in another project switches project and opens the run | |
-| 4 | Queued item `···` → Remove from queue dequeues it | |
-| 5 | Rail menu row stays open across a poll (>5 s) | |
-| 6 | Project switcher lists projects, switches, marks the current one | |
-| 7 | "+ New project" opens the name dialog and creates the project | |
-| 8 | Attention line shows for a parked run and Open goes to it | |
-| 9 | Tabs Run / Documents / Live app switch the panel; Close hides it | |
-| 10 | Brief mode: Guide thread and composer work; draft text survives a poll | |
-| 11 | Documents (brief): View/Edit toggle and Queue button present | |
-| 12 | Run mode: summary card, Open the run, New brief | |
-| 13 | Run panel: stages, run map, actions (Resume/Dismiss on a parked run) | |
-| 14 | Theme menu: Light and Dark apply and persist across reload; Auto follows the system | |
-| 15 | Menu: Feedback dialog opens, Manual link, Update pill | |
-| 16 | Narrow width (390 px): columns stack, no sideways scroll | |
+| 1 | Page loads with no console errors, dark theme | Pass: no console errors; dark by default |
+| 2 | WORK rail groups runs (Needs you / Running / Queued / Done) across projects | Pass: Needs you 2, Queued 2, Done 2 across habit-tracker and recipe-box |
+| 3 | Clicking a rail item in another project switches project and opens the run | Pass: "Import recipes from a link" switched to recipe-box and opened its run |
+| 4 | Queued item `···` → Remove from queue dequeues it | Pass: POST cancel 202; the row moved to Done as "Removed from queue" |
+| 5 | Rail menu row stays open across a poll (>5 s) | Pass: open row survived a 7 s wait (rail rebuilds only when the board changes) |
+| 6 | Project switcher lists projects, switches, marks the current one | Pass: `aria-current` on the current project; switching works |
+| 7 | "+ New project" opens the name dialog and creates the project | Pass: "Garden planner" created and selected as garden-planner |
+| 8 | Attention line shows for a parked run and Open goes to it | Pass: "2 runs are stopped or paused and need you"; Open went to Streak calendar; tab title "(2) needs you" |
+| 9 | Tabs Run / Documents / Live app switch the panel; Close hides it | Pass: each tab shows its panel with `aria-pressed`; Close hides the aside |
+| 10 | Brief mode: Guide thread and composer work; draft text survives a poll | Pass: draft text and focus kept across a 6.5 s wait |
+| 11 | Documents (brief): View/Edit toggle and Queue button present | Pass: View/Edit toggle `aria-pressed`; Queue disabled ("Brief not ready · 0 of 13") |
+| 12 | Run mode: summary card, Open the run, New brief | Pass: summary card with Open the run and New brief |
+| 13 | Run panel: stages, run map, actions (Resume/Dismiss on a parked run) | Pass: six stages, run map, Resume current run, Dismiss, recovery checkpoint |
+| 14 | Theme menu: Light and Dark apply and persist across reload; Auto follows the system | Pass: Light kept after reload (`solofactory.theme`); Auto followed emulated dark and light |
+| 15 | Menu: Feedback dialog opens, Manual link, Update pill | Pass: Feedback dialog opens; Manual link returns 200; update pill runs a forced check |
+| 16 | Narrow width (390 px): columns stack, no sideways scroll | Pass: 390 px stacks rail, header, main and aside; scrollWidth equals viewport |
+
+Notes from the run:
+
+- The attention line counts each project's latest run; the rail lists every parked run, so the two can
+  differ when an older run in a project is parked behind a newer one.
+- "Cancel run" keeps its red outline: it is destructive, which the colour rule allows.
+- Done shows at most five completed runs per project (server cap), so no "Show all" was added.
+- A completed run's elapsed time now falls back to `completedAt` when it has no stage history, so a
+  Done row never keeps counting.

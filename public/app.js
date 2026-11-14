@@ -15,7 +15,7 @@ const labels = {
 };
 
 const stageOrder = ["specifying", "building", "verifying", "reviewing", "deploying", "completed"];
-const state = { config: null, provider: null, messages: [], guide: null, revises: null, mode: "view", edited: new Set(), editing: null, job: null, events: [], telemetry: null, poller: null, jobs: [], busyJobId: null, projects: [], project: null };
+const state = { config: null, provider: null, messages: [], guide: null, revises: null, mode: "view", edited: new Set(), editing: null, job: null, events: [], telemetry: null, poller: null, jobs: [], busyJobId: null, projects: [], project: null, board: null, workMenu: null };
 const $ = (selector) => document.querySelector(selector);
 const NO_PROVIDER = "No subscription is signed in yet. Follow the note under Claude Code above, then reload this page.";
 
@@ -43,7 +43,8 @@ async function boot() {
 }
 
 async function refreshProjects() {
-  const [projects, listing] = await Promise.all([api("/api/projects"), api("/api/jobs")]);
+  const [projects, listing, board] = await Promise.all([api("/api/projects"), api("/api/jobs"), api("/api/board")]);
+  state.board = board;
   state.projects = projects.projects;
   state.project = projects.active;
   state.jobs = listing.jobs;
@@ -51,73 +52,145 @@ async function refreshProjects() {
   const active = listing.activeRuns?.length ?? 0;
   $("#system-status").textContent = active ? `Factory running${active > 1 ? ` (${active})` : ""}` : "Factory ready";
   renderProjects();
-  renderRuns();
+  renderWork();
+  renderRunCard();
   renderBackgroundBanner();
   renderAttention();
-  if (!$("#board-view").classList.contains("hidden")) renderBoard(await api("/api/board"));
 }
 
-// Factory board: one column per state, a card per run, click to open it.
+// WORK rail: every run in every project from /api/board, grouped by what it needs. Click opens it.
 const PARKED = ["failed", "cancelled", "interrupted", "paused"];
-const BOARD_COLUMNS = ["queued", "specifying", "building", "reviewing", "deploying", "parked", "completed"];
-$("#board-button").addEventListener("click", () => {
-  if ($("#board-view").classList.contains("hidden")) showBoard().catch(showError);
-  else showInterview();
-});
+const WORK_GROUPS = [
+  ["Needs you", (c) => c.parked.filter((card) => card.state !== "cancelled")],
+  ["Running", (c) => [...c.specifying, ...c.building, ...c.reviewing, ...c.deploying]],
+  ["Queued", (c) => c.queued],
+  ["Done", (c) => [...c.completed, ...c.parked.filter((card) => card.state === "cancelled")]],
+];
 
-async function showBoard() {
-  clearError();
-  stopPolling();
-  for (const id of ["brief-view", "run-view"]) $(`#${id}`).classList.add("hidden");
-  document.body.classList.remove("brief-mode");
-  $("#board-view").classList.remove("hidden");
-  $("#board-button").setAttribute("aria-pressed", "true");
-  renderBoard(await api("/api/board"));
-}
-
-function hideBoard() {
-  $("#board-view").classList.add("hidden");
-  $("#board-button").setAttribute("aria-pressed", "false");
-}
-
-function renderBoard(board) {
-  $("#board-capacity").textContent = `${board.active} of ${board.maxActiveRuns} active run${board.maxActiveRuns === 1 ? "" : "s"}`;
-  $("#board-columns").replaceChildren(...BOARD_COLUMNS.map((name) => {
-    const column = document.createElement("div");
-    column.className = "board-column";
-    const heading = document.createElement("h3");
-    heading.append(name, Object.assign(document.createElement("span"), { textContent: String(board.columns[name].length) }));
-    column.append(heading, ...board.columns[name].map(boardCard));
-    return column;
+function renderWork() {
+  const board = state.board;
+  if (!board) return;
+  $("#work-capacity").textContent = `${board.active} of ${board.maxActiveRuns} active`;
+  // Rebuild only when something but the clocks changed, so a click or focus survives the poll;
+  // otherwise just tick the elapsed times. The open row lives in state.workMenu.
+  const key = JSON.stringify([board.columns, state.job?.id, state.workMenu], (k, v) => (k === "elapsedMs" ? undefined : v));
+  if (key === state.workKey) {
+    for (const small of $("#work").querySelectorAll("small[data-job]")) small.textContent = workLine(workCards(board).get(small.dataset.job));
+    return;
+  }
+  state.workKey = key;
+  $("#work").replaceChildren(...WORK_GROUPS.flatMap(([name, pick]) => {
+    const cards = pick(board.columns);
+    if (!cards.length) return [];
+    return [el("section", { className: `work-group${name === "Needs you" ? " needs" : ""}` },
+      el("h3", { textContent: name }, el("span", { textContent: String(cards.length) })),
+      ...cards.map(workItem))];
   }));
 }
 
-function boardCard(card) {
-  const button = document.createElement("button");
-  button.className = "board-card";
-  button.type = "button";
-  const title = Object.assign(document.createElement("strong"), { textContent: card.promise || card.jobId });
-  const meta = Object.assign(document.createElement("small"), { textContent: `${card.project} · ${card.stage || card.state}${card.startedAt ? ` · ${formatDuration(card.elapsedMs)}` : ""}` });
-  button.append(title, meta);
-  if (card.slices) {
-    const bar = document.createElement("div");
-    bar.className = "slice-bar";
-    for (let i = 0; i < card.slices.total; i += 1) {
-      const seg = document.createElement("i");
-      if (i < card.slices.done) seg.classList.add("done");
-      else if (i === card.slices.done && !["completed", ...PARKED].includes(card.state)) seg.classList.add("current");
-      bar.append(seg);
-    }
-    if (card.slices.repairs && bar.lastChild) bar.children[Math.max(0, card.slices.done - 1)].classList.add("repaired");
-    // Feature status: verified, then the cursor's substage (or blocked when parked), then planned.
-    const status = card.slices.current ? ` · ${card.slices.current} ${PARKED.includes(card.state) ? "blocked" : card.slices.substage ?? "planned"}` : "";
-    bar.title = `${card.slices.done}/${card.slices.total} features verified${status}${card.slices.repairs ? ` · ${card.slices.repairs} repair${card.slices.repairs === 1 ? "" : "s"}` : ""}${card.slices.remainingRepairs != null ? ` · ${card.slices.remainingRepairs} repair${card.slices.remainingRepairs === 1 ? "" : "s"} left` : ""}`;
-    button.append(bar);
-  }
-  if (card.blockedBy) button.append(Object.assign(document.createElement("small"), { className: "blocked", textContent: `waiting on recovery of ${card.blockedBy}` }));
-  button.addEventListener("click", () => openFromBoard(card).catch(showError));
-  return button;
+function workItem(card) {
+  const open = el("button", { type: "button", className: `work-item${card.jobId === state.job?.id ? " selected" : ""}` },
+    el("strong", { textContent: card.promise || card.jobId }),
+    jobLine(card));
+  if (card.slices) open.append(sliceBar(card));
+  if (card.blockedBy) open.append(el("small", { className: "blocked", textContent: `waiting on recovery of ${card.blockedBy}` }));
+  open.addEventListener("click", () => openFromBoard(card).catch(showError));
+  if (card.state !== "queued") return open;
+  const more = el("button", { type: "button", className: "work-more", textContent: "···", title: "More", ariaExpanded: String(state.workMenu === card.jobId) });
+  more.addEventListener("click", () => { state.workMenu = state.workMenu === card.jobId ? null : card.jobId; renderWork(); });
+  const row = el("div", { className: "work-row" }, open, more);
+  if (state.workMenu !== card.jobId) return row;
+  const remove = el("button", { type: "button", textContent: "Remove from queue" });
+  remove.addEventListener("click", async () => {
+    try {
+      await api(`/api/jobs/${card.jobId}/cancel`, { method: "POST" });
+      state.workMenu = null;
+      await refreshProjects();
+    } catch (error) { showError(error); }
+  });
+  return el("div", { className: "work-queued" }, row, el("div", { className: "work-menu" }, remove));
 }
+
+function jobLine(card) {
+  const small = el("small", { textContent: workLine(card) });
+  small.dataset.job = card.jobId;
+  return small;
+}
+
+function workLine(card) {
+  return card ? `${card.project} · ${card.stage || card.state}${card.startedAt ? ` · ${formatDuration(card.elapsedMs)}` : ""}` : "";
+}
+
+function workCards(board) {
+  return new Map(WORK_GROUPS.flatMap(([, pick]) => pick(board.columns)).map((card) => [card.jobId, card]));
+}
+
+function sliceBar(card) {
+  const bar = el("div", { className: "slice-bar" });
+  for (let i = 0; i < card.slices.total; i += 1) {
+    const seg = document.createElement("i");
+    if (i < card.slices.done) seg.classList.add("done");
+    else if (i === card.slices.done && !["completed", ...PARKED].includes(card.state)) seg.classList.add("current");
+    bar.append(seg);
+  }
+  if (card.slices.repairs && bar.lastChild) bar.children[Math.max(0, card.slices.done - 1)].classList.add("repaired");
+  // Feature status: verified, then the cursor's substage (or blocked when parked), then planned.
+  const status = card.slices.current ? ` · ${card.slices.current} ${PARKED.includes(card.state) ? "blocked" : card.slices.substage ?? "planned"}` : "";
+  bar.title = `${card.slices.done}/${card.slices.total} features verified${status}${card.slices.repairs ? ` · ${card.slices.repairs} repair${card.slices.repairs === 1 ? "" : "s"}` : ""}${card.slices.remainingRepairs != null ? ` · ${card.slices.remainingRepairs} repair${card.slices.remainingRepairs === 1 ? "" : "s"} left` : ""}`;
+  return bar;
+}
+
+// Run mode: the main column shows a summary of the open run; the Run panel holds the full view.
+function renderRunCard() {
+  const job = state.job;
+  if (!job) return;
+  const card = Object.values(state.board?.columns ?? {}).flat().find((entry) => entry.jobId === job.id);
+  const openRun = el("button", { type: "button", className: "button primary small", textContent: "Open the run" });
+  openRun.addEventListener("click", () => setPanel("run"));
+  const fresh = el("button", { type: "button", className: "button ghost small", textContent: "New brief" });
+  fresh.addEventListener("click", showInterview);
+  $("#run-card").replaceChildren(
+    el("p", { className: "eyebrow", textContent: state.projects.find((entry) => entry.id === state.project)?.name ?? "" }),
+    el("h2", { textContent: job.brief?.promise || projectName(job) }),
+    ...(card?.slices ? [sliceBar(card)] : []),
+    el("p", { className: "run-card-state", textContent: $("#run-subtitle").textContent }),
+    el("div", { className: "run-card-actions" }, openRun, fresh));
+}
+
+// The aside shows one panel at a time; an empty name closes it.
+function setPanel(name) {
+  $("#hub").dataset.panel = name;
+  document.querySelectorAll(".tabs [data-panel]").forEach((tab) => tab.setAttribute("aria-pressed", String(tab.dataset.panel === name && name !== "")));
+}
+document.querySelectorAll(".tabs [data-panel]").forEach((tab) => tab.addEventListener("click", () => setPanel(tab.dataset.panel)));
+
+// Theme: Auto follows the system; Light and Dark are remembered in this browser.
+function applyTheme(choice) {
+  if (choice === "light" || choice === "dark") document.documentElement.dataset.theme = choice;
+  else delete document.documentElement.dataset.theme;
+  document.querySelectorAll("[data-theme-choice]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.themeChoice === (choice || "auto"))));
+}
+applyTheme(localStorage.getItem("solofactory.theme"));
+document.querySelectorAll("[data-theme-choice]").forEach((button) => button.addEventListener("click", () => {
+  const choice = button.dataset.themeChoice;
+  if (choice === "auto") localStorage.removeItem("solofactory.theme");
+  else localStorage.setItem("solofactory.theme", choice);
+  applyTheme(choice);
+  $("#theme-menu").hidePopover();
+}));
+
+// Menus open beside the button that opened them (a popover otherwise centres in the window).
+for (const menu of document.querySelectorAll(".menu[popover]")) {
+  menu.addEventListener("toggle", (event) => {
+    if (event.newState !== "open") return;
+    const anchor = document.querySelector(`[popovertarget="${menu.id}"]`).getBoundingClientRect();
+    const width = menu.offsetWidth;
+    menu.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - width - 8))}px`;
+    menu.style.top = anchor.bottom + menu.offsetHeight + 8 > innerHeight
+      ? `${Math.max(8, anchor.top - menu.offsetHeight - 4)}px` : `${anchor.bottom + 4}px`;
+  });
+}
+$("#new-project-button").addEventListener("click", () => { $("#nav-menu").hidePopover(); switchProject("new").catch(showError); });
 
 async function openFromBoard(card) {
   if (card.projectId !== state.project) {
@@ -131,21 +204,25 @@ function projectName(job) {
   return job?.brief?.workingName || job?.id || "Untitled";
 }
 
-function option(value, text) {
-  return Object.assign(document.createElement("option"), { value, textContent: text });
-}
-
 function renderProjects() {
-  const select = $("#project-select");
-  select.replaceChildren(option("new", "+ New project…"), ...state.projects.map((project) => {
-    const marker = project.activeJobId ? "● " : "";
-    const last = project.lastRun ? `${project.lastRun.state} · ${project.runCount} run${project.runCount === 1 ? "" : "s"}` : "no runs";
-    const queued = project.queued ? ` · ${project.queued} queued` : "";
-    return option(project.id, `${marker}${project.name} · ${last}${queued}`);
-  }));
-  select.value = state.project;
-  $("#brief-project").textContent = state.projects.find((entry) => entry.id === state.project)?.name ?? "Project";
+  const current = state.projects.find((entry) => entry.id === state.project);
+  $("#project-label").textContent = current?.name ?? "Project";
+  $("#brief-project").textContent = current?.name ?? "Project";
   renderQueueHint();
+  if ($("#project-menu").matches(":popover-open")) return; // never rebuilt under the owner's pointer
+  $("#project-menu").replaceChildren(...state.projects.map((project) => {
+    const last = project.lastRun ? `${project.lastRun.state} · ${project.runCount} run${project.runCount === 1 ? "" : "s"}` : "no runs";
+    const item = el("button", { type: "button", className: project.id === state.project ? "current" : "" },
+      el("strong", { textContent: project.name }),
+      el("small", { textContent: `${project.activeJobId ? "running · " : ""}${last}${project.queued ? ` · ${project.queued} queued` : ""}` }));
+    if (project.id === state.project) item.setAttribute("aria-current", "true");
+    item.addEventListener("click", () => { $("#project-menu").hidePopover(); switchProject(project.id).catch(showError); });
+    return item;
+  }), (() => {
+    const create = el("button", { type: "button", className: "menu-new", textContent: "+ New project" });
+    create.addEventListener("click", () => { $("#project-menu").hidePopover(); switchProject("new").catch(showError); });
+    return create;
+  })());
 }
 
 // Runs in one project share a tree, so they serialize whatever the active-run limit says;
@@ -160,15 +237,6 @@ function renderQueueHint() {
     ? `a parked run, which holds the queue until you resume, restart, or dismiss it${ahead > 1 ? `, plus ${ahead - 1} queued` : ""}`
     : `${ahead} run${ahead === 1 ? "" : "s"} ${project.activeJobId ? "active or " : ""}queued`;
   $("#queue-hint").textContent = `${project.name} already has ${holding}. Runs in one project go one after another, each on the tree the last one leaves, so this brief waits for them whatever the active-run limit is. Independent fixes for the same app are cheaper as one brief with a must-have and an acceptance scenario each.`;
-}
-
-function renderRuns() {
-  const select = $("#run-select");
-  select.replaceChildren(option("new", "+ New run"), ...state.jobs.map((job) => {
-    const marker = job.id === state.busyJobId ? "● " : job.queuePosition ? `#${job.queuePosition} ` : "";
-    return option(job.id, `${marker}${projectName(job)} · ${job.state} · ${job.createdAt.slice(0, 10)}`);
-  }));
-  select.value = state.job?.id ?? "new";
 }
 
 // A parked latest run blocks its project until the owner acts, so it is announced on every screen
@@ -203,8 +271,6 @@ function renderBackgroundBanner() {
   if (busy) $("#background-text").textContent = `“${projectName(busy)}” is ${busy.state} in the background${queued ? ` · ${queued} queued` : ""}.`;
 }
 
-$("#project-select").addEventListener("change", (event) => switchProject(event.target.value).catch(showError));
-$("#run-select").addEventListener("change", (event) => selectRun(event.target.value).catch(showError));
 $("#background-view-button").addEventListener("click", () => selectRun(state.busyJobId).catch(showError));
 
 // window.prompt is blocked in embedded browsers (the Claude desktop pane), so
@@ -247,7 +313,7 @@ async function selectRun(id) {
   localStorage.setItem("solofactory.currentJob", state.job.id);
   resetRunPanels();
   showRun();
-  renderRuns();
+  renderWork();
   renderBackgroundBanner();
   await poll();
   if (["completed", ...PARKED].includes(state.job.state)) stopPolling();
@@ -306,7 +372,7 @@ function showInterview() {
   state.mode = "view";
   $("#message-input").value = "";
   localStorage.removeItem("solofactory.currentJob");
-  hideBoard();
+  setPanel("docs");
   $("#run-view").classList.add("hidden");
   $("#brief-view").classList.remove("hidden");
   document.body.classList.add("brief-mode");
@@ -314,7 +380,7 @@ function showInterview() {
   document.querySelector('[data-stage="interview"]').classList.add("active");
   renderProviders();
   renderWorkspace();
-  renderRuns();
+  renderWork();
   renderBackgroundBanner();
   restoreDraft().catch(showError);
 }
@@ -884,7 +950,7 @@ function reviewOutcome(text) {
 }
 
 function showRun() {
-  hideBoard();
+  setPanel("run");
   $("#brief-view").classList.add("hidden");
   document.body.classList.remove("brief-mode");
   $("#run-view").classList.remove("hidden");
@@ -892,6 +958,7 @@ function showRun() {
   $("#run-id").textContent = state.job.id;
   $("#run-title").textContent = state.job.brief.workingName || "Building your app";
   renderJob();
+  renderRunCard();
   renderAttention();
 }
 
@@ -903,6 +970,7 @@ async function poll() {
     state.events = result.events;
     state.telemetry = await api(`/api/jobs/${state.job.id}/telemetry`);
     renderJob();
+    renderRunCard();
     if (PARKED.includes(state.job.state)) {
       state.pausing = false;
       $("#pause-button").disabled = false;

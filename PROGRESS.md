@@ -1,3 +1,16 @@
+## Unreleased: project hub layout, version A (branch explore/project-hub-ui, 2026-11-14)
+
+The page now follows mockup A (`notes/project-hub-ui-mockups/Main.dc.html`); spec and live-preview results in `docs/project-hub-ui-spec.md`. Revert point: tag `hub-ui-pre-impl`.
+- Left rail: brand, status, and a Work list fed by `/api/board` grouping every run of every project as Needs you, Running, Queued and Done; clicking a row switches project if needed and opens the run. A queued row's `···` menu has Remove from queue (the existing cancel endpoint). The rail rebuilds only when the board changes, so an open menu survives the 5-second poll. Check for updates and Menu (New project, Feedback, Manual) sit at its foot.
+- Header: project switcher (popover, "+ New project"), the amber needs-you line, theme menu (Auto, Light, Dark) and panel tabs Run, Documents, Live app with Close.
+- Main column: the Guide thread and composer in brief mode, a run summary card in run mode. Aside: stages and the full run view (Run), the brief with View/Edit and Queue or the run's artifacts (Documents), live traffic (Live app).
+- Removed: the top-bar project and run selects, the Factory button and board page, the left stage rail as a separate column.
+- Neutral gray palette in dark and light; amber and red only on attention.
+- `/api/board`: a finished run without stage history uses `completedAt` for its elapsed time instead of counting on.
+- Deferred: pick cards and suggestion pills, queue reorder (no endpoint), adopt-folder and settings, manual screenshots of the new layout.
+- Tests: 460/460; 16 functions driven in a live preview on a seeded fixture server.
+- Docs: README (Brief, board, Feedback), manual sections on updates, projects, Brief page, run view, board and feedback; INSTALL (update button, project switcher, Feedback, first-run check).
+
 ## 0.11.0-alpha.2: repair-plan, token and Queue fixes for testers (2026-11-12)
 
 Second alpha zip, same terms as alpha.1 (testers only, not on `main` or AIMM).
