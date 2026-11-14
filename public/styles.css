@@ -271,7 +271,7 @@ body.brief-mode .rail { display: none; }
 .brief-status[data-state="unsaved"] { color: var(--amber); }
 .brief-status[data-state="ready"] { color: var(--muted); }
 .brief-status[data-state="busy"] { color: var(--ink); }
-.revising-pill { border: 1px solid var(--orange); color: var(--orange); border-radius: 99px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
+.revising-pill { border: 1px solid var(--line2); color: var(--fg); border-radius: 99px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
 .brief-bar-actions { display: flex; gap: 10px; align-items: center; }
 .change-count { font-size: 12px; color: var(--muted); }
 .mode-toggle { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
@@ -472,4 +472,41 @@ body.brief-mode .run-only, body:not(.brief-mode) .brief-only { display: none !im
 }
 /* The aside is narrow: keep the brief bar to its essentials. */
 .hub-aside .brief-bar .lg { display: none; }
+.hub-aside .brief-bar .queue-button .sm { display: inline; }
+@media (min-width: 901px) {
+  body.revise-mode .hub-aside .brief-bar .lg { display: inline; }
+  body.revise-mode .hub-aside .brief-bar .queue-button .sm { display: none; }
+}
+@media (max-width: 900px) {
+  body.revise-mode .brief-bar { height: auto; flex-wrap: wrap; row-gap: 8px; padding: 8px 12px; }
+}
 .hub-aside .brief-crumb { overflow: hidden; }
+
+/* Revising a run's brief (mockup A's document viewer): the brief is the wide document, the Guide works beside
+   it on the right, and the bar holds Discard changes, Resubmit to the factory and Close. Always editing. */
+body:not(.revise-mode) .revise-only { display: none !important; }
+body.revise-mode .hub-aside { order: 1; flex: 999 1 560px; max-width: none; border-left: 0; }
+body.revise-mode .hub-cols > .splitter { order: 2; }
+body.revise-mode .hub-main { order: 3; flex: 0 1 400px; min-width: 280px; border-left: 1px solid var(--line); background: var(--panel); }
+body.revise-mode .mode-toggle { display: none; }
+body.revise-mode .hub-aside .doc { padding: 40px 48px 64px; }
+body.revise-mode .doc-in { max-width: 800px; }
+body.revise-mode .doc-title { font-size: 28px; }
+.guide-sub { font-weight: 500; color: var(--muted); }
+#revise-close { font-size: 13px; padding: 6px 4px; }
+.revision-status { margin: 0 0 18px; padding: 8px 12px; border: 1px solid var(--paper-line); border-radius: 6px; background: #efe9da; font: 600 12px/1.4 var(--sans); color: #3c3e39; }
+.draft-changes { margin: 0 0 24px; padding: 10px 14px; border: 1px solid var(--paper-line); border-radius: 6px; }
+.draft-changes p { margin: 0; font: 400 13px/1.5 var(--sans); color: #3c3e39; }
+
+/* Pane dividers: a thin hit area over the border between panes. */
+.splitter { flex: 0 0 8px; margin: 0 -4px; position: relative; z-index: 5; cursor: col-resize; touch-action: none; }
+.splitter::after { content: ""; position: absolute; inset: 0 3px; border-radius: 2px; transition: background .15s; }
+.splitter:hover::after, .splitter:focus-visible::after, body.resizing .splitter::after { background: var(--line2); }
+.splitter:focus-visible { outline: none; }
+body.resizing { cursor: col-resize; user-select: none; }
+.hub[data-panel=""] #split-cols { display: none; }
+@media (max-width: 900px) {
+  .splitter { display: none; }
+  .hub-nav, .hub-main, .hub-aside { flex: none !important; max-width: none !important; }
+  body.revise-mode .hub-main { min-width: 0; border-left: 0; }
+}

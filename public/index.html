@@ -32,6 +32,7 @@
           </div>
         </div>
       </nav>
+      <div id="split-nav" class="splitter" role="separator" aria-orientation="vertical" aria-label="Resize the work rail. Arrow keys resize, double-click resets" tabindex="0"></div>
       <div class="hub-body">
         <header class="hub-head">
           <button id="project-button" class="project-button" type="button" popovertarget="project-menu"><span id="project-label">Project</span> <span aria-hidden="true">▾</span></button>
@@ -66,7 +67,7 @@
                 <button id="guide-rail" class="guide-rail" type="button" aria-expanded="false" aria-controls="guide-panel"><span>Guide</span><i aria-hidden="true"></i></button>
                 <div id="guide-panel" class="guide-panel">
                   <div class="guide-head">
-                    <p>Guide</p>
+                    <p>Guide<span class="guide-sub revise-only"> · Working on this document with you</span></p>
                     <span class="guide-head-right">
                       <button id="earlier-button" class="link-button hidden" type="button"></button>
                       <span id="guide-meta" class="guide-meta"></span>
@@ -98,6 +99,7 @@
             </section>
             <section id="run-card" class="run-card run-only"></section>
           </main>
+          <div id="split-cols" class="splitter" role="separator" aria-orientation="vertical" aria-label="Resize the two panes. Arrow keys resize, double-click resets" tabindex="0"></div>
           <aside class="hub-aside">
             <section class="panel-run">
               <p class="eyebrow">Factory run</p>
@@ -165,13 +167,17 @@
                   <button id="mode-view" type="button" aria-pressed="true">View</button>
                   <button id="mode-edit" type="button" aria-pressed="false">Edit</button>
                 </div>
+                <button id="revise-discard" class="button ghost small revise-only" type="button" title="Throw this draft away and put the run back as it was">Discard changes</button>
                 <button id="start-button" class="button primary queue-button" type="button" disabled>Brief not ready</button>
+                <button id="revise-close" class="link-button revise-only" type="button" title="Back to the run; this draft stays saved">Close</button>
               </div>
             </div>
               <div class="doc">
                 <div class="doc-in">
                   <p id="doc-eyebrow" class="doc-eyebrow">Product brief · draft</p>
                   <h1 id="doc-title" class="doc-title">Untitled idea</h1>
+                  <p id="revision-status" class="revision-status revise-only"></p>
+                  <div id="draft-changes" class="draft-changes hidden"></div>
                   <div id="brief-notices" class="doc-notices hidden"></div>
                   <article id="brief" class="doc-body" aria-live="polite"></article>
                   <div id="doc-foot" class="doc-foot hidden">

@@ -34,6 +34,17 @@ show in one mode each. In run mode the aside takes the wide share of the row and
 narrows to the summary card, so the run map keeps its room; in brief mode the Guide takes the wide
 share. Opening a run selects the Run tab; opening the brief selects Documents.
 
+Revise mode (`body.revise-mode`, set while a brief revises an earlier run) follows mockup A: the
+brief document takes the wide left share and opens in Edit, the Guide sits on the right ("Working on
+this document with you"), and the bar holds the run pill, **Discard changes** (two clicks; deletes
+the draft and returns to the run), **Resubmit** and **Close** (returns to the run, keeps the draft).
+A status line says nothing builds until you resubmit, and "Changed in this draft" lists the edited
+sections.
+
+Panes resize: drag the divider after the WORK rail or between the two columns, or focus it and use
+the arrow keys; double-click resets. Widths are kept per layout (brief, revise, run) in this
+browser's localStorage under `solofactory.pane.*`. Phone widths drop the dividers.
+
 ## What changes
 
 | Old control | New home |

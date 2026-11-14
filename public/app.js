@@ -160,9 +160,59 @@ function renderRunCard() {
 // The aside shows one panel at a time; an empty name closes it.
 function setPanel(name) {
   $("#hub").dataset.panel = name;
+  applyPanes();
   document.querySelectorAll(".tabs [data-panel]").forEach((tab) => tab.setAttribute("aria-pressed", String(tab.dataset.panel === name && name !== "")));
 }
 document.querySelectorAll(".tabs [data-panel]").forEach((tab) => tab.addEventListener("click", () => setPanel(tab.dataset.panel)));
+
+// Resizable panes: drag a divider, or focus it and use the arrow keys; double-click resets. Each layout keeps
+// one pane at a set width and lets the other flex, and the width is remembered per layout in this browser.
+const PANES = { brief: [".hub-aside", "right"], revise: [".hub-main", "right"], run: [".hub-main", "left"] };
+const layoutKey = () => (document.body.classList.contains("revise-mode") ? "revise" : document.body.classList.contains("brief-mode") ? "brief" : "run");
+const savedWidth = (key) => { try { return Number(localStorage.getItem(`solofactory.pane.${key}`)) || null; } catch { return null; } };
+const saveWidth = (key, width) => { try { if (width) localStorage.setItem(`solofactory.pane.${key}`, String(Math.round(width))); else localStorage.removeItem(`solofactory.pane.${key}`); } catch { /* storage blocked: the width lasts until reload */ } };
+const sizePane = (node, width) => Object.assign(node.style, width ? { flex: `0 0 ${width}px`, maxWidth: "none" } : { flex: "", maxWidth: "" });
+function applyPanes() {
+  sizePane($(".hub-nav"), savedWidth("nav"));
+  sizePane($(".hub-main"), null);
+  sizePane($(".hub-aside"), null);
+  const [pane] = PANES[layoutKey()];
+  if ($("#hub").dataset.panel) sizePane($(pane), savedWidth(layoutKey()));
+}
+function splitter(handle, target) {
+  // target() names the pane this divider sizes, the side of the divider it sits on, its storage key and its limits.
+  const resize = (width) => {
+    const { key, min, max } = target();
+    saveWidth(key, Math.max(min, Math.min(max, width)));
+    applyPanes();
+  };
+  const widthAt = (x) => { const { node, side } = target(); const box = node.getBoundingClientRect(); return side === "left" ? x - box.left : box.right - x; };
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    document.body.classList.add("resizing");
+  });
+  handle.addEventListener("pointermove", (event) => { if (handle.hasPointerCapture(event.pointerId)) resize(widthAt(event.clientX)); });
+  const stop = () => document.body.classList.remove("resizing");
+  handle.addEventListener("pointerup", stop);
+  handle.addEventListener("pointercancel", stop);
+  handle.addEventListener("dblclick", () => { saveWidth(target().key, null); applyPanes(); });
+  handle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const { node, side } = target();
+    const grow = (event.key === "ArrowRight") === (side === "left");
+    resize(node.getBoundingClientRect().width + (grow ? 24 : -24));
+  });
+}
+splitter($("#split-nav"), () => ({ node: $(".hub-nav"), side: "left", key: "nav", min: 180, max: 480 }));
+splitter($("#split-cols"), () => {
+  const [pane, side] = PANES[layoutKey()];
+  return { node: $(pane), side, key: layoutKey(), min: 280, max: Math.max(280, $(".hub-cols").getBoundingClientRect().width - 320) };
+});
+new MutationObserver(applyPanes).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+applyPanes();
 
 // Theme: Auto follows the system; Light and Dark are remembered in this browser.
 function applyTheme(choice) {
@@ -405,11 +455,30 @@ async function restoreDraft() {
     const revised = await api(`/api/jobs/${state.revises}`).catch(() => null);
     state.revisedJob = revised?.job ?? null;
     state.baseBrief = state.revisedJob?.brief ?? null;
-    if (state.revisedJob) state.mode = "edit";
+    // Revising is always editing, as in the document viewer: the Read/Edit toggle hides on this page.
+    state.mode = "edit";
   }
   renderProviders();
   renderWorkspace();
 }
+
+// Revising: Close goes back to the run and keeps the draft; Discard throws the draft away and puts the run
+// back as it was. Discard asks with a second click (confirm() is declined silently in some embedded browsers).
+$("#revise-close").addEventListener("click", () => selectRun(state.revises).catch(showError));
+$("#revise-discard").addEventListener("click", async () => {
+  const button = $("#revise-discard");
+  if (button.dataset.armed !== state.revises) {
+    button.dataset.armed = state.revises;
+    button.textContent = "Discard? Click again";
+    setTimeout(() => { delete button.dataset.armed; button.textContent = "Discard changes"; }, 4000);
+    return;
+  }
+  const run = state.revises;
+  delete button.dataset.armed;
+  button.textContent = "Discard changes";
+  await api("/api/interview/draft", { method: "DELETE" }).catch(showError);
+  selectRun(run).catch(showError);
+});
 
 $("#discard-draft").addEventListener("click", async () => {
   if (!confirm("Discard this conversation and its brief and start a new one?")) return;
@@ -470,14 +539,15 @@ function changedKeys() {
 function queueLabel() {
   const { revises, replaces } = state;
   if (!revises) return { long: "Queue for the factory", short: "Queue" };
-  if (replaces === revises) return { long: `Queue and replace run ${revises}`, short: "Queue" };
-  if (replaces) return { long: `Queue and set aside run ${replaces}`, short: "Queue" };
-  return { long: "Queue as a new run", short: "Queue" };
+  if (replaces === revises) return { long: "Resubmit to the factory", short: "Resubmit" };
+  if (replaces) return { long: `Resubmit and set aside run ${replaces}`, short: "Resubmit" };
+  return { long: "Resubmit as a new run", short: "Resubmit" };
 }
 
 function renderBar(busy = false) {
   const project = state.projects.find((entry) => entry.id === state.project);
   $("#brief-project").textContent = project?.name ?? "Project";
+  document.body.classList.toggle("revise-mode", Boolean(state.revises));
   const pill = $("#revising-pill");
   pill.classList.toggle("hidden", !state.revises);
   if (state.revises) {
@@ -545,6 +615,11 @@ function renderDoc() {
   const ready = state.guide.status === "ready";
   $("#doc-eyebrow").textContent = state.revises ? `Product brief · revision of run ${state.revises}` : ready ? "Product brief · ready" : "Product brief · draft";
   $("#doc-title").textContent = brief.workingName?.trim() || "Untitled idea";
+  const stopped = state.revisedJob?.state;
+  $("#revision-status").textContent = state.revises ? `Draft revision of run ${state.revises}${stopped ? ` (${stopped})` : ""} · nothing is building until you resubmit` : "";
+  const changes = changedKeys().map((key) => BRIEF_SECTIONS.find(([k]) => k === key)[1]);
+  $("#draft-changes").classList.toggle("hidden", !state.revises || !changes.length);
+  $("#draft-changes").replaceChildren(el("h2", { textContent: "Changed in this draft" }), el("p", { textContent: changes.join(" · ") }));
   const notices = briefNoticesShown();
   $("#brief-notices").classList.toggle("hidden", !notices.length);
   $("#brief-notices").replaceChildren(el("h2", { textContent: "Before you queue" }), el("ul", {}, ...notices.map((text) => el("li", { textContent: text }))));
@@ -662,7 +737,7 @@ function renderGuideHead() {
   $("#earlier-button").textContent = state.showEarlier ? "Hide earlier messages" : `${hidden} earlier message${hidden === 1 ? "" : "s"}`;
   const turns = state.messages.length;
   $("#guide-meta").textContent = collapse ? "" : state.revises ? `Revision · ${turns} messages` : turns > 1 ? `New idea · ${turns} messages` : "New idea";
-  $("#discard-draft").classList.toggle("hidden", state.messages.length < 2 && !state.revises);
+  $("#discard-draft").classList.toggle("hidden", state.messages.length < 2 || Boolean(state.revises));
 }
 $("#earlier-button").addEventListener("click", () => { state.showEarlier = !state.showEarlier; renderGuideHead(); renderMessages(state.guideBusy); });
 
@@ -952,7 +1027,7 @@ function reviewOutcome(text) {
 function showRun() {
   setPanel("run");
   $("#brief-view").classList.add("hidden");
-  document.body.classList.remove("brief-mode");
+  document.body.classList.remove("brief-mode", "revise-mode");
   $("#run-view").classList.remove("hidden");
   document.querySelector('[data-stage="interview"]').classList.add("done");
   $("#run-id").textContent = state.job.id;
