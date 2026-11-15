@@ -59,6 +59,13 @@ These came back in design A's own style rather than as the earlier hub's panels.
 - The Guide's "Let the Guide plan a repair" button uses the same note as guidance. At an exhausted plan
   it points to the upload instead of posting a plan that would be refused.
 
+## Guide replies in Markdown
+
+The Guide skill asks for its `message` in Markdown (short paragraphs, lists, bold, code, small
+headings). The hub renders it with a small built-in renderer that escapes the reply first, so the
+only markup on the page is what the renderer adds; links open only for http and https addresses.
+The owner's own messages stay plain text.
+
 ## Function checklist (live preview)
 
 Driven on an isolated seed server (:4380, temporary home, projects habit-tracker, recipe-box and notes-app).
@@ -91,3 +98,4 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 24 | A ready plan also offers the corrected-plan upload and lists its repair features and allowance | Pass |
 | 25 | Let the Guide plan a repair at an exhausted plan points to the upload and posts nothing | Pass |
 | 26 | Recovery box reads as neutral gray in light and dark at desktop width | Pass |
+| 27 | Guide replies show Markdown headings, lists, bold, code and links; script tags and javascript links stay text | Pass (unit test on the renderer) |

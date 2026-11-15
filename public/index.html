@@ -127,7 +127,7 @@
 <sc-if value="{{m.isGuide}}" hint-placeholder-val="{{true}}">
 <div style="display: flex; flex-direction: column; gap: 4px; max-width: 88%">
 <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim)">Guide</span>
-<p style="margin: 0; color: var(--text1)">{{m.text}}</p>
+<div class="md" sc-html="{{m.html}}" style="color: var(--text1)"></div>
 </div>
 </sc-if>
 
@@ -471,7 +471,7 @@
 <p style="align-self: flex-end; max-width: 88%; margin: 0; padding: 9px 12px; border-radius: 12px 12px 4px 12px; background: var(--inv); color: var(--inv-fg)">{{m.text}}</p>
 </sc-if>
 <sc-if value="{{m.guide}}" hint-placeholder-val="{{true}}">
-<p style="max-width: 94%; margin: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px 12px 12px 4px; background: var(--raise); color: var(--text1)">{{m.text}}</p>
+<div class="md" sc-html="{{m.html}}" style="max-width: 94%; margin: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px 12px 12px 4px; background: var(--raise); color: var(--text1)"></div>
 </sc-if>
 </div>
 </sc-for>

@@ -8,3 +8,12 @@ button{font:inherit;cursor:pointer}
 input{font:inherit}
 button:focus-visible,input:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
 a{color:var(--fg)}a:hover{color:var(--fg-strong)}
+
+.md>:first-child{margin-top:0}.md>:last-child{margin-bottom:0}
+.md p,.md ul,.md ol,.md pre{margin:0 0 10px}
+.md ul,.md ol{padding-left:22px}.md li{margin:2px 0}
+.md h3,.md h4,.md h5{margin:14px 0 6px;font-size:14px;font-weight:600;color:var(--fg)}
+.md strong{color:var(--fg);font-weight:600}
+.md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;padding:1px 5px;border-radius:4px;background:var(--raise2)}
+.md pre{padding:10px 12px;border-radius:8px;background:var(--raise2);overflow-x:auto}
+.md pre code{padding:0;background:none}

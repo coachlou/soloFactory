@@ -45,7 +45,7 @@ function draw(nodes, sc, H) {
     const type = String(raw(attrOf(n, "type"), sc) ?? "");
     let attrs = "";
     for (const [k, v] of n.attrs) {
-      if (k.startsWith("hint-")) continue;
+      if (k.startsWith("hint-") || k === "sc-html") continue;
       if (/^on[A-Z]/.test(k)) {
         const fn = raw(v, sc);
         if (typeof fn !== "function") continue;
@@ -58,7 +58,9 @@ function draw(nodes, sc, H) {
       attrs += v === null ? ` ${k}` : ` ${k}="${esc(fill(v, sc))}"`;
     }
     out += `<${n.tag}${attrs}>`;
-    if (!VOID.has(n.tag)) out += `${draw(n.kids, sc, H)}</${n.tag}>`;
+    // sc-html="{{x}}" places x as markup. Only md() output may be bound this way: it is escaped first.
+    const html = attrOf(n, "sc-html");
+    if (!VOID.has(n.tag)) out += `${html != null ? String(raw(html, sc) ?? "") : draw(n.kids, sc, H)}</${n.tag}>`;
   }
   return out;
 }
@@ -213,6 +215,41 @@ function reportError(error, action = "notice") {
 window.addEventListener("error", (event) => reportError(event.error ?? event.message, "uncaught"));
 window.addEventListener("unhandledrejection", (event) => reportError(event.reason, "unhandled rejection"));
 
+// Guide replies are Markdown. Escape first, so the only HTML on the page is what this function adds.
+// ponytail: headings, lists, code, bold/italic, http(s) links; add tables when the Guide starts writing them.
+function md(src) {
+  const inline = (s) => s
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)"]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  const lines = esc(String(src ?? "")).split("\n");
+  let out = "", list = null, para = [];
+  const flush = () => { if (para.length) out += `<p>${inline(para.join("<br>"))}</p>`; para = []; };
+  const close = () => { if (list) out += `</${list}>`; list = null; };
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^```/.test(line)) {
+      flush(); close();
+      const code = [];
+      for (i += 1; i < lines.length && !/^```/.test(lines[i]); i += 1) code.push(lines[i]);
+      out += `<pre><code>${code.join("\n")}</code></pre>`;
+      continue;
+    }
+    const h = /^(#{1,3})\s+(.*)$/.exec(line);
+    const item = /^\s*(?:([-*])|\d+\.)\s+(.*)$/.exec(line);
+    if (h) { flush(); close(); out += `<h${h[1].length + 2}>${inline(h[2])}</h${h[1].length + 2}>`; }
+    else if (item) {
+      flush();
+      const tag = item[1] ? "ul" : "ol";
+      if (list !== tag) { close(); out += `<${tag}>`; list = tag; }
+      out += `<li>${inline(item[2])}</li>`;
+    } else if (!line.trim()) { flush(); close(); }
+    else { close(); para.push(line); }
+  }
+  flush(); close();
+  return out;
+}
 class Component extends DCLogic {
   state = {
     pid: 'nm', panel: 'run', docName: '', draft: '', nextId: 100,
@@ -598,7 +635,7 @@ class Component extends DCLogic {
       const run = m.type === 'run' ? s.runs.find((r) => r.id === m.runId) : null;
       const kind = run ? run.kind : m.kind;
       const k = kind ? K[kind] : null;
-      const v = { isUser: m.type === 'user', isGuide: m.type === 'guide', isPick: m.type === 'pick', isRun: m.type === 'run', text: m.text };
+      const v = { isUser: m.type === 'user', isGuide: m.type === 'guide', isPick: m.type === 'pick', isRun: m.type === 'run', text: m.text, html: m.type === 'guide' ? md(m.text) : '' };
       if (k) { v.kindLabel = k.label; v.chipBg = k.chipBg; v.chipFg = k.chipFg; }
       if (m.type === 'pick') {
         v.read = current.hasDocs ? ['PRD.md', 'FEATURES.md', 'ACCEPTANCE.md'] : ['no documents found'];
@@ -717,7 +754,7 @@ class Component extends DCLogic {
       }),
       footer: editing ? 'Click any section to edit it. Click away or press Cmd/Ctrl+Enter to keep the edit. Escape cancels. Each edit saves at once, and the Guide checks it before anything is built.' : canEdit ? 'Read only. Press Edit to change it, or ask the Guide.' : 'Read only while the run is active. Use Revise the spec on a parked or cancelled run, or ask the Guide.',
       chat: [{ mine: false, guide: true, text: 'I have ' + vRaw.name + ' open with you. Tell me what to change and I will edit it, or edit it yourself and I will check your changes against the rest of the project documents.' }]
-        .concat((s.docChat[key] || []).map((m) => ({ mine: m.who === 'you', guide: m.who === 'guide', text: m.text }))).reverse(),
+        .concat((s.docChat[key] || []).map((m) => ({ mine: m.who === 'you', guide: m.who === 'guide', text: m.text, html: md(m.text) }))).reverse(),
       draft: s.vdraft,
       onDraft: (e) => this.setState({ vdraft: e.target.value }),
       onKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); vsend(); } },

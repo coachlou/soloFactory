@@ -1045,3 +1045,17 @@ test("revise brief works on a finished run and an older set-aside run, and sets 
   assert.equal(kept.dismissed, undefined, "a finished run is never dismissed");
   assert.ok(!(await app.store.events(finished.id)).some((event) => event.type === "job.rolled_back"), "a finished run is never rolled back");
 });
+
+test("Guide replies render as Markdown with nothing from the reply left as markup", async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const lift = (re) => source.match(re)[0];
+  const md = new Function(`${lift(/const esc = .*\n/)}${lift(/function md\([\s\S]*?\n}\n/)}; return md;`)();
+  const html = md("## Plan\n\n- **Save** to `notes.json`\n- two\n\n1. first\n\n```\n<b>x</b>\n```\n[docs](https://example.com) [bad](javascript:alert(1)) <script>alert(1)</script> <img src=x onerror=alert(1)>");
+  assert.match(html, /<h4>Plan<\/h4>/);
+  assert.match(html, /<ul><li><strong>Save<\/strong> to <code>notes\.json<\/code><\/li><li>two<\/li><\/ul>/);
+  assert.match(html, /<ol><li>first<\/li><\/ol>/);
+  assert.match(html, /<pre><code>&lt;b&gt;x&lt;\/b&gt;<\/code><\/pre>/);
+  assert.match(html, /<a href="https:\/\/example\.com" target="_blank" rel="noopener">docs<\/a>/);
+  assert.doesNotMatch(html, /<script|<img|href="javascript/);
+  assert.match(html, /\[bad\]\(javascript:alert\(1\)\)/, "a non-http link stays as plain text");
+});
