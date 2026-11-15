@@ -124,6 +124,25 @@ the run panel lists every feature under the steps with Done, Now or To do and a 
 The two new server routes are `POST /api/jobs/:id/stop-app` and `POST /api/jobs/:id/queue-move`. Both drive what
 the factory already does (stop a deployment, reorder the queue); no stage or gate changed.
 
+## Profiles
+
+A profile names a provider and, for each stage tier (Guide, planning and review, coding), a model and an effort.
+
+- **Built in.** Claude and Codex ship built in and cannot be renamed or deleted. Claude keeps the factory's own
+  Claude defaults (Opus medium for the Guide, Opus low for planning and review, Sonnet medium for coding, with the
+  advisor on). Codex uses `gpt-6.1-sol` medium for the Guide, `gpt-6.1-sol` low for planning and review and
+  `gpt-6.1-terra` low for coding. `SOLOFACTORY_CODEX_MODEL` and `SOLOFACTORY_CODEX_REASONING_EFFORT` still win.
+- **Changing a value.** Settings, AI and models shows the chosen profile's rows. Changing one opens a prompt: save
+  it as a new profile (named, up to 40 characters, unique) or into an existing custom profile, or discard. A
+  built-in profile is never overwritten. New, Save and Delete sit above the rows; Delete only for custom profiles,
+  and projects using a deleted profile fall back to Claude.
+- **Storage.** Custom profiles save to `profiles.json` in the factory home through `PUT /api/profiles`, which
+  refuses a built-in name, a duplicate, an unknown provider or effort, and a missing tier. The default profile and
+  each project's pick stay in the browser (`solofactory.profile`, `solofactory.profile.<project>`).
+- **Per project.** The Guide box button reads Profile: name and cycles through the profiles whose provider is
+  signed in. Interview turns and Send to the factory carry that profile's provider and models; the job stores the
+  models and the run log records them, so a run keeps the profile it started with.
+
 ## Function checklist (live preview)
 
 Driven on an isolated seed server (:4380, temporary home, projects habit-tracker, recipe-box and notes-app).
@@ -168,3 +187,8 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 36 | A shipped run's spec viewer offers Revise the spec; resubmitting keeps the shipped run in Done | Pass (server test on revise of a finished run) |
 | 37 | Live app shows Stop the app while live and Relaunch once stopped, with requests, errors, response time, uptime and busiest routes | Pass (unit test on the mapping; server tests on stop and relaunch) |
 | 38 | The projects list and right panel resize by drag, arrow keys and double-click reset, clamped and remembered | Pass (unit test on the splitter) |
+| 39 | Settings shows the profile picker; changing a row of a built-in profile prompts to save as new or into a custom profile, and Save as new writes `profiles.json` and selects it | Pass (live on :4381; server test on `PUT /api/profiles`) |
+| 40 | Built-in names are refused, and Delete is off for built-in profiles | Pass (server test; live on :4381) |
+| 41 | The Guide box button cycles profiles per project, and a deleted profile falls back to Claude | Pass (live on :4381) |
+| 42 | A job sent with a profile stores its models; a half models body is refused with 400 | Pass (server test) |
+| 43 | Codex built-in matches the effort chart (Sol medium, Sol low, Terra low), both model IDs accepted by the Codex CLI | Pass (unit test; `codex exec` with each model) |

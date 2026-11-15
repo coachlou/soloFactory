@@ -17,7 +17,7 @@ import {
   validateInterviewResult,
   validateMessages,
 } from "./interview.mjs";
-import { claudeMaxTurns, createProvider, detectProviderDiagnostics, discoverProviders } from "./providers.mjs";
+import { checkModels, claudeMaxTurns, createProvider, detectProviderDiagnostics, discoverProviders } from "./providers.mjs";
 import { createFixtureProvider } from "./fixture-provider.mjs";
 import { createUpdateChecker } from "./update-check.mjs";
 import { REPORTABLE_STATES, buildDiagnostics, issuesConfig, renderReport, scrub, validateFeedback } from "./feedback.mjs";
@@ -34,6 +34,8 @@ export async function createSoloFactoryServer(options = {}) {
   // .solofactory/; the distro points SOLOFACTORY_ROOT at the ambient folder.
   const root = path.resolve(options.root ?? process.env.SOLOFACTORY_ROOT ?? home);
   const activeFile = path.join(home, "active-project");
+  // Custom profiles (named model and effort choices per stage). The two built-ins are computed, never stored.
+  const profilesFile = path.join(home, "profiles.json");
   const { version } = JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8"));
   // One JSONL line per operational error, from the server, the browser, and chat agents, for later analysis.
   // ponytail: append-only, no rotation; add a size cap if a real install ever grows it past a few MB.
@@ -95,11 +97,11 @@ export async function createSoloFactoryServer(options = {}) {
   const autoStartRepairs = options.autoStartRepairs ?? true;
   watchConfig(); // fails fast on an invalid progress window or loop threshold
   claudeMaxTurns(); // and on an invalid per-turn step limit
-  const providerFactory = options.providerFactory ?? ((id) => {
+  const providerFactory = options.providerFactory ?? ((id, models) => {
     if (id === "fixture" && fixtureMode) return createFixtureProvider();
     // Runs made with SOLOFACTORY_DEMO=1 persist in the project; outside demo mode they can't run.
     if (id === "fixture") throw new Error("This run was made in demo mode. Start SoloFactory with SOLOFACTORY_DEMO=1 to resume it, or Dismiss it.");
-    return createProvider(id);
+    return createProvider(id, models);
   });
   const factories = new Map();
   let closing = false;
@@ -124,7 +126,7 @@ export async function createSoloFactoryServer(options = {}) {
       const projectStore = storeFor(entry.projectId);
       await projectStore.init();
       const job = await projectStore.read(entry.jobId);
-      const factory = new SoloFactory({ store: projectStore, provider: providerFactory(job.provider), maxRepairs, autoStartRepairs });
+      const factory = new SoloFactory({ store: projectStore, provider: providerFactory(job.provider, job.models), maxRepairs, autoStartRepairs });
       factories.set(job.id, factory);
       const run = { jobId: job.id, factory };
       runs.set(entry.projectId, run);
@@ -316,10 +318,18 @@ export async function createSoloFactoryServer(options = {}) {
           fixtureMode,
           version,
           issues: issues ? { base: issues.base, available: true } : null,
+          profiles: { builtins: builtinProfiles(), custom: await readProfiles(profilesFile) },
           sdlcOptions: [
             { id: "slices", label: "Planned features", detail: "A reviewed feature plan first, then each feature is built, proved and reviewed before the next starts." },
           ],
         });
+      }
+      if (request.method === "PUT" && url.pathname === "/api/profiles") {
+        const body = await readJson(request);
+        const custom = validateProfiles(body.custom);
+        await mkdir(home, { recursive: true });
+        await writeFile(profilesFile, JSON.stringify({ custom }, null, 2));
+        return json(response, 200, { custom });
       }
       if (request.method === "POST" && url.pathname === "/api/interview/upload") {
         // Images cannot ride inline in the transcript, so they land in the active
@@ -356,7 +366,7 @@ export async function createSoloFactoryServer(options = {}) {
             planFile: current.recoveryPhase.planFile ?? null, features: current.recoveryPhase.plan?.slices.length ?? 0, gaps: current.recoveryPhase.request?.checks ?? [], planBlockers: current.recoveryPhase.planBlockers ?? [], remainingRepairs: Math.max(0, (current.repairBudgetLimit ?? 0) - current.attempt) } : null,
           recoveryPacket: PARKED.has(current.state) ? buildRecoveryPacket(withContinuation({ ...current, recovery: current.recovery ?? buildRecovery(current, active.dir, undefined, { maxRepairs }) }, { maxRepairs })) : null,
         } : { project: active.id, state: "no-runs" };
-        const guide = providerFactory(provider);
+        const guide = providerFactory(provider, inputModels(body.models));
         const result = await runGuideTurn((prompt) => guide.run({
           // The guide runs inside the active project so its transcript is that project's memory
           // and the CLI picks up the project's own CLAUDE.md/.aai.
@@ -453,7 +463,7 @@ export async function createSoloFactoryServer(options = {}) {
           const jobStore = storeOfJob(feedback.jobId);
           const job = await jobStore.read(feedback.jobId);
           if (!REPORTABLE_STATES.includes(job.state)) return json(response, 409, { error: "Diagnostics are only available for failed, interrupted, or cancelled runs.", code: "feedback_not_reportable" });
-          const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider), maxRepairs, autoStartRepairs });
+          const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider, job.models), maxRepairs, autoStartRepairs });
           const { summary } = await factory.telemetry(job.id);
           diagnostics = buildDiagnostics({ job, events: await jobStore.events(job.id, 500), summary, version });
         }
@@ -499,7 +509,8 @@ export async function createSoloFactoryServer(options = {}) {
           }
           blocker = holder && (await store.read(holder));
         }
-        const job = await store.create({ brief: validated.brief, transcript: body.transcript, provider, sdlc, notices, featureReview });
+        const models = inputModels(body.models);
+        const job = await store.create({ brief: validated.brief, transcript: body.transcript, provider, models, sdlc, notices, featureReview });
         if (blocker) await supersede(blocker, store);
         await enqueue(active.id, job.id, "start", { front: Boolean(blocker) });
         await rm(draftFile(active.dir), { force: true });
@@ -521,7 +532,7 @@ export async function createSoloFactoryServer(options = {}) {
       if (request.method === "GET" && telemetryMatch) {
         const jobStore = storeOfJob(telemetryMatch[1]);
         const job = await jobStore.read(telemetryMatch[1]);
-        const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider), maxRepairs, autoStartRepairs });
+        const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider, job.models), maxRepairs, autoStartRepairs });
         return json(response, 200, await factory.telemetry(job.id));
       }
       const artifactMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/artifacts\/([a-z]+)$/);
@@ -685,7 +696,7 @@ export async function createSoloFactoryServer(options = {}) {
         const jobStore = storeFor(projectId);
         const job = await jobStore.read(waiveMatch[1]);
         const { proof, reason } = await readJson(request);
-        const factory = new SoloFactory({ store: jobStore, provider: providerFactory(job.provider), maxRepairs, autoStartRepairs });
+        const factory = new SoloFactory({ store: jobStore, provider: providerFactory(job.provider, job.models), maxRepairs, autoStartRepairs });
         try { return json(response, 200, { job: await factory.waiveProof(job.id, String(proof ?? ""), String(reason ?? "")) }); }
         catch (error) { return json(response, 409, { error: error.message, code: error.code }); }
       }
@@ -719,7 +730,7 @@ export async function createSoloFactoryServer(options = {}) {
       if (request.method === "POST" && relaunchMatch) {
         const jobStore = storeOfJob(relaunchMatch[1]);
         const job = await jobStore.read(relaunchMatch[1]);
-        const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider), maxRepairs, autoStartRepairs });
+        const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider, job.models), maxRepairs, autoStartRepairs });
         factories.set(job.id, factory); // keeps the relaunched child reachable for shutdown
         try {
           return json(response, 200, { job: await factory.relaunch(job.id) });
@@ -732,7 +743,7 @@ export async function createSoloFactoryServer(options = {}) {
       if (request.method === "POST" && stopAppMatch) {
         const jobStore = storeOfJob(stopAppMatch[1]);
         const job = await jobStore.read(stopAppMatch[1]);
-        const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider), maxRepairs, autoStartRepairs });
+        const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider, job.models), maxRepairs, autoStartRepairs });
         try {
           return json(response, 200, { job: await factory.stopDeployment(job.id) });
         } catch (error) {
@@ -786,7 +797,7 @@ export async function createSoloFactoryServer(options = {}) {
         const jobStore = storeFor(projectId);
         const original = await jobStore.read(retryMatch[1]);
         if (runs.get(projectId)?.jobId === original.id) return json(response, 409, { error: "That run is still active." });
-        const job = await jobStore.create({ brief: original.brief, transcript: original.transcript, provider: original.provider, notices: briefNotices(original.brief), featureReview: original.featureReview ?? featureReview });
+        const job = await jobStore.create({ brief: original.brief, transcript: original.transcript, provider: original.provider, models: original.models ?? null, notices: briefNotices(original.brief), featureReview: original.featureReview ?? featureReview });
         // Starting over replaces the original, so it no longer holds the queue, and the new run goes first.
         await supersede(original, jobStore);
         await enqueue(projectId, job.id, "start", { front: true });
@@ -796,7 +807,7 @@ export async function createSoloFactoryServer(options = {}) {
       if (request.method === "GET") return serveStatic(response, url.pathname);
       return json(response, 404, { error: "Not found" });
     } catch (error) {
-      const status = error.code === "ENOENT" ? 404 : /invalid|must|unknown|coverage|transcript|message/i.test(error.message) ? 400 : 500;
+      const status = error.status ?? (error.code === "ENOENT" ? 404 : null) ?? (/invalid|must|unknown|coverage|transcript|message/i.test(error.message) ? 400 : 500);
       await logError({ source: "server", status, request: `${request.method} ${request.url.split("?")[0]}`, code: error.code, message: error.message });
       return json(response, status, { error: error.message, code: error.code ?? "request_failed" });
     }
@@ -880,6 +891,55 @@ async function ensureRecovery(job, store) {
       : "Recovery prepared from preserved run evidence",
   });
   return job;
+}
+
+// The built-in profiles. Claude sends no models, so its runs use the env and built-in stage choices exactly as
+// before profiles existed; its shown values are those choices. Codex names a model per stage.
+export function builtinProfiles(env = process.env) {
+  const codexModel = (fallback) => env.SOLOFACTORY_CODEX_MODEL || fallback;
+  // Matched to the Claude tiers on the effort chart: Sol medium ~ Opus medium, Sol low ~ Opus low, Terra low ~ Sonnet medium.
+  const codexEffort = (fallback) => env.SOLOFACTORY_CODEX_REASONING_EFFORT || fallback;
+  return [
+    { name: "Claude", provider: "claude", builtin: true, models: null, shown: {
+      guide: { model: env.SOLOFACTORY_CLAUDE_GUIDE_MODEL || "opus", effort: env.SOLOFACTORY_CLAUDE_GUIDE_EFFORT || "medium" },
+      plan: { model: env.SOLOFACTORY_CLAUDE_REASONING_MODEL || "opus", effort: env.SOLOFACTORY_CLAUDE_REASONING_EFFORT || "low" },
+      code: { model: env.SOLOFACTORY_CLAUDE_MODEL || "sonnet", effort: env.SOLOFACTORY_CLAUDE_EFFORT || "medium" },
+      advisor: (env.SOLOFACTORY_CLAUDE_GUIDE_ADVISOR ?? "opus") !== "",
+    } },
+    { name: "Codex", provider: "codex", builtin: true, models: {
+      guide: { model: codexModel("gpt-6.1-sol"), effort: codexEffort("medium") },
+      plan: { model: codexModel("gpt-6.1-sol"), effort: codexEffort("low") },
+      code: { model: codexModel("gpt-6.1-terra"), effort: codexEffort("low") },
+    } },
+  ];
+}
+
+function inputModels(models) {
+  try { return checkModels(models); } catch (error) { throw Object.assign(error, { status: 400 }); }
+}
+
+async function readProfiles(file) {
+  const saved = await readFile(file, "utf8").then(JSON.parse).catch(() => null);
+  try { return validateProfiles(saved?.custom ?? []); } catch { return []; }
+}
+
+// Custom profiles from the hub: a name, a provider and a model and effort per stage. Built-in names are refused.
+export function validateProfiles(list) {
+  if (!Array.isArray(list) || list.length > 50) throw Object.assign(new Error("custom must be a list of at most 50 profiles."), { status: 400 });
+  const builtins = new Set(["claude", "codex"]);
+  const seen = new Set();
+  return list.map((item) => {
+    const name = String(item?.name ?? "").trim();
+    if (!name || name.length > 40) throw Object.assign(new Error("A profile needs a name of at most 40 characters."), { status: 400 });
+    if (builtins.has(name.toLowerCase())) throw Object.assign(new Error(`${name} is a built-in profile and cannot be saved over or deleted.`), { status: 400 });
+    if (seen.has(name.toLowerCase())) throw Object.assign(new Error(`Two profiles are named ${name}.`), { status: 400 });
+    seen.add(name.toLowerCase());
+    if (!["claude", "codex"].includes(item.provider)) throw Object.assign(new Error("A profile's provider must be claude or codex."), { status: 400 });
+    let models;
+    try { models = checkModels(item.models); } catch (error) { throw Object.assign(error, { status: 400 }); }
+    if (!models) throw Object.assign(new Error("A custom profile must name its models."), { status: 400 });
+    return { name, provider: item.provider, models };
+  });
 }
 
 function requireProvider(id, fixtureMode) {

@@ -1128,7 +1128,7 @@ test("Send runs one final review at a time and does not review an unchanged read
   const api = async (url) => { posted.push(url); return {}; };
   const Hub = new Function("state", "api", "briefChanged", `return class { ${methods} }`)(state, api, (a, b) => JSON.stringify(a) !== JSON.stringify(b));
   const hub = Object.assign(new Hub(), {
-    showInfo: (title) => infos.push(title), setState() {}, loadDraft: async () => {}, refresh: async () => {},
+    showInfo: (title) => infos.push(title), setState() {}, loadDraft: async () => {}, refresh: async () => {}, ai: () => ({ provider: "fixture", models: null }),
     // The review rewrites the brief and comes back ready, but only once the test lets it finish.
     turn: () => { reviews += 1; return new Promise((done) => { release = () => { state.guide = { status: "ready", brief: { promise: "b" } }; done(); }; }); },
   });

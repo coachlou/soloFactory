@@ -20,3 +20,5 @@ a{color:var(--fg)}a:hover{color:var(--fg-strong)}
 
 .split{background:transparent}.split:hover,.split:focus-visible{background:var(--line2);outline:none}
 @media (max-width: 900px){.split{display:none}}
+
+button:disabled{opacity:.45;cursor:default}

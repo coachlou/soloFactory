@@ -1097,6 +1097,26 @@ const count = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.
 const repairUsage = (job) => { const phase = job.recoveryPhase, start = phase?.cursor?.attemptBefore; if (phase?.totalRepairLimit === undefined || start === undefined || job.repairBudgetLimit == null) return null; const perFeature = job.repairBudgetLimit - start, planCap = perFeature * (phase.plan.slices.length + 1); return { feature: [job.attempt - start, perFeature], plan: [Math.max(0, planCap - (phase.totalRepairLimit - job.attempt)), planCap] }; };
 const lastActivityAge = (job, events) => { const at = Math.max(Date.parse(job.supervision?.lastActivityAt) || 0, Date.parse(events.at(-1)?.at) || 0); return at ? Date.now() - at : null; };
 // Uploads each chosen file in turn and stops at the first refusal. Files are read before any await.
+// ---- Profiles: a name, a provider and a model and effort for the Guide, planning and review, and coding.
+// The built-ins (Claude, Codex) come from the server and are never changed or deleted. Editing a row makes an
+// unsaved copy, which is saved as a new custom profile or into an existing custom one before it is used.
+const PROFILE_TIERS = [["guide", "Guide"], ["plan", "Planning and review"], ["code", "Coding"]];
+const PROFILE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+// The rows a profile shows. The built-in Claude profile sends no models (the factory keeps its own defaults), so it shows those.
+const profileRows = (p) => JSON.parse(JSON.stringify(p.models ?? p.shown ?? {}));
+function profileNameError(name, all) {
+  const n = name.trim();
+  if (!n) return "Name the new profile first.";
+  if (n.length > 40) return "Keep the name to 40 characters or fewer.";
+  if (all.some((p) => p.name.toLowerCase() === n.toLowerCase())) return "A profile named " + n + " already exists. Pick another name, or save into a custom profile below.";
+  return "";
+}
+// The custom list after saving the edited copy under name: replaces a custom profile of that name, or adds a new one.
+function profileSaveList(custom, edit, name) {
+  const entry = { name, provider: edit.provider, models: edit.models };
+  return custom.some((c) => c.name === name) ? custom.map((c) => (c.name === name ? entry : c)) : [...custom, entry];
+}
+
 function pickFiles(accept, multiple, onFiles) {
   const input = document.createElement("input");
   input.type = "file"; input.accept = accept; input.multiple = multiple;
@@ -1110,12 +1130,90 @@ class Live extends Component {
     this.state = { ...this.state, runs: [], threads: { "": [] }, pid: "", nextId: 1, busy: false };
     try { this.state.themeMode = localStorage.getItem("solofactory.theme") || "auto"; } catch {}
     try { const panes = {}; for (const k of ["nav", "panel"]) { const w = Number(localStorage.getItem(`solofactory.pane.${k}`)); if (w > 0) panes[k] = w; } this.state.panes = panes; } catch {}
+    this.state.profilePick = {}; this.state.profEdit = null;
+    try { this.state.profileDefault = localStorage.getItem("solofactory.profile") || ""; } catch {}
+  }
+
+  // ---- Profiles. The project's pick from the Guide box wins, then the default chosen in Settings, then the built-in Claude.
+  profiles() { const p = state.config?.profiles; return p ? [...p.builtins, ...p.custom] : []; }
+  profileNamed(name) { return this.profiles().find((p) => p.name === name) || null; }
+  profile(pid = this.state.pid) {
+    let pick = this.state.profilePick[pid];
+    if (pick === undefined) { try { pick = localStorage.getItem("solofactory.profile." + pid) || ""; } catch { pick = ""; } }
+    return this.profileNamed(pick) || this.profileNamed(this.state.profileDefault) || this.profiles()[0] || null;
+  }
+  pickProfile(pid, name) {
+    try { if (pid) localStorage.setItem("solofactory.profile." + pid, name); else localStorage.setItem("solofactory.profile", name); } catch {}
+    this.setState(pid ? { profilePick: { ...this.state.profilePick, [pid]: name } } : { profileDefault: name });
+  }
+  // What a Guide turn or a new run uses: the profile's provider and models. Demo mode always uses the fixture provider.
+  ai() {
+    if (state.config?.fixtureMode) return { provider: "fixture", models: null };
+    const p = this.profile();
+    const signed = p && state.config?.providers.find((x) => x.id === p.provider && x.authenticated);
+    if (!signed) throw new Error(p ? "The " + p.name + " profile runs on " + (p.provider === "codex" ? "Codex" : "Claude Code") + ", which is not signed in here. Sign in to it, or pick another profile from the Guide box." : "Sign in to Claude Code or Codex first.");
+    return { provider: p.provider, models: p.models ?? null };
+  }
+  async saveProfiles(custom, pick) {
+    const saved = await api("/api/profiles", { method: "PUT", body: { custom } });
+    state.config.profiles.custom = saved.custom;
+    try { localStorage.setItem("solofactory.profile", pick); } catch {}
+    this.setState({ profEdit: null, profileDefault: pick });
+  }
+  profileSection() {
+    const s = this.state, all = this.profiles(), shown = this.profileNamed(s.profileDefault) || all[0];
+    if (!shown) return { title: "AI and models", fields: [], hasBar: false, hasPrompt: false };
+    const edit = s.profEdit && s.profEdit.base === shown.name ? s.profEdit : null;
+    const rows = edit ? edit.models : profileRows(shown);
+    const change = (tier, key, value) => {
+      const models = JSON.parse(JSON.stringify(rows));
+      if (tier === "advisor") models.advisor = value; else models[tier] = { ...models[tier], [key]: value };
+      this.setState({ profEdit: { base: shown.name, provider: shown.provider, models, name: edit?.name ?? "", error: "" } });
+    };
+    const runsOn = shown.provider === "codex" ? "Codex" : "Claude Code";
+    const field = (o) => ({ envLine: "", envColor: "var(--muted)", locked: false, isSelect: false, isInput: false, isToggle: false, inputType: "text", min: "", max: "", hasUnit: false, unit: "", options: [], on: false, toggleText: "", ...o });
+    const efforts = PROFILE_EFFORTS.map((e) => ({ v: e, label: e[0].toUpperCase() + e.slice(1) }));
+    const fields = [field({
+      id: "cfg-profile", label: "Profile", isSelect: true, value: shown.name,
+      help: "Runs on " + runsOn + ". Used by every project unless you pick another profile for a project from the Guide box." + (shown.builtin ? " Built in: change a row to save your own copy." : ""),
+      options: all.map((p) => ({ v: p.name, label: p.name + (p.builtin ? " (built in)" : " · " + (p.provider === "codex" ? "Codex" : "Claude Code")) })),
+      onChange: (e) => { if (s.profEdit && !confirm("Discard the unsaved changes to " + s.profEdit.base + "?")) return this.setState({}); this.setState({ profEdit: null }); this.pickProfile("", e.target.value); }
+    })];
+    for (const [tier, label] of PROFILE_TIERS) {
+      const v = rows[tier] || { model: "", effort: "medium" };
+      fields.push(shown.provider === "claude"
+        ? field({ id: "cfg-" + tier + "-model", label: label + " model", help: "", isSelect: true, value: v.model, options: ["opus", "sonnet", "haiku"].map((m) => ({ v: m, label: m })), onChange: (e) => change(tier, "model", e.target.value) })
+        : field({ id: "cfg-" + tier + "-model", label: label + " model", help: "", isInput: true, value: v.model, onChange: (e) => change(tier, "model", e.target.value.trim()) }));
+      fields.push(field({ id: "cfg-" + tier + "-effort", label: label + " effort", help: tier === "code" ? "More effort is slower and uses more of your subscription." : "", isSelect: true, value: v.effort, options: efforts, onChange: (e) => change(tier, "effort", e.target.value) }));
+    }
+    if (shown.provider === "claude") fields.push(field({ id: "cfg-advisor", label: "Guide advisor", help: "A second opus opinion on the Guide's answers. Off uses less of your subscription.", isToggle: true, on: rows.advisor !== false, toggleText: rows.advisor !== false ? "On" : "Off", onToggle: (e) => change("advisor", null, !!e.target.checked) }));
+    const fail = (error) => this.setState({ profEdit: { ...this.state.profEdit, error } });
+    const saveAs = (name) => this.saveProfiles(profileSaveList(state.config.profiles.custom, this.state.profEdit, name), name).catch((error) => fail(error.message));
+    const btn = (label, act, off = false) => ({ label, act, off });
+    const bar = [
+      btn("New", () => this.setState({ profEdit: { base: shown.name, provider: shown.provider, models: JSON.parse(JSON.stringify(rows)), name: "", error: "", fresh: true } })),
+      btn("Save", () => (shown.builtin ? fail("Built-in profiles cannot be changed. Name a new profile, or save into a custom one.") : saveAs(shown.name)), !edit),
+      btn("Delete", () => {
+        if (!confirm("Delete the " + shown.name + " profile? Projects using it go back to Claude.")) return;
+        this.saveProfiles(state.config.profiles.custom.filter((c) => c.name !== shown.name), "Claude").catch(showError);
+      }, !!shown.builtin)
+    ];
+    const prompt = edit ? {
+      text: edit.fresh ? "Name the new profile. It starts as a copy of " + shown.name + "; change any row before or after saving." : "You changed " + shown.name + ". Save the change to use it" + (shown.builtin ? ": built-in profiles stay as they are, so save it as a new profile or into a custom one." : "."),
+      name: edit.name, onName: (e) => this.setState({ profEdit: { ...this.state.profEdit, name: e.target.value, error: "" } }),
+      hasError: !!edit.error, error: edit.error,
+      acts: [
+        btn("Save as new profile", () => { const error = profileNameError(edit.name, all); if (error) return fail(error); saveAs(edit.name.trim()); }),
+        ...state.config.profiles.custom.filter((c) => c.provider === shown.provider).map((c) => btn("Save to " + c.name, () => saveAs(c.name))),
+        btn("Discard changes", () => this.setState({ profEdit: null }))
+      ]
+    } : null;
+    return { title: "AI and models", hasNote: false, note: "", fields, hasBar: true, bar, hasPrompt: !!prompt, prompt };
   }
 
   async componentDidMount() {
     try {
       state.config = await api("/api/config");
-      state.provider = state.config.providers.find((provider) => provider.authenticated)?.id ?? null;
       await this.loadDraft();
       await this.refresh();
     } catch (error) { showError(error); }
@@ -1137,7 +1235,7 @@ class Live extends Component {
     const key = pid + "|" + viewer;
     const out = briefEdits(this.docsFor(pid).find((d) => d.name === viewer), this.state.docEdits[key]);
     if (!Object.keys(out).length) return;
-    api("/api/interview/draft", { method: "PATCH", body: { edits: out, provider: state.provider } }).then((saved) => {
+    api("/api/interview/draft", { method: "PATCH", body: { edits: out, provider: state.config?.fixtureMode ? "fixture" : this.profile(pid)?.provider } }).then((saved) => {
       const guide = saved?.draft?.guide ?? saved?.guide;
       if (guide) state.guide = guide;
       // The saved brief now holds the edit; drop the overlay, since section positions shift as the brief fills in.
@@ -1152,7 +1250,6 @@ class Live extends Component {
     state.guide = draft?.guide ?? state.config.opening;
     state.revises = draft?.revises ?? null;
     state.replaces = draft?.replaces ?? null;
-    if (state.config.providers.some((provider) => provider.id === draft?.provider && provider.authenticated)) state.provider = draft.provider;
     this.sync();
   }
 
@@ -1454,11 +1551,11 @@ class Live extends Component {
   moreCtrls(r) { return super.moreCtrls(r).map((c) => this.wire(c, r)); }
 
   async turn(content, review = false) {
-    if (!state.provider) throw new Error("Sign in to Claude Code or Codex first.");
+    const ai = this.ai();
     if (!review) state.messages.push({ role: "user", content });
     this.setState({ busy: true }); this.sync();
     try {
-      const guide = await api("/api/interview/turn", { method: "POST", body: { provider: state.provider, messages: state.messages, ...(review && { review: true }) } });
+      const guide = await api("/api/interview/turn", { method: "POST", body: { ...ai, messages: state.messages, ...(review && { review: true }) } });
       state.guide = guide;
       state.messages.push({ role: "assistant", content: guide.message });
     } catch (error) {
@@ -1505,7 +1602,7 @@ class Live extends Component {
       }
     }
     state.queueAnyway = null;
-    const body = { provider: state.provider, transcript: state.messages, coverage: state.guide.coverage, brief: state.guide.brief, ...(state.revises && { revises: state.revises, replaces: state.replaces }) };
+    const body = { ...this.ai(), transcript: state.messages, coverage: state.guide.coverage, brief: state.guide.brief, ...(state.revises && { revises: state.revises, replaces: state.replaces }) };
     try { await api("/api/jobs", { method: "POST", body }); }
     catch (error) {
       if (error.body?.code !== "revise_blocker_changed") throw error;
@@ -1544,7 +1641,9 @@ class Live extends Component {
       };
     }
     for (const sec of v.cfg.sections) for (const f of sec.fields) { f.locked = true; f.onChange = () => later("Changing settings here"); f.onToggle = f.onChange; }
-    v.cfg.status = "Read only for now";
+    // Only AI and models is live: it is the profile picker. The other sections stay read only for now.
+    v.cfg.sections[0] = this.profileSection();
+    v.cfg.status = this.state.profEdit ? "Unsaved profile changes" : "Profiles and models";
     // The pick card names the draft spec the Guide wrote and opens it in Documents, so it can be read and revised before sending.
     const hasDraft = this.docsFor(this.state.pid).some((d) => d.name === DRAFT_SPEC);
     for (const m of v.messages) {
@@ -1567,14 +1666,16 @@ class Live extends Component {
       if (link.label === "Updates") { link.hasBadge = false; link.badge = ""; }
     }
     v.nav.hint = "";
-    const live = (state.config?.providers || []).filter((provider) => provider.authenticated);
-    const now = live.find((provider) => provider.id === state.provider);
-    v.provider = now?.label || "No AI signed in";
-    v.providerAria = "Builds with " + v.provider + ". Switch the AI.";
+    // The Guide box picks this project's profile, cycling through the profiles whose AI is signed in.
+    const signedIn = new Set((state.config?.providers || []).filter((x) => x.authenticated).map((x) => x.id));
+    const usable = this.profiles().filter((p) => state.config?.fixtureMode || signedIn.has(p.provider));
+    const now = this.profile();
+    v.provider = now?.name || "none";
+    v.providerAria = "Profile " + v.provider + " for this project. Switch the profile.";
     v.toggleProvider = () => {
-      if (live.length < 2) return this.showInfo("Builds with", live.length ? "Only " + v.provider + " is signed in." : "Sign in to Claude Code or Codex first.");
-      state.provider = live[(live.indexOf(now) + 1) % live.length].id;
-      this.setState({});
+      if (!usable.length) return this.showInfo("Profile", "Sign in to Claude Code or Codex first.");
+      if (usable.length < 2 && usable[0] === now) return this.showInfo("Profile", "Only the " + v.provider + " profile can run here. Add profiles in Settings, or sign in to the other AI.");
+      this.pickProfile(this.state.pid, usable[(usable.indexOf(now) + 1) % usable.length].name);
     };
     v.onAttach = () => { const input = document.createElement("input"); input.type = "file"; later("Attaching files"); };
     if (v.app.live) Object.assign(v.app, this.appVals());

@@ -208,7 +208,7 @@
 </div>
 <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; max-width: 720px; width: 100%; margin: 0 auto; font-size: 12px; color: var(--muted)">
 <span>The Guide reads this project's documents first. Do not paste passwords, tokens or private customer data.</span>
-<button onClick="{{toggleProvider}}" aria-label="{{providerAria}}" style="min-height: 32px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 99px; background: transparent; color: var(--text2); font-size: 12px">Builds with {{provider}}</button>
+<button onClick="{{toggleProvider}}" aria-label="{{providerAria}}" style="min-height: 32px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 99px; background: transparent; color: var(--text2); font-size: 12px">Profile: {{provider}}</button>
 </div>
 </div>
 </main>
@@ -579,11 +579,20 @@
 <button onClick="{{cfg.close}}" style="min-height: 40px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">Done</button>
 </div>
 <div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; padding: 20px 24px 28px">
-<p style="margin: 0; font-size: 13px; color: var(--muted)">Saved as you change them, to settings.json in the factory home. A setting your environment already sets is locked here and names the variable. Changes apply from the next run: a run in progress keeps the settings it started with.</p>
+<p style="margin: 0; font-size: 13px; color: var(--muted)">Profiles save to profiles.json in the factory home; other settings are read only for now. A setting your environment already sets is locked here and names the variable. Changes apply from the next run: a run in progress keeps the settings it started with.</p>
 <sc-for list="{{cfg.sections}}" as="sec" hint-placeholder-count="3">
 <section style="display: flex; flex-direction: column; gap: 4px">
 <h3 style="margin: 0 0 6px; font-size: 15px; font-weight: 600">{{sec.title}}</h3>
 <sc-if value="{{sec.hasNote}}" hint-placeholder-val="{{false}}"><p style="margin: 0 0 6px; font-size: 13px; color: var(--amber)">{{sec.note}}</p></sc-if>
+<sc-if value="{{sec.hasBar}}" hint-placeholder-val="{{false}}"><div style="display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 0 6px"><sc-for list="{{sec.bar}}" as="b" hint-placeholder-count="3"><button onClick="{{b.act}}" disabled="{{b.off}}" style="min-height: 36px; padding: 6px 12px; border: 1px solid var(--line2); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">{{b.label}}</button></sc-for></div></sc-if>
+<sc-if value="{{sec.hasPrompt}}" hint-placeholder-val="{{false}}">
+<div role="group" aria-label="Save profile changes" style="display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px; padding: 12px 14px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise)">
+<p style="margin: 0; font-size: 13px">{{sec.prompt.text}}</p>
+<input type="text" value="{{sec.prompt.name}}" onChange="{{sec.prompt.onName}}" aria-label="New profile name" placeholder="New profile name" maxlength="40" autocomplete="off" style="min-height: 40px; padding: 6px 10px; border: 1px solid var(--line2); border-radius: 9px; background: var(--panel); color: var(--fg)">
+<sc-if value="{{sec.prompt.hasError}}" hint-placeholder-val="{{false}}"><p role="alert" style="margin: 0; font-size: 13px; color: var(--red-text)">{{sec.prompt.error}}</p></sc-if>
+<div style="display: flex; flex-wrap: wrap; gap: 8px"><sc-for list="{{sec.prompt.acts}}" as="b" hint-placeholder-count="2"><button onClick="{{b.act}}" style="min-height: 36px; padding: 6px 12px; border: 1px solid var(--line2); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">{{b.label}}</button></sc-for></div>
+</div>
+</sc-if>
 <sc-for list="{{sec.fields}}" as="fd" hint-placeholder-count="3">
 <div style="display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--raise2)">
 <div style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 2px">
