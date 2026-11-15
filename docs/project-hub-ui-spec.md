@@ -229,3 +229,4 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 49 | Areas and reportable states match the server; issue links carry only the title or fingerprint, never the body | Pass (unit test) |
 | 50 | Check for updates shows the result beside the Menu entry | Pass (live on :4381, "Up to date") |
 | 51 | Background-run strip and tab title count | Pass (unit test on the texts; no background run on the preview to show live) |
+| 52 | Picking Codex in Settings shows its rows (Sol medium, Sol low, Terra low, no advisor) and picking Claude restores Claude's; a Guide turn then posts provider codex with those models | Pass after reading the pick before the repaint reset the select (live on :4381; turn body captured with the network call stubbed) |

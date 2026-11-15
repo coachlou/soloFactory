@@ -1097,9 +1097,6 @@ const count = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.
 const repairUsage = (job) => { const phase = job.recoveryPhase, start = phase?.cursor?.attemptBefore; if (phase?.totalRepairLimit === undefined || start === undefined || job.repairBudgetLimit == null) return null; const perFeature = job.repairBudgetLimit - start, planCap = perFeature * (phase.plan.slices.length + 1); return { feature: [job.attempt - start, perFeature], plan: [Math.max(0, planCap - (phase.totalRepairLimit - job.attempt)), planCap] }; };
 const lastActivityAge = (job, events) => { const at = Math.max(Date.parse(job.supervision?.lastActivityAt) || 0, Date.parse(events.at(-1)?.at) || 0); return at ? Date.now() - at : null; };
 // Uploads each chosen file in turn and stops at the first refusal. Files are read before any await.
-// ---- Profiles: a name, a provider and a model and effort for the Guide, planning and review, and coding.
-// The built-ins (Claude, Codex) come from the server and are never changed or deleted. Editing a row makes an
-// unsaved copy, which is saved as a new custom profile or into an existing custom one before it is used.
 // ---- Feedback, run reports and the update notice. The server renders the report (POST /api/feedback/preview);
 // these helpers only shape the form, the links and the banner text. Nothing is sent: the owner emails or files it.
 const FEEDBACK_AREAS = ["interview", "specification", "build", "verification", "recovery", "dashboard", "deployment", "generated app", "other"];
@@ -1121,6 +1118,9 @@ function feedbackLinks(issues, mode, title, fingerprint) {
 function backgroundText(title, jobState, queued) { return `“${title}” is ${jobState} in the background${queued ? ` · ${queued} queued` : ""}.`; }
 function updateLabel(result) { return result?.newer ? "Update available" : result?.disabled ? "Update checks off" : result?.error ? "Couldn't check" : `Up to date (${result?.current ?? "?"})`; }
 
+// ---- Profiles: a name, a provider and a model and effort for the Guide, planning and review, and coding.
+// The built-ins (Claude, Codex) come from the server and are never changed or deleted. Editing a row makes an
+// unsaved copy, which is saved as a new custom profile or into an existing custom one before it is used.
 const PROFILE_TIERS = [["guide", "Guide"], ["plan", "Planning and review"], ["code", "Coding"]];
 const PROFILE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 // The rows a profile shows. The built-in Claude profile sends no models (the factory keeps its own defaults), so it shows those.
@@ -1215,7 +1215,8 @@ class Live extends Component {
       id: "cfg-profile", label: "Profile", isSelect: true, value: shown.name,
       help: "Runs on " + runsOn + ". Used by every project unless you pick another profile for a project from the Guide box." + (shown.builtin ? " Built in: change a row to save your own copy." : ""),
       options: all.map((p) => ({ v: p.name, label: p.name + (p.builtin ? " (built in)" : " · " + (p.provider === "codex" ? "Codex" : "Claude Code")) })),
-      onChange: (e) => { if (s.profEdit && !confirm("Discard the unsaved changes to " + s.profEdit.base + "?")) return this.setState({}); this.setState({ profEdit: null }); this.pickProfile("", e.target.value); }
+      // Read the pick before any setState: a repaint resets the select to the shown profile.
+      onChange: (e) => { const name = e.target.value; if (s.profEdit && !confirm("Discard the unsaved changes to " + s.profEdit.base + "?")) return this.setState({}); this.setState({ profEdit: null }); this.pickProfile("", name); }
     })];
     for (const [tier, label] of PROFILE_TIERS) {
       const v = rows[tier] || { model: "", effort: "medium" };
