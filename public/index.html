@@ -116,6 +116,9 @@
 </div>
 </div>
 </header>
+<sc-if value="{{bg.show}}" hint-placeholder-val="{{false}}">
+<div role="status" style="display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 24px; border-bottom: 1px solid var(--line); background: var(--raise); font-size: 13px; color: var(--text1)"><span>{{bg.text}}</span><button onClick="{{bg.view}}" style="min-height: 36px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px; font-weight: 600">View</button></div>
+</sc-if>
 
 <div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column-reverse; gap: 16px; padding: 22px 24px">
 <sc-for list="{{messages}}" as="m" hint-placeholder-count="3">
@@ -542,7 +545,46 @@
 <div style="display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 520px; padding: 22px 24px; border: 1px solid var(--line2); border-radius: 14px; background: var(--panel)">
 <h2 style="margin: 0; font-size: 18px; font-weight: 600">{{info.title}}</h2>
 <p style="margin: 0; color: var(--text1)">{{info.text}}</p>
+<sc-if value="{{info.hasPre}}" hint-placeholder-val="{{false}}"><pre style="margin: 0; max-height: 240px; overflow: auto; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise); font-size: 12px; white-space: pre-wrap">{{info.pre}}</pre>
+<button onClick="{{info.copy}}" style="align-self: flex-start; min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--fg); font-weight: 600">{{info.copyLabel}}</button></sc-if>
 <button onClick="{{info.close}}" style="align-self: flex-end; min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: var(--inv); color: var(--inv-fg); font-weight: 700">OK</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{fb.open}}" hint-placeholder-val="{{false}}">
+<div role="dialog" aria-modal="true" aria-label="{{fb.title}}" onKeyDown="{{fb.onKey}}" style="position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; padding: 24px; background: var(--scrim)">
+<div style="display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 620px; max-height: 100%; overflow-y: auto; padding: 22px 24px; border: 1px solid var(--line2); border-radius: 14px; background: var(--panel)">
+<h2 style="margin: 0; font-size: 18px; font-weight: 600">{{fb.title}}</h2>
+<div role="radiogroup" aria-label="Kind of feedback" style="display: flex; gap: 8px">
+<sc-for list="{{fb.modes}}" as="m" hint-placeholder-count="2"><button role="radio" aria-checked="{{m.checked}}" onClick="{{m.pick}}" style="flex: 1; display: flex; flex-direction: column; gap: 2px; min-height: 44px; padding: 8px 12px; border: 1px solid {{m.border}}; border-radius: 10px; background: {{m.bg}}; color: var(--fg); text-align: left"><span style="font-weight: 700">{{m.label}}</span><span style="font-size: 12px; color: var(--muted)">{{m.help}}</span></button></sc-for>
+</div>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Title<input value="{{fb.f.title}}" onChange="{{fb.on.title}}" maxlength="120" style="min-height: 44px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise); color: var(--fg); font: inherit"></label>
+<sc-if value="{{fb.problem}}" hint-placeholder-val="{{true}}">
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">What happened<textarea value="{{fb.f.happened}}" onChange="{{fb.on.happened}}" maxlength="4000" rows="3" style="min-height: 44px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise); color: var(--fg); font: inherit; resize: vertical"></textarea></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Expected result<textarea value="{{fb.f.expected}}" onChange="{{fb.on.expected}}" maxlength="4000" rows="3" style="min-height: 44px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise); color: var(--fg); font: inherit; resize: vertical"></textarea></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Additional context (optional)<textarea value="{{fb.f.context}}" onChange="{{fb.on.context}}" maxlength="4000" rows="3" style="min-height: 44px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise); color: var(--fg); font: inherit; resize: vertical"></textarea></label>
+</sc-if>
+<sc-if value="{{fb.improvement}}" hint-placeholder-val="{{false}}">
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Problem or friction<textarea value="{{fb.f.friction}}" onChange="{{fb.on.friction}}" maxlength="4000" rows="3" style="min-height: 44px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise); color: var(--fg); font: inherit; resize: vertical"></textarea></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Desired outcome<textarea value="{{fb.f.outcome}}" onChange="{{fb.on.outcome}}" maxlength="4000" rows="3" style="min-height: 44px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise); color: var(--fg); font: inherit; resize: vertical"></textarea></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Current workaround (optional)<textarea value="{{fb.f.workaround}}" onChange="{{fb.on.workaround}}" maxlength="4000" rows="3" style="min-height: 44px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise); color: var(--fg); font: inherit; resize: vertical"></textarea></label>
+<div style="display: flex; gap: 10px"><label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Frequency<select value="{{fb.f.frequency}}" onChange="{{fb.on.frequency}}" style="min-height: 44px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise); color: var(--fg); font: inherit"><option value="once">Once</option><option value="sometimes">Sometimes</option><option value="often">Often</option></select></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Area<select value="{{fb.f.area}}" onChange="{{fb.on.area}}" style="min-height: 44px; padding: 8px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise); color: var(--fg); font: inherit"><option value="interview">Interview</option><option value="specification">Specification</option><option value="build">Build</option><option value="verification">Verification</option><option value="recovery">Recovery</option><option value="dashboard">Dashboard</option><option value="deployment">Deployment</option><option value="generated app">Generated app</option><option value="other">Other</option></select></label>
+</div>
+</sc-if>
+<sc-if value="{{fb.hasDiag}}" hint-placeholder-val="{{false}}"><label style="display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--text1)"><input type="checkbox" checked="{{fb.diagChecked}}" onChange="{{fb.onDiag}}" style="margin-top: 3px">Include run diagnostics: version, platform, error code, failed stage, gate, counts, and recent lifecycle event types. Never your brief, transcript, agent output, or paths.</label></sc-if>
+<p style="margin: 0; font-size: 12px; color: var(--muted)">{{fb.privacy}}</p>
+<sc-if value="{{fb.hasError}}" hint-placeholder-val="{{false}}"><p role="alert" style="margin: 0; font-size: 13px; color: var(--red-text)">{{fb.error}}</p></sc-if>
+<button onClick="{{fb.onPreview}}" disabled="{{fb.busy}}" style="align-self: flex-start; min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--fg); font-weight: 600">{{fb.previewLabel}}</button>
+<pre id="fb-preview" aria-live="polite" style="margin: 0; max-height: 220px; overflow: auto; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 10px; background: var(--raise); font-size: 12px; white-space: pre-wrap; color: var(--text1)">{{fb.preview}}</pre>
+<sc-if value="{{fb.redacted}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 12px; color: var(--muted)">Some text looked like a path, address or secret and was replaced before the preview.</p></sc-if>
+<div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end">
+<button onClick="{{fb.close}}" style="min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--fg); font-weight: 600">Close</button>
+<sc-if value="{{fb.hasIssues}}" hint-placeholder-val="{{false}}"><button onClick="{{fb.onSearch}}" disabled="{{fb.notReady}}" style="min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--fg); font-weight: 600">Search existing issues</button><button onClick="{{fb.onGithub}}" disabled="{{fb.notReady}}" style="min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--fg); font-weight: 600">Open GitHub issue</button></sc-if>
+<button onClick="{{fb.onCopy}}" disabled="{{fb.notReady}}" style="min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--fg); font-weight: 600">{{fb.copyLabel}}</button>
+<button onClick="{{fb.onEmail}}" disabled="{{fb.notReady}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: var(--inv); color: var(--inv-fg); font-weight: 700">{{fb.emailLabel}}</button>
+</div>
 </div>
 </div>
 </sc-if>

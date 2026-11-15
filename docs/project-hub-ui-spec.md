@@ -32,8 +32,6 @@ into design A's layout one at a time.
 - Guide thread: the earlier-messages pager, design A's pick card sizing alternatives and
   suggestion chips (the demo chips are hidden), and Guide edits to a document outside revise mode.
 - Projects: adopting an existing folder or custom repo at New project; editing settings.
-- Hub chrome: the feedback form, the report-a-run form, update and background-run
-  banners.
 - Manual screenshots of the new layout.
 
 ## Run detail and recovery (added back)
@@ -154,6 +152,26 @@ with an × to remove it. Send works with files and no typed text. In the thread 
 "Attached: name" and an image as a thumbnail; the thumbnail lives only in the open page, as in alpha.2, so after a
 reload the turn shows the image's file name instead.
 
+## Feedback, report and banners
+
+These call the same alpha.2 routes as before (`POST /api/feedback/preview`, `GET /api/update`); only the
+controls moved into design A.
+
+- **Feedback** in the Menu opens an Improvement form; **Report this run** on a stuck, paused or cancelled run
+  opens a Problem form for that run. Both forms switch between Problem and Improvement with the alpha.2 fields.
+  A failed, interrupted or cancelled run offers the diagnostics checkbox (ticked unless cancelled).
+- Preview report asks the server to render the report; missing required fields are named inline first, and
+  any edit clears the preview. Copy report, Copy & open email (to support@coachlou.com, body via the
+  clipboard, never in the link) and, when the repo has issues, Search existing issues and Open GitHub issue
+  stay disabled until there is a preview. Escape closes the form. Nothing is sent by the hub itself.
+- **Update notice.** The Menu entry reads Update available with the version when the server reports a newer
+  release, and opens the update prompt with a Copy button. Otherwise it reads Check for updates and shows the
+  result beside it for four seconds.
+- **Background run.** When the project's building run is not the one shown, a neutral strip under the header
+  says what it is doing and how many runs are queued, with View.
+- **Tab title.** The browser tab reads "(N) needs you · SoloFactory" while N projects have a failed, interrupted
+  or paused last run. The amber header line already flags them in the page, so there is no extra banner.
+
 ## Function checklist (live preview)
 
 Driven on an isolated seed server (:4380, temporary home, projects habit-tracker, recipe-box and notes-app).
@@ -206,3 +224,8 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 44 | Attach adds a chip per file: a document as "name · Nk chars", an image as "name · image" after its upload | Pass (live on :4381) |
 | 45 | The × on a chip removes only that file | Pass (live on :4381) |
 | 46 | A sent turn carries each document inline and each image's upload path; the thread shows the file names | Pass (unit test) |
+| 47 | Feedback opens an Improvement form; missing required fields are named; Preview report renders the server's report and enables Copy | Pass (live on :4381) |
+| 48 | Escape closes the feedback form | Pass (live on :4381) |
+| 49 | Areas and reportable states match the server; issue links carry only the title or fingerprint, never the body | Pass (unit test) |
+| 50 | Check for updates shows the result beside the Menu entry | Pass (live on :4381, "Up to date") |
+| 51 | Background-run strip and tab title count | Pass (unit test on the texts; no background run on the preview to show live) |

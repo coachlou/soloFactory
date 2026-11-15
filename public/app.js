@@ -1042,7 +1042,7 @@ class Component extends DCLogic {
           newProject: () => this.setState({ pmOpen: false, np: { name: '', mode: 'empty', folder: '', where: 'default', repo: '' } })
         };
       })(), np: npv, cfg: cfg,
-      info: s.info ? { open: true, title: s.info.title, text: s.info.text, close: () => this.setState({ info: null }) } : { open: false, title: '', text: '' },
+      info: s.info ? { open: true, title: s.info.title, text: s.info.text, hasPre: !!s.info.pre, pre: s.info.pre || '', copyLabel: s.info.copied ? 'Copied' : 'Copy', copy: () => navigator.clipboard.writeText(s.info.pre).then(() => this.setState((st) => ({ info: st.info && { ...st.info, copied: true } }))).catch(() => this.setState((st) => ({ info: st.info && { ...st.info, text: st.info.text + ' Select the text and press ⌘C / Ctrl+C.' } }))), close: () => this.setState({ info: null }) } : { open: false, title: '', text: '' },
       provider: provider, providerAria: 'Builds with ' + provider + '. Switch the AI for this project.',
       toggleProvider: () => this.setState({ provider: { ...this.state.provider, [this.state.pid]: provider === 'Codex' ? 'Claude Code' : 'Codex' } }),
       onAttach: () => this.showInfo('Attach', 'Drops a spec or notes into the conversation (markdown, text, JSON, YAML, CSV) or lets the Guide look at a mockup or screenshot (png, jpg, gif, webp). Images are saved under the project\'s .factory/uploads/.'),
@@ -1100,6 +1100,27 @@ const lastActivityAge = (job, events) => { const at = Math.max(Date.parse(job.su
 // ---- Profiles: a name, a provider and a model and effort for the Guide, planning and review, and coding.
 // The built-ins (Claude, Codex) come from the server and are never changed or deleted. Editing a row makes an
 // unsaved copy, which is saved as a new custom profile or into an existing custom one before it is used.
+// ---- Feedback, run reports and the update notice. The server renders the report (POST /api/feedback/preview);
+// these helpers only shape the form, the links and the banner text. Nothing is sent: the owner emails or files it.
+const FEEDBACK_AREAS = ["interview", "specification", "build", "verification", "recovery", "dashboard", "deployment", "generated app", "other"];
+const FEEDBACK_KEYS = { problem: ["title", "happened", "expected", "context"], improvement: ["title", "friction", "outcome", "workaround", "frequency", "area"] };
+const FEEDBACK_REQUIRED = { problem: [["title", "Title"], ["happened", "What happened"], ["expected", "Expected result"]], improvement: [["title", "Title"], ["friction", "Problem or friction"], ["outcome", "Desired outcome"]] };
+const FEEDBACK_MAILTO = "mailto:support@coachlou.com?subject=" + encodeURIComponent("SoloFactory Feedback");
+const REPORTABLE = ["failed", "interrupted", "cancelled"];
+function feedbackFields(mode, f) { return Object.fromEntries(FEEDBACK_KEYS[mode].map((k) => [k, String(f[k] ?? "").trim()])); }
+function feedbackMissing(mode, f) { return FEEDBACK_REQUIRED[mode].filter(([k]) => !String(f[k] ?? "").trim()).map(([, label]) => label); }
+// Titles only travel in URLs. The report body goes through the clipboard, never a link.
+function feedbackLinks(issues, mode, title, fingerprint) {
+  if (!issues?.base) return null;
+  const t = String(title ?? "").trim();
+  return {
+    search: `${issues.base}?q=${encodeURIComponent(`is:issue ${fingerprint ?? t.slice(0, 100)}`)}`,
+    github: `${issues.base}/new?template=${mode}.yml&title=${encodeURIComponent(`${mode === "problem" ? "[Problem]" : "[Improvement]"} ${t}`)}`
+  };
+}
+function backgroundText(title, jobState, queued) { return `“${title}” is ${jobState} in the background${queued ? ` · ${queued} queued` : ""}.`; }
+function updateLabel(result) { return result?.newer ? "Update available" : result?.disabled ? "Update checks off" : result?.error ? "Couldn't check" : `Up to date (${result?.current ?? "?"})`; }
+
 const PROFILE_TIERS = [["guide", "Guide"], ["plan", "Planning and review"], ["code", "Coding"]];
 const PROFILE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 // The rows a profile shows. The built-in Claude profile sends no models (the factory keeps its own defaults), so it shows those.
@@ -1233,6 +1254,7 @@ class Live extends Component {
       state.config = await api("/api/config");
       await this.loadDraft();
       await this.refresh();
+      this.checkUpdate();
     } catch (error) { showError(error); }
     this.timer = setInterval(() => { if (!this.polling) this.refresh().catch(() => {}); }, 2000);
   }
@@ -1558,6 +1580,7 @@ class Live extends Component {
       "Resubmit to the factory": () => this.queue().catch(showError),
       "Discard changes": () => this.discardDraft().catch(showError),
       "Copy recovery packet": () => this.copyPacket(r).catch(showError),
+      "Report this run": () => this.openFeedback("problem", r),
       "Start over from scratch": () => this.post(r, "retry"),
       "Dismiss": () => this.post(r, "dismiss"),
     };
@@ -1651,6 +1674,79 @@ class Live extends Component {
     await this.refresh();
   }
 
+  // ---- Feedback form. Feedback opens as an improvement, Report this run as a problem with that run's diagnostics.
+  openFeedback(mode, r = null) {
+    const jobState = r?.job?.state;
+    const diag = REPORTABLE.includes(jobState);
+    this.setState({ navOpen: false, fb: { mode, jobId: r?.jobId ?? null, diag, diagOn: diag && jobState !== "cancelled", f: { frequency: "sometimes", area: "other" }, preview: null, error: "", busy: false, copy: "Copy report", email: "Copy & open email" } });
+  }
+  patchFb(patch) { this.setState((st) => ({ fb: st.fb && { ...st.fb, ...patch } })); }
+  async previewFeedback() {
+    const fb = this.state.fb;
+    const missing = feedbackMissing(fb.mode, fb.f);
+    if (missing.length) return this.patchFb({ error: "Fill in " + missing.join(", ") + "." });
+    this.patchFb({ busy: true, error: "" });
+    try {
+      const body = { mode: fb.mode, fields: feedbackFields(fb.mode, fb.f), jobId: fb.jobId, includeDiagnostics: Boolean(fb.jobId && fb.diag && fb.diagOn) };
+      this.patchFb({ preview: await api("/api/feedback/preview", { method: "POST", body }), busy: false });
+    } catch (error) { this.patchFb({ error: error.message, busy: false }); }
+  }
+  async copyFeedback(key) {
+    const md = this.state.fb?.preview?.markdown;
+    if (!md) return false;
+    try { await navigator.clipboard.writeText(md); this.patchFb({ [key]: key === "email" ? "Copied: paste into the email" : "Copied" }); return true; }
+    catch {
+      // The clipboard needs a secure context; a LAN http:// page selects the preview instead.
+      const pre = document.getElementById("fb-preview");
+      if (pre) window.getSelection().selectAllChildren(pre);
+      this.patchFb({ [key]: "Press ⌘C / Ctrl+C to copy" });
+      return false;
+    }
+  }
+  feedbackVals() {
+    const fb = this.state.fb;
+    if (!fb) return { open: false, f: {}, on: {} };
+    const issues = state.config?.issues;
+    const md = fb.preview?.markdown || "";
+    const links = feedbackLinks(issues, fb.mode, fb.f.title, fb.preview?.fingerprint ?? null);
+    const clear = { preview: null, copy: "Copy report", email: "Copy & open email" };
+    const on = {};
+    for (const k of [...FEEDBACK_KEYS.problem, ...FEEDBACK_KEYS.improvement]) on[k] = (e) => this.patchFb({ f: { ...this.state.fb.f, [k]: e.target.value }, ...clear });
+    const mode = (m, label, help) => ({ label, help, checked: fb.mode === m ? "true" : "false", bg: fb.mode === m ? "var(--raise)" : "transparent", border: fb.mode === m ? "var(--fg)" : "var(--line2)", pick: () => this.patchFb({ mode: m, error: "", ...clear }) });
+    return {
+      open: true, f: fb.f, on, title: fb.jobId ? "Report this run" : "Feedback",
+      modes: [mode("problem", "Problem", "Something broke or went wrong"), mode("improvement", "Improvement", "Something could work better")],
+      problem: fb.mode === "problem", improvement: fb.mode === "improvement",
+      hasDiag: fb.diag, diagChecked: fb.diagOn ? "true" : "false", onDiag: (e) => this.patchFb({ diagOn: e.target.checked, ...clear }),
+      privacy: `Email your report to support@coachlou.com with the subject SoloFactory Feedback. Nothing is sent anywhere until you send the email${issues ? " or open GitHub" : ""} yourself.`,
+      hasError: !!fb.error, error: fb.error,
+      preview: md || "Choose Preview report to see exactly what will be copied.", ready: !!md, notReady: !md, redacted: !!fb.preview?.redacted,
+      previewLabel: fb.busy ? "Previewing…" : "Preview report", busy: fb.busy,
+      onPreview: () => { if (!this.state.fb.busy) this.previewFeedback(); },
+      copyLabel: fb.copy, emailLabel: fb.email,
+      onCopy: () => this.copyFeedback("copy"),
+      onEmail: async () => { if (await this.copyFeedback("email")) window.location.href = FEEDBACK_MAILTO; },
+      hasIssues: !!links,
+      onSearch: () => links && window.open(links.search, "_blank", "noopener"),
+      onGithub: () => links && window.open(links.github, "_blank", "noopener"),
+      close: () => this.setState({ fb: null }),
+      onKey: (e) => { if (e.key === "Escape") { e.preventDefault(); this.setState({ fb: null }); } }
+    };
+  }
+
+  // ---- Update notice. A page load reuses the server's recent answer; a manual check asks again.
+  async checkUpdate(manual = false) {
+    const result = await api(`/api/update${manual ? "?force=1" : ""}`).catch(() => ({ error: true }));
+    if (result.newer) { this.upd = result; if (manual) this.showUpdate(); this.setState({}); return; }
+    if (!manual) return;
+    this.updFlash = updateLabel(result); this.setState({});
+    setTimeout(() => { this.updFlash = ""; this.setState({}); }, 4000);
+  }
+  showUpdate() {
+    const u = this.upd;
+    this.setState({ navOpen: false, info: { title: "Update available", text: `SoloFactory ${u.latest} is available. You have ${u.current}. Paste this into Claude Code or Codex when you are ready. Nothing updates by itself.`, pre: u.prompt || "" } });
+  }
+
   async select(id) {
     await api("/api/projects/select", { method: "POST", body: { id } });
     await this.refresh();
@@ -1698,10 +1794,25 @@ class Live extends Component {
     if (board) v.slots = (board.activeRuns?.length ?? 0) + " of " + board.maxActiveRuns + " build slots in use";
     for (const link of v.railLinks) {
       if (link.label === "Manual") link.act = () => { this.setState({ navOpen: false }); window.open("/manual", "_blank"); };
-      else if (link.label === "Feedback" || link.label === "Updates") link.act = () => { this.setState({ navOpen: false }); later(link.label); };
-      if (link.label === "Updates") { link.hasBadge = false; link.badge = ""; }
+      else if (link.label === "Feedback") link.act = () => this.openFeedback("improvement");
+      else if (link.label === "Updates") {
+        link.label = this.upd ? "Update available" : "Check for updates";
+        link.hasBadge = !!(this.upd || this.updFlash); link.badge = this.upd ? this.upd.latest : this.updFlash || "";
+        link.act = () => (this.upd ? this.showUpdate() : this.checkUpdate(true));
+      }
     }
-    v.nav.hint = "";
+    v.nav.hint = this.upd ? "Update available" : "";
+    v.fb = this.feedbackVals();
+    // A run of this project building while another run is shown: say so, with a way to look at it.
+    const busyId = state.board?.busyJobId;
+    const busyRun = busyId && this.state.runs.find((r) => r.jobId === busyId && r.pid === this.state.pid);
+    const shownId = this.shownRun()?.jobId;
+    v.bg = busyRun && busyRun.jobId !== shownId
+      ? { show: true, text: backgroundText(busyRun.title, busyRun.job?.state || "running", state.jobs.filter((j) => j.state === "queued").length), view: () => this.setState({ selRun: busyRun.id, panel: "run" }) }
+      : { show: false };
+    const waiting = runsNeedingYou(state.projects, null).length;
+    const title = waiting ? `(${waiting}) needs you · SoloFactory` : "SoloFactory";
+    if (document.title !== title) document.title = title;
     // The Guide box picks this project's profile, cycling through the profiles whose AI is signed in.
     const signedIn = new Set((state.config?.providers || []).filter((x) => x.authenticated).map((x) => x.id));
     const usable = this.profiles().filter((p) => state.config?.fixtureMode || signedIn.has(p.provider));
