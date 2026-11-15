@@ -686,7 +686,7 @@ class Component extends DCLogic {
       const run = m.type === 'run' ? s.runs.find((r) => r.id === m.runId) : null;
       const kind = run ? run.kind : m.kind;
       const k = kind ? K[kind] : null;
-      const v = { isUser: m.type === 'user', isGuide: m.type === 'guide', isPick: m.type === 'pick', isRun: m.type === 'run', text: m.text, html: m.type === 'guide' ? md(m.text) : '' };
+      const v = { isUser: m.type === 'user', isGuide: m.type === 'guide', isPick: m.type === 'pick', isRun: m.type === 'run', text: m.type === 'user' ? shownUserText(m.text) : m.text, images: m.images || [], html: m.type === 'guide' ? md(m.text) : '' };
       if (k) { v.kindLabel = k.label; v.chipBg = k.chipBg; v.chipFg = k.chipFg; }
       if (m.type === 'pick') {
         v.read = current.hasDocs ? ['PRD.md', 'FEATURES.md', 'ACCEPTANCE.md'] : ['no documents found'];
@@ -1124,6 +1124,23 @@ function pickFiles(accept, multiple, onFiles) {
   input.click();
 }
 
+// Attachments ride inside the owner's turn, as in alpha.2: the Guide reads a document inline, and an image as a file
+// path under .factory/uploads that it opens before answering.
+const ATTACH_ACCEPT = ".md,.markdown,.txt,.json,.yaml,.yml,.csv,image/png,image/jpeg,image/gif,image/webp";
+const attachLabel = (f) => (f.path ? `${f.name} · image` : `${f.name} · ${Math.ceil(f.text.length / 1000)}k chars`);
+function composeMessage(typed, files) {
+  const parts = typed ? [typed] : [];
+  for (const f of files) {
+    if (f.path) parts.push(`Attached image: ${f.path} (open this file to view it before answering)`);
+    else parts.push(`--- Attached document: ${f.name} ---\n${f.text.trim()}\n--- End of ${f.name} ---`);
+  }
+  return parts.join("\n\n");
+}
+// The thread names an attached document instead of printing all of it; the Guide still gets the whole text.
+const shownUserText = (content) => String(content)
+  .replace(/--- Attached document: (.+?) ---\n[\s\S]*?\n--- End of \1 ---/g, "Attached: $1")
+  .replace(/Attached image: \S*?\/[0-9a-z]+-([^/\s]+) \(open this file to view it before answering\)/g, "Attached image: $1");
+
 class Live extends Component {
   constructor() {
     super();
@@ -1424,7 +1441,7 @@ class Live extends Component {
     }
     const here = threads[state.project] ?? (threads[state.project || ""] = []);
     const talk = state.messages.length ? state.messages : [{ role: "assistant", content: state.guide?.message ?? "" }];
-    for (const m of talk) here.push({ id: id++, type: m.role === "user" ? "user" : "guide", text: m.content });
+    for (const m of talk) here.push({ id: id++, type: m.role === "user" ? "user" : "guide", text: m.content, images: m.images });
     if (this.state.busy) here.push({ id: id++, type: "guide", text: "Thinking…" });
     // A revision draft resubmits from its run, so it is not also a new plan waiting in the chat.
     else if (state.guide?.status === "ready" && !state.revises) here.push({ id: id++, type: "pick", kind: "brief", sent: false, ask: state.guide.brief?.workingName || "The brief" });
@@ -1550,9 +1567,9 @@ class Live extends Component {
   runCtrls(r) { return super.runCtrls(r).filter((c) => !(c.label === "Cancel run" && (r.state === "stuck" || r.state === "paused"))).map((c) => this.wire(c, r)); }
   moreCtrls(r) { return super.moreCtrls(r).map((c) => this.wire(c, r)); }
 
-  async turn(content, review = false) {
+  async turn(content, review = false, images = []) {
     const ai = this.ai();
-    if (!review) state.messages.push({ role: "user", content });
+    if (!review) state.messages.push({ role: "user", content, ...(images.length && { images }) });
     this.setState({ busy: true }); this.sync();
     try {
       const guide = await api("/api/interview/turn", { method: "POST", body: { ...ai, messages: state.messages, ...(review && { review: true }) } });
@@ -1565,11 +1582,30 @@ class Live extends Component {
   }
 
   submit(text) {
-    const t = (text || "").trim();
-    if (!t || this.state.busy) return;
-    this.setState({ draft: "" });
+    const t = (text || "").trim(), files = this.state.attached || [];
+    if ((!t && !files.length) || this.state.busy) return;
+    this.setState({ draft: "", attached: [] });
     const go = this.state.pid && this.state.pid !== state.project ? this.select(this.state.pid) : Promise.resolve();
-    go.then(() => this.turn(t)).catch(showError);
+    go.then(() => this.turn(composeMessage(t, files), false, files.filter((f) => f.url).map((f) => f.url))).catch(showError);
+  }
+
+  // Images upload into the selected project's .factory/uploads, so that project is made active first.
+  attach() {
+    pickFiles(ATTACH_ACCEPT, true, async (files) => {
+      if (this.state.pid && this.state.pid !== state.project) await this.select(this.state.pid);
+      for (const file of files) {
+        try {
+          let entry;
+          if (file.type.startsWith("image/")) {
+            const response = await fetch(`/api/interview/upload?name=${encodeURIComponent(file.name)}`, { method: "POST", body: file });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(body.error || `Upload failed with HTTP ${response.status}.`);
+            entry = { name: file.name, path: body.path, url: URL.createObjectURL(file) };
+          } else entry = { name: file.name, text: await file.text() };
+          this.setState((st) => ({ attached: [...(st.attached || []), entry] }));
+        } catch (error) { showError(new Error(`Could not read ${file.name}: ${error.message}`)); }
+      }
+    });
   }
 
   sendPick() { this.queue().catch(showError); }
@@ -1677,7 +1713,9 @@ class Live extends Component {
       if (usable.length < 2 && usable[0] === now) return this.showInfo("Profile", "Only the " + v.provider + " profile can run here. Add profiles in Settings, or sign in to the other AI.");
       this.pickProfile(this.state.pid, usable[(usable.indexOf(now) + 1) % usable.length].name);
     };
-    v.onAttach = () => { const input = document.createElement("input"); input.type = "file"; later("Attaching files"); };
+    v.onAttach = () => this.attach();
+    v.attachments = (this.state.attached || []).map((f, i) => ({ label: attachLabel(f), aria: `Remove ${f.name}`, remove: () => this.setState((st) => ({ attached: st.attached.filter((_, j) => j !== i) })) }));
+    v.hasAttachments = v.attachments.length > 0;
     if (v.app.live) Object.assign(v.app, this.appVals());
     const draftOpen = v.vw.open && v.vw.name === DRAFT_SPEC;
     const vRun = v.vw.open ? this.state.runs.filter((x) => x.pid === this.state.pid && this.specName(x) === v.vw.name).pop() : null;

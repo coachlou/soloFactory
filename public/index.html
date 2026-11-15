@@ -122,7 +122,10 @@
 <div style="display: flex; flex-direction: column; max-width: 720px; width: 100%; margin: 0 auto">
 
 <sc-if value="{{m.isUser}}" hint-placeholder-val="{{false}}">
-<p style="align-self: flex-end; max-width: 82%; margin: 0; padding: 11px 14px; border-radius: 14px 14px 4px 14px; background: var(--raise2); color: var(--fg)">{{m.text}}</p>
+<p style="align-self: flex-end; max-width: 82%; margin: 0; padding: 11px 14px; border-radius: 14px 14px 4px 14px; background: var(--raise2); color: var(--fg); white-space: pre-wrap">{{m.text}}</p>
+<sc-for list="{{m.images}}" as="src">
+<img src="{{src}}" alt="Attached image" style="align-self: flex-end; max-width: 60%; max-height: 260px; margin-top: 6px; border: 1px solid var(--line); border-radius: 10px">
+</sc-for>
 </sc-if>
 
 <sc-if value="{{m.isGuide}}" hint-placeholder-val="{{true}}">
@@ -200,6 +203,13 @@
 <button onClick="{{s.use}}" style="min-height: 36px; padding: 6px 11px; border: 1px solid var(--line); border-radius: 99px; background: transparent; color: var(--text2); font-size: 12px">{{s.text}}</button>
 </sc-for>
 </div>
+<sc-if value="{{hasAttachments}}">
+<ul aria-label="Files to send" style="display: flex; flex-wrap: wrap; gap: 6px; max-width: 720px; width: 100%; margin: 0 auto; padding: 0; list-style: none">
+<sc-for list="{{attachments}}" as="f">
+<li style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 11px; border: 1px solid var(--line2); border-radius: 99px; background: var(--card); color: var(--text2); font-size: 12px">{{f.label}}<button onClick="{{f.remove}}" aria-label="{{f.aria}}" title="Remove" style="min-width: 28px; min-height: 28px; border: 0; border-radius: 99px; background: transparent; color: var(--muted); font-size: 15px">×</button></li>
+</sc-for>
+</ul>
+</sc-if>
 <div style="display: flex; gap: 8px; align-items: center; max-width: 720px; width: 100%; margin: 0 auto; padding: 6px 6px 6px 14px; border: 1px solid var(--line2); border-radius: 14px; background: var(--card); box-shadow: 0 4px 18px var(--shadow)">
 <button onClick="{{onAttach}}" aria-label="Attach a file" style="flex: none; min-height: 40px; padding: 6px 10px; border: 1px solid var(--line2); border-radius: 9px; background: transparent; color: var(--text2); font-size: 13px">Attach</button>
 <label for="guide-a" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0)">Message the Guide</label>

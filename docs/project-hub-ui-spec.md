@@ -29,7 +29,7 @@ into design A's layout one at a time.
 
 - Run detail: the metro run map; supervision controls; the stage rail.
 - Recovery: the recovery packet is copied to the clipboard; only the plan help packet downloads.
-- Guide thread: the earlier-messages pager, attachments, design A's pick card sizing alternatives and
+- Guide thread: the earlier-messages pager, design A's pick card sizing alternatives and
   suggestion chips (the demo chips are hidden), and Guide edits to a document outside revise mode.
 - Projects: adopting an existing folder or custom repo at New project; editing settings.
 - Hub chrome: the feedback form, the report-a-run form, update and background-run
@@ -143,6 +143,17 @@ A profile names a provider and, for each stage tier (Guide, planning and review,
   signed in. Interview turns and Send to the factory carry that profile's provider and models; the job stores the
   models and the run log records them, so a run keeps the profile it started with.
 
+## Attachments
+
+The Guide box's Attach button opens a file picker, as alpha.2 did. Text documents (Markdown, text, JSON, YAML,
+CSV) are read in the browser and ride inside the owner's turn between `--- Attached document: name ---` and
+`--- End of name ---` lines, so the Guide reads them in full. Images (PNG, JPEG, GIF, WebP) upload to
+`POST /api/interview/upload` under the project's `.factory/uploads/`, and the turn names the saved path for the
+Guide to open. Each waiting file shows as a chip above the composer ("notes.md · 2k chars", "mock.png · image")
+with an × to remove it. Send works with files and no typed text. In the thread a sent document shows as
+"Attached: name" and an image as a thumbnail; the thumbnail lives only in the open page, as in alpha.2, so after a
+reload the turn shows the image's file name instead.
+
 ## Function checklist (live preview)
 
 Driven on an isolated seed server (:4380, temporary home, projects habit-tracker, recipe-box and notes-app).
@@ -192,3 +203,6 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 41 | The Guide box button cycles profiles per project, and a deleted profile falls back to Claude | Pass (live on :4381) |
 | 42 | A job sent with a profile stores its models; a half models body is refused with 400 | Pass (server test) |
 | 43 | Codex built-in matches the effort chart (Sol medium, Sol low, Terra low), both model IDs accepted by the Codex CLI | Pass (unit test; `codex exec` with each model) |
+| 44 | Attach adds a chip per file: a document as "name · Nk chars", an image as "name · image" after its upload | Pass (live on :4381) |
+| 45 | The × on a chip removes only that file | Pass (live on :4381) |
+| 46 | A sent turn carries each document inline and each image's upload path; the thread shows the file names | Pass (unit test) |
