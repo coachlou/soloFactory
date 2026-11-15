@@ -305,6 +305,56 @@
 </sc-for>
 <button onClick="{{run.openSpec}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">Open the spec</button>
 </div>
+<sc-if value="{{run.hasRecov}}" hint-placeholder-val="{{false}}">
+<section aria-label="Recovery" style="display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--raise)">
+<strong style="font-weight: 600; color: var(--fg-strong)">{{run.recov.title}}</strong>
+<sc-if value="{{run.recov.summary}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 13px; color: var(--text1)">{{run.recov.summary}}</p></sc-if>
+<sc-if value="{{run.recov.spend}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 13px; color: var(--text2)">{{run.recov.spend}}</p></sc-if>
+<sc-if value="{{run.recov.prior}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 13px; color: var(--text2)">{{run.recov.prior}}</p></sc-if>
+<sc-for list="{{run.recov.lists}}" as="l">
+<div><span style="font-size: 12px; color: var(--muted)">{{l.title}}</span>
+<ol style="margin: 4px 0 0; padding-left: 20px; max-height: 160px; overflow: auto; font-size: 13px; color: var(--text1)"><sc-for list="{{l.rows}}" as="row"><li>{{row}}</li></sc-for></ol></div>
+</sc-for>
+<sc-if value="{{run.recov.amend}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line)">
+<p style="margin: 0; font-size: 13px; color: var(--text1)">{{run.recov.amend.note}}</p>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<a href="{{run.recov.amend.packet}}" download style="display: inline-flex; align-items: center; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line3); border-radius: 9px; color: var(--fg); font-size: 13px; text-decoration: none">{{run.recov.amend.packetLabel}}</a>
+<button onClick="{{run.recov.amend.choose}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid var(--line3); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">Choose corrected plan</button>
+<button onClick="{{run.recov.amend.submit}}" disabled="{{run.recov.amend.off}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid var(--inv); border-radius: 9px; background: var(--inv); color: var(--inv-fg); font-size: 13px; font-weight: 600; opacity: {{run.recov.amend.opacity}}">Review this plan</button>
+</div>
+<span role="status" style="font-size: 12px; color: {{run.recov.amend.statusColor}}">{{run.recov.amend.status}}</span>
+<sc-if value="{{run.recov.amend.altReason}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 12px; color: var(--muted)">{{run.recov.amend.altReason}}</p></sc-if>
+</div>
+</sc-if>
+<sc-if value="{{run.recov.hasNote}}" hint-placeholder-val="{{false}}">
+<label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted)">Note for the repair planner, or the reason for a waiver
+<textarea value="{{run.recov.note}}" onChange="{{run.recov.onNote}}" maxlength="6000" rows="3" style="padding: 8px 10px; border: 1px solid var(--line2); border-radius: 9px; background: var(--panel); color: var(--fg); font: inherit; font-size: 13px; resize: vertical"></textarea></label>
+</sc-if>
+<sc-for list="{{run.recov.waives}}" as="w">
+<div style="display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line)">
+<p style="margin: 0; font-size: 13px; color: var(--text1)">{{w.reason}}</p>
+<sc-if value="{{w.hasNote}}" hint-placeholder-val="{{false}}">
+<button onClick="{{w.toggle}}" aria-expanded="{{w.expanded}}" style="align-self: flex-start; min-height: 32px; padding: 4px 0; border: 0; background: transparent; color: var(--text2); font-size: 12px; text-decoration: underline">{{w.toggleLabel}}</button>
+<sc-if value="{{w.open}}" hint-placeholder-val="{{false}}"><p style="margin: 0; padding: 8px 10px; border-left: 2px solid var(--line3); font-size: 12px; color: var(--text2); white-space: pre-wrap">Last repair turn said: {{w.note}}</p></sc-if>
+</sc-if>
+<button onClick="{{w.act}}" style="align-self: flex-start; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line3); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">{{w.label}}</button>
+</div>
+</sc-for>
+<sc-if value="{{run.recov.hasActs}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<sc-for list="{{run.recov.acts}}" as="a">
+<button onClick="{{a.act}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid {{a.border}}; border-radius: 9px; background: {{a.bg}}; color: {{a.fg}}; font-size: 13px; font-weight: 600">{{a.label}}</button>
+</sc-for>
+<sc-if value="{{run.recov.canInput}}" hint-placeholder-val="{{false}}">
+<button onClick="{{run.recov.addInput}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid var(--line3); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">Add a spec or prototype file</button>
+</sc-if>
+</div>
+</sc-if>
+<sc-if value="{{run.recov.allowance}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 12px; color: var(--muted)">{{run.recov.allowance}}</p></sc-if>
+<sc-if value="{{run.recov.usage}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 12px; color: var(--muted)">{{run.recov.usage}}</p></sc-if>
+</section>
+</sc-if>
 <ol style="display: flex; flex-direction: column; gap: 0; margin: 6px 0 0; padding: 0; list-style: none">
 <sc-for list="{{run.stops}}" as="s" hint-placeholder-count="5">
 <li style="display: flex; gap: 12px; align-items: center; min-height: 46px; border-bottom: 1px solid var(--raise2)">
@@ -318,6 +368,27 @@
 </sc-for>
 </ol>
 <p style="margin: 6px 0 0; font-size: 13px; color: var(--muted)">{{run.note}}</p>
+<sc-if value="{{run.hasQa}}" hint-placeholder-val="{{false}}">
+<dl style="display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 10px 0 0; font-size: 13px">
+<sc-for list="{{run.qa}}" as="q"><dt style="color: var(--muted)">{{q.q}}</dt><dd style="margin: 0; color: {{q.color}}">{{q.a}}</dd></sc-for>
+</dl>
+</sc-if>
+<sc-if value="{{run.hasStream}}" hint-placeholder-val="{{false}}">
+<section aria-label="Activity" style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px">
+<div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+<strong style="font-weight: 600; color: var(--fg-strong); margin-right: 4px">Activity</strong>
+<sc-for list="{{run.chips}}" as="ch">
+<button onClick="{{ch.pick}}" aria-pressed="{{ch.pressed}}" style="height: 30px; padding: 0 12px; border: 1px solid {{ch.border}}; border-radius: 99px; background: {{ch.bg}}; color: {{ch.fg}}; font-size: 12px">{{ch.label}}</button>
+</sc-for>
+</div>
+<sc-if value="{{run.streamEmpty}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 12px; color: var(--muted)">Nothing yet.</p></sc-if>
+<ol style="margin: 0; padding: 6px 10px; list-style: none; max-height: 280px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); font-size: 12px">
+<sc-for list="{{run.stream}}" as="e">
+<li style="display: flex; gap: 10px; padding: 3px 0"><span style="flex: none; color: var(--muted); font-variant-numeric: tabular-nums">{{e.time}}</span><span style="flex: none; width: 42px; color: var(--muted)">{{e.kind}}</span><span style="color: {{e.color}}; overflow-wrap: anywhere">{{e.text}}</span></li>
+</sc-for>
+</ol>
+</section>
+</sc-if>
 <sc-if value="{{hasQueue}}" hint-placeholder-val="{{false}}">
 <p style="margin: 4px 0 0; font-size: 13px; color: var(--text2)">{{queueTitle}}. {{queueNote}} Reorder them under Queued in the left rail.</p>
 </sc-if>

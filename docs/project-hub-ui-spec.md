@@ -27,10 +27,8 @@ column with Resubmit to the factory and Discard changes, exactly as design A sho
 These worked in the earlier hub and are not in design A, so this build drops them. Retrofit them
 into design A's layout one at a time.
 
-- Run detail: the metro run map, live stream, health line and Q&A; supervision controls; the stage
-  rail; restart from a chosen step.
-- Recovery: waiving a proof, extra inputs, uploading a plan amendment, spend figures. The recovery
-  packet is copied to the clipboard instead of downloaded as a file.
+- Run detail: the metro run map; supervision controls; the stage rail; restart from a chosen step.
+- Recovery: the recovery packet is copied to the clipboard; only the plan help packet downloads.
 - Queue: reordering queued runs (no server endpoint yet). Remove from queue and Cancel remain.
 - Guide thread: the earlier-messages pager, attachments, design A's pick card sizing alternatives and
   suggestion chips (the demo chips are hidden), and Guide edits to a document outside revise mode.
@@ -40,6 +38,26 @@ into design A's layout one at a time.
 - Hub chrome: resizable panes, the feedback form, the report-a-run form, update and background-run
   banners.
 - Manual screenshots of the new layout.
+
+## Run detail and recovery (added back)
+
+These came back in design A's own style rather than as the earlier hub's panels.
+
+- **Run Q&A and activity.** The run card in the right panel answers five questions (Moving?, Healthy?,
+  How far?, Needs you?, Safe to resume?) and shows the latest factory events as an Activity list with
+  filter chips (All, Agent, Files, Gates, Stages). It follows the selected run, else the active run, else the
+  newest one, and refreshes with the rest of the page.
+- **Recovery box.** When the factory's next step needs the owner, a Recovery section opens under the
+  run card. It states what happened and what has been spent (workers, tokens, cost, time), then
+  offers only the actions the server's `nextAction` allows:
+  - Waive a proof the owner believes is wrong (needs a reason in the note box).
+  - Approve a ready plan and continue repairs.
+  - Prepare or retry a repair plan, sending the note box as guidance to the planner.
+  - Upload a corrected plan when plan corrections are exhausted: download the plan help packet,
+    choose the JSON plan, then submit it for one review.
+  - Revise inputs and prepare a new plan, or add a spec or prototype file to the run.
+- The Guide's "Let the Guide plan a repair" button uses the same note as guidance. At an exhausted plan
+  it points to the upload instead of posting a plan that would be refused.
 
 ## Function checklist (live preview)
 
@@ -62,3 +80,11 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 13 | Resubmit to the factory queues the revised brief (a second press queues an unconfirmed review as shown) | Pass |
 | 14 | Remove from queue cancels a queued run | Pass |
 | 15 | Cancel run shows only on active runs; parked runs offer repair, revise, start over instead | Pass (matches the earlier hub) |
+| 16 | Run Q&A and Activity list render for a parked run, and the filter chips switch | Pass |
+| 17 | Recovery box shows the summary, spend and the actions `nextAction` allows | Pass |
+| 18 | Waive with an empty note asks for a reason; with a reason it posts `waive-proof` (200) | Pass |
+| 19 | Exhausted plan: blockers listed, help packet link, choosing a JSON plan shows its size and phase | Pass |
+| 20 | Review this plan posts `recovery-review`; the server's refusal shows inline | Pass (a dummy plan was refused with 400 as expected) |
+| 21 | Add a spec or prototype file posts `inputs` (200) | Pass |
+| 22 | Revise inputs posts `recovery-plan` with the note as guidance (202) | Pass (the seed's thin run then parked with the planner's error, shown on the run) |
+| 23 | Approve and continue repairs | Not driven: needs a reviewed plan, which the seed cannot fake |

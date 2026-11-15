@@ -975,6 +975,22 @@ const later = (what) => hub.showInfo(what, "Not wired to the factory yet. It is 
 const JOB_STATE = { specifying: "building", planning: "building", building: "building", verifying: "building", repairing: "building", reviewing: "building", deploying: "building", failed: "stuck", interrupted: "stuck", paused: "paused", completed: "shipped", cancelled: "cancelled", dismissed: "dismissed", queued: "queued" };
 const JOB_IDX = { specifying: 0, planning: 1, building: 2, verifying: 3, repairing: 3, reviewing: 4, deploying: 5, completed: 7 };
 const PLAN_STEPS = ["retry-plan", "amend-plan", "revise-inputs", "prepare-plan", "approve-plan"];
+const PARKED = ["failed", "cancelled", "interrupted", "paused"];
+const QUIET_WARN_MS = 10 * 60_000, QUIET_BAD_MS = 30 * 60_000;
+const TONE = { ok: "var(--text1)", warn: "var(--amber)", bad: "var(--red-text)", muted: "var(--muted)" };
+const BTN = { plain: { bg: "transparent", fg: "var(--fg)", border: "var(--line3)" }, main: { bg: "var(--inv)", fg: "var(--inv-fg)", border: "var(--inv)" } };
+function formatSpan(ms) { const s = Math.max(0, Math.floor(ms / 1000)), m = Math.floor(s / 60), h = Math.floor(m / 60), d = Math.floor(h / 24); const pad = (n) => String(n).padStart(2, "0"); return d ? `${d}d ${h % 24}h` : h ? `${h}h ${pad(m % 60)}m` : m ? `${m}m ${pad(s % 60)}s` : `${s}s`; }
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const count = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
+const repairUsage = (job) => { const phase = job.recoveryPhase, start = phase?.cursor?.attemptBefore; if (phase?.totalRepairLimit === undefined || start === undefined || job.repairBudgetLimit == null) return null; const perFeature = job.repairBudgetLimit - start, planCap = perFeature * (phase.plan.slices.length + 1); return { feature: [job.attempt - start, perFeature], plan: [Math.max(0, planCap - (phase.totalRepairLimit - job.attempt)), planCap] }; };
+const lastActivityAge = (job, events) => { const at = Math.max(Date.parse(job.supervision?.lastActivityAt) || 0, Date.parse(events.at(-1)?.at) || 0); return at ? Date.now() - at : null; };
+// Uploads each chosen file in turn and stops at the first refusal. Files are read before any await.
+function pickFiles(accept, multiple, onFiles) {
+  const input = document.createElement("input");
+  input.type = "file"; input.accept = accept; input.multiple = multiple;
+  input.addEventListener("change", () => { const files = [...input.files]; if (files.length) onFiles(files).catch(showError); });
+  input.click();
+}
 
 class Live extends Component {
   constructor() {
@@ -1031,7 +1047,139 @@ class Live extends Component {
       state.board = projects;
       state.jobs = (await api("/api/jobs")).jobs;
       this.sync();
+      // The shown run's events and spend feed the Q&A, the activity list and the recovery box.
+      const r = this.shownRun();
+      if (r?.jobId) {
+        const [detail, telemetry] = await Promise.all([api(`/api/jobs/${r.jobId}`).catch(() => null), api(`/api/jobs/${r.jobId}/telemetry`).catch(() => null)]);
+        if (detail?.job) { this.det = { jobId: r.jobId, job: detail.job, events: detail.events ?? [], telemetry }; this.setState({}); }
+      }
     } finally { this.polling = false; }
+  }
+
+  // The same run the panel shows (class renderVals): the selected one, else the active one, else the newest.
+  shownRun() {
+    const s = this.state;
+    const mine = s.runs.filter((r) => r.pid === s.pid && r.state !== "dismissed");
+    return s.runs.find((x) => x.id === s.selRun && x.pid === s.pid && x.state !== "dismissed") || this.activeIn(s.runs, s.pid) || mine[mine.length - 1] || null;
+  }
+
+  // Q&A, activity and recovery for the shown run. Fields the template does not find stay hidden.
+  detailVals(r) {
+    const det = this.det?.jobId === r.jobId ? this.det : null;
+    if (!det) return {};
+    const s = this.state, job = det.job, events = det.events, spend = det.telemetry?.spend;
+    const parked = PARKED.includes(job.state), next = job.nextAction, phase = job.recoveryPhase, usage = repairUsage(job);
+    const actionable = next && !["none", "factory-fix"].includes(next.action);
+    const quiet = lastActivityAge(job, events);
+    const recent = events.findLast((entry) => eventKind(entry) !== "stage");
+    const moving = job.state === "completed" ? ["ok", "No; the run is finished."]
+      : job.state === "queued" ? ["muted", "Not yet; it is waiting in the queue."]
+        : parked ? ["bad", `No. ${job.state === "paused" ? "Paused on request." : job.error?.message ?? "The run stopped."}`]
+          : quiet != null && quiet >= QUIET_WARN_MS ? [quiet >= QUIET_BAD_MS ? "bad" : "warn", `Quiet for ${formatSpan(quiet)}. ${job.supervision?.status ?? ""}; the safety cap still bounds this turn.`]
+            : ["ok", recent ? `Yes. Last activity: ${recent.message || recent.type}, ${formatSpan(Date.now() - Date.parse(recent.at))} ago.` : `Yes. ${job.stage ?? job.state}.`];
+    const healthy = [job.supervision?.status === "Progress needs checking" || (usage && usage.feature[0] >= usage.feature[1]) ? "warn" : "ok",
+      usage ? `This feature: ${usage.feature[0]} of ${usage.feature[1]} repairs used. This plan: ${usage.plan[0]} of ${usage.plan[1]} repairs used.` : `Whole run: ${plural(job.attempt ?? 0, "repair")}.`];
+    const steps = this.kinds()[r.kind].steps.length, done = r.state === "shipped" ? steps : Math.min(r.idx, steps);
+    const elapsed = runningMs(Date.parse(job.startedAt || job.createdAt), job.completedAt ? Date.parse(job.completedAt) : Date.now(), job.idleGaps);
+    const far = ["ok", `${done} of ${steps} steps done${phase?.plan ? `; repair plan: ${phase.done.length} of ${phase.plan.slices.length} features verified` : ""}. ${formatSpan(elapsed)} running.`];
+    const needs = parked && actionable ? ["bad", `Yes: ${next.label}${next.reason ? `. ${next.reason}` : ""}`]
+      : phase?.status === "ready" ? ["warn", "Yes: review and approve the repair plan."]
+        : parked ? ["bad", "Yes: the run stopped."] : ["ok", "No."];
+    const advice = parked && (next?.action === "resume" || job.state === "paused") ? spend?.resume : null;
+    const qa = [["Moving?", moving], ["Healthy?", healthy], ["How far?", far], ["Needs you?", needs], ...(advice ? [["Safe to resume?", [advice.tone, advice.text]]] : [])]
+      .map(([q, [tone, a]]) => ({ q, a, color: TONE[tone] || TONE.ok }));
+
+    const filter = s.streamFilter || "all";
+    const stream = streamRows(events, filter, 100).slice(0, 100).map((entry) => ({
+      time: new Date(entry.at).toLocaleTimeString([], { hour12: false }), kind: eventKind(entry),
+      text: String(entry.message || entry.type).slice(0, 300), color: /fail|error/i.test(entry.type) ? "var(--red-text)" : "var(--text2)",
+    }));
+    const chips = [["all", "All"], ["agent", "Agent"], ["file", "Files"], ["gate", "Gates"], ["stage", "Stages"]].map(([k, label]) => ({
+      label, pressed: String(filter === k), pick: () => this.setState({ streamFilter: k }),
+      bg: filter === k ? "var(--inv)" : "transparent", fg: filter === k ? "var(--inv-fg)" : "var(--fg)", border: filter === k ? "var(--inv)" : "var(--line2)",
+    }));
+
+    return { hasQa: job.state !== "queued", qa, hasStream: job.state !== "queued", stream, streamEmpty: !stream.length, chips,
+      hasRecov: parked || Boolean(phase && job.state !== "completed"), recov: parked || phase ? this.recovVals(r, job, spend, next, phase, usage, parked) : null };
+  }
+
+  // Recovery tools, as the old hub's recovery card offered them: spend, planner, plan amendment, waivers, inputs.
+  recovVals(r, job, spend, next, phase, usage, parked) {
+    const s = this.state, notes = s.recovNotes || {}, note = notes[r.jobId] || "";
+    const send = (endpoint, body) => this.post(r, endpoint, body);
+    const acts = [];
+    const planner = (label) => acts.push({ ...BTN.plain, label, act: () => send("recovery-plan", { guidance: note }) });
+    if (phase?.status === "ready") acts.push({ ...BTN.main, label: "Approve and continue repairs", act: () => send("recovery-start", { planDigest: phase.planDigest }) });
+    let amend = null;
+    if (next?.action === "amend-plan" && phase) amend = this.amendVals(r, next, phase, true);
+    else if (next?.action === "retry-plan" || next?.action === "revise-inputs") planner(next.label);
+    else if (next?.action === "prepare-plan" || next?.action === "approve-plan") planner("Prepare repair plan");
+    if (next?.action === "approve-plan" && phase && next.alternatives?.some((item) => item.action === "amend-plan")) amend = this.amendVals(r, next, phase, false);
+    if (amend?.alt) planner(amend.alt.label);
+    const open = s.recovOpen || {};
+    const waives = (next?.alternatives ?? []).filter((item) => item.action === "waive-proof").map((item, i) => ({
+      reason: item.reason, hasNote: Boolean(item.repairerNote), note: item.repairerNote || "", open: Boolean(open[r.jobId + "|" + i]), expanded: String(Boolean(open[r.jobId + "|" + i])),
+      toggleLabel: open[r.jobId + "|" + i] ? "Hide what the last repair turn said" : "Show what the last repair turn said",
+      toggle: () => this.setState({ recovOpen: { ...open, [r.jobId + "|" + i]: !open[r.jobId + "|" + i] } }),
+      label: item.label, act: () => note.trim() ? send("waive-proof", { proof: item.proof, reason: note }) : this.showInfo(item.label, "Write why in the note box first. It is recorded as the reason."),
+    }));
+    const prior = parked ? previousReleaseNote(job) : null;
+    if (prior?.relaunch) acts.push({ ...BTN.plain, label: prior.label, act: () => api(`/api/jobs/${r.jobId}/dismiss`, { method: "POST", body: {} }).then(() => api(`/api/jobs/${prior.relaunch}/relaunch`, { method: "POST", body: {} })).then(() => this.refresh()).catch(showError) });
+    const lists = [];
+    if (phase?.status === "plan_failed" && phase.planBlockers?.length) lists.push({ title: "Plan review blockers", rows: phase.planBlockers });
+    if (phase?.plan) lists.push({ title: "Repair features", rows: phase.plan.slices.map((slice) => `${phase.done.includes(slice.id) ? "Verified" : phase.current === slice.id ? "Current" : "Pending"}: ${slice.title}`) });
+    const actionable = next && !["none", "factory-fix"].includes(next.action);
+    return {
+      title: job.recovery?.title || (phase?.status === "planning" ? "Preparing repair plan" : "Recovery"),
+      summary: job.recovery?.summary || (phase?.plan ? `${phase.done.length} of ${phase.plan.slices.length} repair features verified.` : ""),
+      spend: spend && parked ? `Spent so far: ${plural(spend.workers, "worker")}, ${count(spend.tokens)} tokens, cost ${spend.costUsd == null ? "unknown" : `$${spend.costUsd.toFixed(2)}`}, ${formatSpan(spend.elapsedMs)} elapsed.${spend.grantTurns == null ? "" : ` Approving grants up to ${plural(spend.grantTurns, "repair turn")}.`}${spend.idleApprovals ? ` Last ${spend.idleApprovals === 1 ? "approval" : `${spend.idleApprovals} approvals`} verified no features.` : ""}` : "",
+      prior: prior?.text || "",
+      allowance: phase?.status === "ready" && phase.plan ? `Repair allowance: up to ${2 * (phase.plan.slices.length + 1)} attempts (2 per feature plus 2 for the full final review).` : "",
+      lists, amend, waives, acts, hasActs: acts.length > 0 || actionable,
+      hasNote: acts.length > 0 || waives.length > 0,
+      note, onNote: (e) => this.setState({ recovNotes: { ...notes, [r.jobId]: e.target.value } }),
+      canInput: Boolean(actionable),
+      // Owner-added specs join the run's inputs; the next plan, review or Resume sees them.
+      addInput: () => pickFiles("", true, async (files) => {
+        for (const chosen of files) {
+          const response = await fetch(`/api/jobs/${r.jobId}/inputs?name=${encodeURIComponent(chosen.name)}`, { method: "POST", body: chosen });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.error || `Upload failed with HTTP ${response.status}.`);
+        }
+        this.showInfo("Added to this run", `${plural(files.length, "file")} added. The next plan, review or Resume reads ${files.length === 1 ? "it" : "them"}.`);
+        await this.refresh();
+      }),
+      usage: usage ? `Repair attempts used: This feature: ${usage.feature[0]} of ${usage.feature[1]} · Plan: ${usage.plan[0]} of ${usage.plan[1]}` : "",
+    };
+  }
+
+  // A corrected repair plan the owner uploads: read and checked here, reviewed once by the server (recovery-review).
+  amendVals(r, next, phase, blocked) {
+    if (!(state.amendment?.jobId === r.jobId && state.amendment.phaseId === phase.id)) state.amendment = null;
+    const pending = state.amendment;
+    return {
+      note: blocked ? `${next.reason} ${phase.corrections ?? 0} automatic correction${phase.corrections === 1 ? "" : "s"} used; no repairs have started.` : next.alternatives.find((item) => item.action === "amend-plan").reason,
+      packet: `/api/jobs/${r.jobId}/recovery-plan-packet`, packetLabel: blocked ? "Download plan help packet" : "Download plan packet for a replacement",
+      status: pending ? pending.error || `${pending.name} (${pending.size.toLocaleString()} bytes) will be reviewed once, for recovery phase ${phase.id}.` : "No file selected.",
+      statusColor: pending?.error ? "var(--red-text)" : "var(--muted)",
+      off: !pending?.plan, opacity: pending?.plan ? "1" : "0.45",
+      alt: blocked && next.alternatives?.[0] ? next.alternatives[0] : null,
+      altReason: blocked ? next.alternatives?.[0]?.reason || "" : "",
+      choose: () => pickFiles(".json,application/json", false, async ([chosen]) => {
+        const entry = state.amendment = { jobId: r.jobId, phaseId: phase.id, name: chosen.name, size: chosen.size, plan: null, error: null };
+        if (chosen.size > MAX_AMENDED_PLAN_BYTES) entry.error = `${chosen.name} is larger than ${MAX_AMENDED_PLAN_BYTES.toLocaleString()} bytes.`;
+        else {
+          try { const plan = JSON.parse(await chosen.text()); if (!plan || typeof plan !== "object" || Array.isArray(plan)) throw new Error("not an object"); entry.plan = plan; }
+          catch { entry.error = `${chosen.name} is not a JSON repair plan.`; }
+        }
+        this.setState({});
+      }),
+      submit: async () => {
+        if (!pending?.plan) return;
+        try { await api(`/api/jobs/${r.jobId}/recovery-review`, { method: "POST", body: { phaseId: pending.phaseId, plan: pending.plan } }); state.amendment = null; await this.refresh(); }
+        catch (error) { pending.error = error.message; this.setState({}); showError(error); }
+      },
+    };
   }
 
   // Rebuilds design A's runs and threads from the factory's jobs and the interview draft.
@@ -1106,10 +1254,11 @@ class Live extends Component {
   // The server's continuation policy decides: nextAction?.action !== "resume" means Resume would not move it.
   resumeOf(r) { return r.job?.nextAction?.action !== "resume" && r.state !== "paused" ? "retry" : "resume"; }
 
-  // Planning steps go to the Guide's repair planner; the recovery-review amendment upload is left out.
+  // Planning steps go to the Guide's repair planner with the owner's note; a blocked plan waits for an upload.
   repairOf(r) {
     const next = r.job?.nextAction;
-    if (next?.action === "retry-plan" || next?.action === "amend-plan" || PLAN_STEPS.includes(next?.action)) return this.post(r, "recovery-plan", { guidance: "" });
+    if (next?.action === "amend-plan") return this.showInfo("Upload a corrected plan", "The planner could not make a plan it trusts. Use the recovery box under the run: download the plan help packet, then upload the corrected plan.");
+    if (next?.action === "retry-plan" || PLAN_STEPS.includes(next?.action)) return this.post(r, "recovery-plan", { guidance: this.state.recovNotes?.[r.jobId] || "" });
     return this.post(r, "retry");
   }
 
@@ -1126,7 +1275,7 @@ class Live extends Component {
     await this.loadDraft();
   }
 
-  // The recovery-plan-packet download is left out; the packet text goes to the clipboard.
+  // The recovery packet goes to the clipboard; the recovery-plan-packet downloads from the recovery box.
   async copyPacket(r) {
     const response = await fetch(`/api/jobs/${r.jobId}/recovery-packet`);
     if (!response.ok) throw new Error(`Recovery packet failed with HTTP ${response.status}.`);
@@ -1275,7 +1424,9 @@ class Live extends Component {
     v.vw.onKey = (e) => { if (e.key === "Enter") { e.preventDefault(); v.vw.send(); } };
     v.suggestions = [];
     if (v.run.stops) for (const stop of v.run.stops) if (stop.state === "Failed twice") stop.state = "Failed";
-    const job = (s.runs.find((r) => r.id === s.selRun && r.pid === s.pid && r.state === "stuck") || s.runs.find((r) => r.pid === s.pid && r.state === "stuck"))?.job;
+    const shownRun = this.shownRun();
+    if (shownRun) Object.assign(v.run, this.detailVals(shownRun));
+    const job = shownRun && this.det?.jobId === shownRun.jobId ? this.det.job : shownRun?.job;
     v.run.stuckText = [job?.error?.message, job?.nextAction?.reason].filter(Boolean).join(" ") || "The factory stopped this run. Nothing was deployed and the last release is still live.";
     if (typeof v.run.note === "string" && v.run.note.startsWith("A parked run")) v.run.note = "A parked run keeps everything that already passed.";
     return v;
