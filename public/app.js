@@ -1,382 +1,133 @@
-const labels = {
-  promise: "Product promise",
-  user: "Primary user",
-  problem: "Triggering problem",
-  workflow: "Core workflow",
-  mustHaves: "Must-haves",
-  nonGoals: "Non-goals",
-  dataAndAccess: "Data & access",
-  integrations: "Integrations",
-  business: "Business model",
-  visual: "Visual direction",
-  deployment: "Deployment",
-  acceptance: "Acceptance proof",
-  constraints: "Constraints",
-};
+// SoloFactory hub, design A. The page is design A's own markup (the template in index.html) and its own
+// component logic, drawn by the small engine below and wired to the factory API by the Live class at the end.
 
-const stageOrder = ["specifying", "building", "verifying", "reviewing", "deploying", "completed"];
-const state = { config: null, provider: null, messages: [], guide: null, revises: null, mode: "view", edited: new Set(), editing: null, job: null, events: [], telemetry: null, poller: null, jobs: [], busyJobId: null, projects: [], project: null, board: null, workMenu: null };
-const $ = (selector) => document.querySelector(selector);
-const NO_PROVIDER = "No subscription is signed in yet. Follow the note under Claude Code above, then reload this page.";
-
-boot().catch(showError);
-
-async function boot() {
-  state.config = await api("/api/config");
-  const first = state.config.providers.find((provider) => provider.authenticated);
-  // No fallback to a signed-out provider: it looked selected but every request failed with its detail.
-  state.provider = first?.id ?? null;
-  state.guide = state.config.opening;
-  state.messages = [{ role: "assistant", content: state.guide.message }];
-  renderProviders();
-  if (!first) showError(new Error(NO_PROVIDER));
-  renderWorkspace();
-  checkUpdate().catch(() => {}); // never holds up the page
-  await refreshProjects();
-  const savedId = localStorage.getItem("solofactory.currentJob");
-  const candidate = state.jobs.find((job) => job.id === savedId)
-    ?? state.jobs.find((job) => PARKED.includes(job.state));
-  if (candidate) await selectRun(candidate.id);
-  else await restoreDraft();
-  // ponytail: /api/projects reads every run's state.json; fine for a handful of projects, paginate if it ever isn't
-  setInterval(() => refreshProjects().catch(() => {}), 5000);
-}
-
-async function refreshProjects() {
-  const [projects, listing, board] = await Promise.all([api("/api/projects"), api("/api/jobs"), api("/api/board")]);
-  state.board = board;
-  state.projects = projects.projects;
-  state.project = projects.active;
-  state.jobs = listing.jobs;
-  state.busyJobId = listing.busyJobId;
-  const active = listing.activeRuns?.length ?? 0;
-  $("#system-status").textContent = active ? `Factory running${active > 1 ? ` (${active})` : ""}` : "Factory ready";
-  renderProjects();
-  renderWork();
-  renderRunCard();
-  renderBackgroundBanner();
-  renderAttention();
-}
-
-// WORK rail: every run in every project from /api/board, grouped by what it needs. Click opens it.
-const PARKED = ["failed", "cancelled", "interrupted", "paused"];
-const WORK_GROUPS = [
-  ["Needs you", (c) => c.parked.filter((card) => card.state !== "cancelled")],
-  ["Running", (c) => [...c.specifying, ...c.building, ...c.reviewing, ...c.deploying]],
-  ["Queued", (c) => c.queued],
-  ["Done", (c) => [...c.completed, ...c.parked.filter((card) => card.state === "cancelled")]],
-];
-
-function renderWork() {
-  const board = state.board;
-  if (!board) return;
-  $("#work-capacity").textContent = `${board.active} of ${board.maxActiveRuns} active`;
-  // Rebuild only when something but the clocks changed, so a click or focus survives the poll;
-  // otherwise just tick the elapsed times. The open row lives in state.workMenu.
-  const key = JSON.stringify([board.columns, state.job?.id, state.workMenu], (k, v) => (k === "elapsedMs" ? undefined : v));
-  if (key === state.workKey) {
-    for (const small of $("#work").querySelectorAll("small[data-job]")) small.textContent = workLine(workCards(board).get(small.dataset.job));
-    return;
+// ---- Template engine: parses the {{path}} / sc-if / sc-for template once, renders it to HTML, morphs the DOM.
+const VOID = new Set(["input", "br", "img", "hr", "meta", "link", "area", "base", "col", "embed", "source", "track", "wbr"]);
+function parseTpl(src) {
+  const root = { kids: [] }, stack = [root];
+  const re = /<\/([a-zA-Z][\w-]*)\s*>|<([a-zA-Z][\w-]*)((?:\s+[^\s=>\/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?)*)\s*(\/?)>|([^<]+|<)/g;
+  let m;
+  while ((m = re.exec(src))) {
+    const top = stack[stack.length - 1];
+    if (m[1]) { const tag = m[1].toLowerCase(); for (let i = stack.length - 1; i > 0; i -= 1) if (stack[i].tag === tag) { stack.length = i; break; } continue; }
+    if (m[5] !== undefined) { top.kids.push({ t: "text", v: m[5] }); continue; }
+    const tag = m[2].toLowerCase(), attrs = [];
+    const ar = /([^\s=\/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
+    let a;
+    while ((a = ar.exec(m[3]))) attrs.push([a[1], a[2] ?? a[3] ?? a[4] ?? null]);
+    const node = { t: "el", tag, attrs, kids: [] };
+    top.kids.push(node);
+    if (!m[4] && !VOID.has(tag)) stack.push(node);
   }
-  state.workKey = key;
-  $("#work").replaceChildren(...WORK_GROUPS.flatMap(([name, pick]) => {
-    const cards = pick(board.columns);
-    if (!cards.length) return [];
-    return [el("section", { className: `work-group${name === "Needs you" ? " needs" : ""}` },
-      el("h3", { textContent: name }, el("span", { textContent: String(cards.length) })),
-      ...cards.map(workItem))];
-  }));
+  return root.kids;
+}
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+function look(sc, path) {
+  const parts = path.split(".");
+  let v = sc[parts[0]];
+  for (let i = 1; i < parts.length; i += 1) v = v == null ? undefined : v[parts[i]];
+  return v;
+}
+const shown = (v) => (v == null || typeof v === "function" || typeof v === "object" ? "" : String(v));
+const fill = (str, sc) => str.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, p) => shown(look(sc, p)));
+const raw = (str, sc) => { const m = /^\{\{\s*([\w.]+)\s*\}\}$/.exec(str ?? ""); return m ? look(sc, m[1]) : str; };
+const attrOf = (node, name) => (node.attrs.find((a) => a[0] === name) || [])[1];
+function draw(nodes, sc, H) {
+  let out = "";
+  for (const n of nodes) {
+    if (n.t === "text") { out += esc(fill(n.v, sc)); continue; }
+    if (n.tag === "sc-if") { if (raw(attrOf(n, "value"), sc)) out += draw(n.kids, sc, H); continue; }
+    if (n.tag === "sc-for") {
+      const as = attrOf(n, "as");
+      for (const item of raw(attrOf(n, "list"), sc) || []) { const inner = Object.create(sc); inner[as] = item; out += draw(n.kids, inner, H); }
+      continue;
+    }
+    const type = String(raw(attrOf(n, "type"), sc) ?? "");
+    let attrs = "";
+    for (const [k, v] of n.attrs) {
+      if (k.startsWith("hint-")) continue;
+      if (/^on[A-Z]/.test(k)) {
+        const fn = raw(v, sc);
+        if (typeof fn !== "function") continue;
+        const evt = k === "onChange" ? (n.tag === "select" || type === "checkbox" ? "change" : "input") : k === "onBlur" ? "focusout" : k.slice(2).toLowerCase();
+        attrs += ` data-on-${evt}="${H.push(fn) - 1}"`;
+        continue;
+      }
+      if (k === "checked" || k === "disabled" || k === "selected") { const val = v === null ? true : raw(v, sc); if (val && val !== "false") attrs += ` ${k}`; continue; }
+      if (k === "value" && (n.tag === "input" || n.tag === "textarea" || n.tag === "select")) { attrs += ` data-v="${esc(fill(v ?? "", sc))}"`; continue; }
+      attrs += v === null ? ` ${k}` : ` ${k}="${esc(fill(v, sc))}"`;
+    }
+    out += `<${n.tag}${attrs}>`;
+    if (!VOID.has(n.tag)) out += `${draw(n.kids, sc, H)}</${n.tag}>`;
+  }
+  return out;
+}
+// Index-wise morph keeps focus, caret and scroll across re-renders.
+function morph(live, next) {
+  const a = live.childNodes, b = Array.from(next.childNodes);
+  b.forEach((n, i) => {
+    const o = a[i];
+    if (!o) return live.appendChild(n);
+    if (o.nodeType !== n.nodeType || o.nodeName !== n.nodeName) return live.replaceChild(n, o);
+    if (o.nodeType !== 1) { if (o.nodeValue !== n.nodeValue) o.nodeValue = n.nodeValue; return; }
+    for (const at of Array.from(o.attributes)) if (!n.hasAttribute(at.name)) o.removeAttribute(at.name);
+    for (const at of Array.from(n.attributes)) if (o.getAttribute(at.name) !== at.value) o.setAttribute(at.name, at.value);
+    morph(o, n);
+  });
+  while (a.length > b.length) live.removeChild(live.lastChild);
 }
 
-function workItem(card) {
-  const open = el("button", { type: "button", className: `work-item${card.jobId === state.job?.id ? " selected" : ""}` },
-    el("strong", { textContent: card.promise || card.jobId }),
-    jobLine(card));
-  if (card.slices) open.append(sliceBar(card));
-  if (card.blockedBy) open.append(el("small", { className: "blocked", textContent: `waiting on recovery of ${card.blockedBy}` }));
-  open.addEventListener("click", () => openFromBoard(card).catch(showError));
-  if (card.state !== "queued") return open;
-  const more = el("button", { type: "button", className: "work-more", textContent: "···", title: "More", ariaExpanded: String(state.workMenu === card.jobId) });
-  more.addEventListener("click", () => { state.workMenu = state.workMenu === card.jobId ? null : card.jobId; renderWork(); });
-  const row = el("div", { className: "work-row" }, open, more);
-  if (state.workMenu !== card.jobId) return row;
-  const remove = el("button", { type: "button", textContent: "Remove from queue" });
-  remove.addEventListener("click", async () => {
+// ---- The DCLogic contract design A's component is written against: state, setState, renderVals, lifecycle.
+class DCLogic {
+  constructor() { this.props = {}; }
+  setState(patch) {
+    const prev = this.state;
+    this.state = { ...prev, ...(typeof patch === "function" ? patch(prev, this.props) : patch) };
+    this.paint();
+    this.componentDidUpdate?.(this.props, prev);
+  }
+  mount(el) {
+    this.el = el;
+    this.tpl = parseTpl(document.getElementById("tpl").textContent);
+    for (const type of ["click", "input", "change", "keydown", "focusout"]) {
+      el.addEventListener(type, (ev) => {
+        const fns = [];
+        for (let node = ev.target; node && node !== el.parentNode; node = node.parentNode) {
+          const i = node.getAttribute?.(`data-on-${type}`);
+          if (i != null) fns.push(this.H[i]);
+        }
+        for (const fn of fns) { if (ev.cancelBubble) break; try { fn(ev); } catch (error) { showError(error); } }
+      });
+    }
+    this.paint();
+    this.componentDidMount?.();
+  }
+  paint() {
+    if (!this.el) return;
+    if (this.painting) { this.again = true; return; }
+    this.painting = true;
     try {
-      await api(`/api/jobs/${card.jobId}/cancel`, { method: "POST" });
-      state.workMenu = null;
-      await refreshProjects();
-    } catch (error) { showError(error); }
-  });
-  return el("div", { className: "work-queued" }, row, el("div", { className: "work-menu" }, remove));
-}
-
-function jobLine(card) {
-  const small = el("small", { textContent: workLine(card) });
-  small.dataset.job = card.jobId;
-  return small;
-}
-
-function workLine(card) {
-  return card ? `${card.project} · ${card.stage || card.state}${card.startedAt ? ` · ${formatDuration(card.elapsedMs)}` : ""}` : "";
-}
-
-function workCards(board) {
-  return new Map(WORK_GROUPS.flatMap(([, pick]) => pick(board.columns)).map((card) => [card.jobId, card]));
-}
-
-function sliceBar(card) {
-  const bar = el("div", { className: "slice-bar" });
-  for (let i = 0; i < card.slices.total; i += 1) {
-    const seg = document.createElement("i");
-    if (i < card.slices.done) seg.classList.add("done");
-    else if (i === card.slices.done && !["completed", ...PARKED].includes(card.state)) seg.classList.add("current");
-    bar.append(seg);
+      do {
+        this.again = false;
+        const H = [], t = document.createElement("template");
+        t.innerHTML = draw(this.tpl, this.renderVals(), H);
+        this.H = H;
+        morph(this.el, t.content);
+        for (const f of this.el.querySelectorAll("[data-v]")) if (f.value !== f.dataset.v) f.value = f.dataset.v;
+        for (const f of this.el.querySelectorAll("input[type=checkbox]")) f.checked = f.hasAttribute("checked");
+      } while (this.again);
+    } finally { this.painting = false; }
   }
-  if (card.slices.repairs && bar.lastChild) bar.children[Math.max(0, card.slices.done - 1)].classList.add("repaired");
-  // Feature status: verified, then the cursor's substage (or blocked when parked), then planned.
-  const status = card.slices.current ? ` · ${card.slices.current} ${PARKED.includes(card.state) ? "blocked" : card.slices.substage ?? "planned"}` : "";
-  bar.title = `${card.slices.done}/${card.slices.total} features verified${status}${card.slices.repairs ? ` · ${card.slices.repairs} repair${card.slices.repairs === 1 ? "" : "s"}` : ""}${card.slices.remainingRepairs != null ? ` · ${card.slices.remainingRepairs} repair${card.slices.remainingRepairs === 1 ? "" : "s"} left` : ""}`;
-  return bar;
 }
 
-// Run mode: the main column shows a summary of the open run; the Run panel holds the full view.
-function renderRunCard() {
-  const job = state.job;
-  if (!job) return;
-  const card = Object.values(state.board?.columns ?? {}).flat().find((entry) => entry.jobId === job.id);
-  const openRun = el("button", { type: "button", className: "button primary small", textContent: "Open the run" });
-  openRun.addEventListener("click", () => setPanel("run"));
-  const fresh = el("button", { type: "button", className: "button ghost small", textContent: "New brief" });
-  fresh.addEventListener("click", showInterview);
-  $("#run-card").replaceChildren(
-    el("p", { className: "eyebrow", textContent: state.projects.find((entry) => entry.id === state.project)?.name ?? "" }),
-    el("h2", { textContent: job.brief?.promise || projectName(job) }),
-    ...(card?.slices ? [sliceBar(card)] : []),
-    el("p", { className: "run-card-state", textContent: $("#run-subtitle").textContent }),
-    el("div", { className: "run-card-actions" }, openRun, fresh));
-}
-
-// The aside shows one panel at a time; an empty name closes it.
-function setPanel(name) {
-  $("#hub").dataset.panel = name;
-  applyPanes();
-  document.querySelectorAll(".tabs [data-panel]").forEach((tab) => tab.setAttribute("aria-pressed", String(tab.dataset.panel === name && name !== "")));
-}
-document.querySelectorAll(".tabs [data-panel]").forEach((tab) => tab.addEventListener("click", () => setPanel(tab.dataset.panel)));
-
-// Resizable panes: drag a divider, or focus it and use the arrow keys; double-click resets. Each layout keeps
-// one pane at a set width and lets the other flex, and the width is remembered per layout in this browser.
-const PANES = { brief: [".hub-aside", "right"], revise: [".hub-main", "right"], run: [".hub-main", "left"] };
-const layoutKey = () => (document.body.classList.contains("revise-mode") ? "revise" : document.body.classList.contains("brief-mode") ? "brief" : "run");
-const savedWidth = (key) => { try { return Number(localStorage.getItem(`solofactory.pane.${key}`)) || null; } catch { return null; } };
-const saveWidth = (key, width) => { try { if (width) localStorage.setItem(`solofactory.pane.${key}`, String(Math.round(width))); else localStorage.removeItem(`solofactory.pane.${key}`); } catch { /* storage blocked: the width lasts until reload */ } };
-const sizePane = (node, width) => Object.assign(node.style, width ? { flex: `0 0 ${width}px`, maxWidth: "none" } : { flex: "", maxWidth: "" });
-function applyPanes() {
-  sizePane($(".hub-nav"), savedWidth("nav"));
-  sizePane($(".hub-main"), null);
-  sizePane($(".hub-aside"), null);
-  const [pane] = PANES[layoutKey()];
-  if ($("#hub").dataset.panel) sizePane($(pane), savedWidth(layoutKey()));
-}
-function splitter(handle, target) {
-  // target() names the pane this divider sizes, the side of the divider it sits on, its storage key and its limits.
-  const resize = (width) => {
-    const { key, min, max } = target();
-    saveWidth(key, Math.max(min, Math.min(max, width)));
-    applyPanes();
-  };
-  const widthAt = (x) => { const { node, side } = target(); const box = node.getBoundingClientRect(); return side === "left" ? x - box.left : box.right - x; };
-  handle.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    handle.setPointerCapture(event.pointerId);
-    document.body.classList.add("resizing");
-  });
-  handle.addEventListener("pointermove", (event) => { if (handle.hasPointerCapture(event.pointerId)) resize(widthAt(event.clientX)); });
-  const stop = () => document.body.classList.remove("resizing");
-  handle.addEventListener("pointerup", stop);
-  handle.addEventListener("pointercancel", stop);
-  handle.addEventListener("dblclick", () => { saveWidth(target().key, null); applyPanes(); });
-  handle.addEventListener("keydown", (event) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    const { node, side } = target();
-    const grow = (event.key === "ArrowRight") === (side === "left");
-    resize(node.getBoundingClientRect().width + (grow ? 24 : -24));
-  });
-}
-splitter($("#split-nav"), () => ({ node: $(".hub-nav"), side: "left", key: "nav", min: 180, max: 480 }));
-splitter($("#split-cols"), () => {
-  const [pane, side] = PANES[layoutKey()];
-  return { node: $(pane), side, key: layoutKey(), min: 280, max: Math.max(280, $(".hub-cols").getBoundingClientRect().width - 320) };
-});
-new MutationObserver(applyPanes).observe(document.body, { attributes: true, attributeFilter: ["class"] });
-applyPanes();
-
-// Theme: Auto follows the system; Light and Dark are remembered in this browser.
-function applyTheme(choice) {
-  if (choice === "light" || choice === "dark") document.documentElement.dataset.theme = choice;
-  else delete document.documentElement.dataset.theme;
-  document.querySelectorAll("[data-theme-choice]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.themeChoice === (choice || "auto"))));
-}
-applyTheme(localStorage.getItem("solofactory.theme"));
-document.querySelectorAll("[data-theme-choice]").forEach((button) => button.addEventListener("click", () => {
-  const choice = button.dataset.themeChoice;
-  if (choice === "auto") localStorage.removeItem("solofactory.theme");
-  else localStorage.setItem("solofactory.theme", choice);
-  applyTheme(choice);
-  $("#theme-menu").hidePopover();
-}));
-
-// Menus open beside the button that opened them (a popover otherwise centres in the window).
-for (const menu of document.querySelectorAll(".menu[popover]")) {
-  menu.addEventListener("toggle", (event) => {
-    if (event.newState !== "open") return;
-    const anchor = document.querySelector(`[popovertarget="${menu.id}"]`).getBoundingClientRect();
-    const width = menu.offsetWidth;
-    menu.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - width - 8))}px`;
-    menu.style.top = anchor.bottom + menu.offsetHeight + 8 > innerHeight
-      ? `${Math.max(8, anchor.top - menu.offsetHeight - 4)}px` : `${anchor.bottom + 4}px`;
-  });
-}
-$("#new-project-button").addEventListener("click", () => { $("#nav-menu").hidePopover(); switchProject("new").catch(showError); });
-
-async function openFromBoard(card) {
-  if (card.projectId !== state.project) {
-    await api("/api/projects/select", { method: "POST", body: { id: card.projectId } });
-    await refreshProjects();
-  }
-  await selectRun(card.jobId);
-}
-
-function projectName(job) {
-  return job?.brief?.workingName || job?.id || "Untitled";
-}
-
-function renderProjects() {
-  const current = state.projects.find((entry) => entry.id === state.project);
-  $("#project-label").textContent = current?.name ?? "Project";
-  $("#brief-project").textContent = current?.name ?? "Project";
-  renderQueueHint();
-  if ($("#project-menu").matches(":popover-open")) return; // never rebuilt under the owner's pointer
-  $("#project-menu").replaceChildren(...state.projects.map((project) => {
-    const last = project.lastRun ? `${project.lastRun.state} · ${project.runCount} run${project.runCount === 1 ? "" : "s"}` : "no runs";
-    const item = el("button", { type: "button", className: project.id === state.project ? "current" : "" },
-      el("strong", { textContent: project.name }),
-      el("small", { textContent: `${project.activeJobId ? "running · " : ""}${last}${project.queued ? ` · ${project.queued} queued` : ""}` }));
-    if (project.id === state.project) item.setAttribute("aria-current", "true");
-    item.addEventListener("click", () => { $("#project-menu").hidePopover(); switchProject(project.id).catch(showError); });
-    return item;
-  }), (() => {
-    const create = el("button", { type: "button", className: "menu-new", textContent: "+ New project" });
-    create.addEventListener("click", () => { $("#project-menu").hidePopover(); switchProject("new").catch(showError); });
-    return create;
-  })());
-}
-
-// Runs in one project share a tree, so they serialize whatever the active-run limit says;
-// say so at the moment a second brief is about to be queued instead of after it waits.
-function renderQueueHint() {
-  const project = state.projects.find((entry) => entry.id === state.project);
-  const parked = Boolean(project?.lastRun && PARKED.includes(project.lastRun.state) && !project.activeJobId);
-  const ahead = (project?.activeJobId ? 1 : 0) + (project?.queued ?? 0) + (parked ? 1 : 0);
-  $("#queue-hint").classList.toggle("hidden", !ahead);
-  if (!ahead) return;
-  const holding = parked
-    ? `a parked run, which holds the queue until you resume, restart, or dismiss it${ahead > 1 ? `, plus ${ahead - 1} queued` : ""}`
-    : `${ahead} run${ahead === 1 ? "" : "s"} ${project.activeJobId ? "active or " : ""}queued`;
-  $("#queue-hint").textContent = `${project.name} already has ${holding}. Runs in one project go one after another, each on the tree the last one leaves, so this brief waits for them whatever the active-run limit is. Independent fixes for the same app are cheaper as one brief with a must-have and an acceptance scenario each.`;
-}
-
-// A parked latest run blocks its project until the owner acts, so it is announced on every screen
-// and in the tab title, whichever run or project is open. Cancelled runs are the owner's own choice.
+// ---- Shared factory state and helpers (kept from the previous hub; tests read some of these lines).
+const state = { job: null, project: null, amendment: null, messages: [], guide: null, revises: null, replaces: null, provider: null, projects: [], jobs: [], board: null, config: null };
+const stageOrder = ["specifying", "building", "verifying", "reviewing", "deploying", "completed"];
 const NEEDS_YOU = ["failed", "interrupted", "paused"];
 function runsNeedingYou(projects, viewingId) {
   return projects.filter((project) => NEEDS_YOU.includes(project.lastRun?.state) && project.lastRun.id !== viewingId)
     .map((project) => ({ projectId: project.id, jobId: project.lastRun.id, name: project.lastRun.workingName || project.name, state: project.lastRun.state }));
 }
-
-function renderAttention() {
-  const waiting = runsNeedingYou(state.projects, state.job?.id);
-  const all = state.projects.filter((project) => NEEDS_YOU.includes(project.lastRun?.state)).length;
-  document.title = all ? `(${all}) needs you · SoloFactory` : "SoloFactory";
-  $("#attention-banner").classList.toggle("hidden", !waiting.length);
-  if (!waiting.length) return;
-  const [first] = waiting;
-  $("#attention-text").textContent = waiting.length > 1 ? `${waiting.length} runs are stopped or paused and need you.`
-    : `“${first.name}” is ${first.state === "paused" ? "paused" : "stopped"} and needs you.`;
-  $("#attention-view-button").onclick = async () => {
-    try {
-      if (first.projectId !== state.project) await switchProject(first.projectId);
-      await selectRun(first.jobId);
-    } catch (error) { showError(error); }
-  };
-}
-
-function renderBackgroundBanner() {
-  const busy = state.busyJobId && state.busyJobId !== state.job?.id ? state.jobs.find((job) => job.id === state.busyJobId) : null;
-  const queued = state.jobs.filter((job) => job.queuePosition).length;
-  $("#background-banner").classList.toggle("hidden", !busy);
-  if (busy) $("#background-text").textContent = `“${projectName(busy)}” is ${busy.state} in the background${queued ? ` · ${queued} queued` : ""}.`;
-}
-
-$("#background-view-button").addEventListener("click", () => selectRun(state.busyJobId).catch(showError));
-
-// window.prompt is blocked in embedded browsers (the Claude desktop pane), so
-// the project name comes from a native <dialog> instead.
-const projectDialog = $("#project-dialog");
-$("#project-close-button").addEventListener("click", () => projectDialog.close());
-function askProjectName() {
-  return new Promise((resolve) => {
-    const input = $("#project-name");
-    input.value = "";
-    projectDialog.addEventListener("close", () => resolve(projectDialog.returnValue === "submit" ? input.value.trim() : ""), { once: true });
-    projectDialog.showModal();
-  });
-}
-$("#project-form").addEventListener("submit", () => projectDialog.close("submit"));
-
-// Switching projects only changes the view; runs in other projects keep going.
-async function switchProject(id) {
-  clearError();
-  const create = id === "new";
-  const body = create ? { name: await askProjectName() } : { id };
-  if (create && !body.name) return renderProjects();
-  const url = create ? "/api/projects" : "/api/projects/select";
-  await api(url, { method: "POST", body });
-  stopPolling();
-  await refreshProjects();
-  return state.jobs[0] ? selectRun(state.jobs[0].id) : showInterview();
-}
-
-async function selectRun(id) {
-  clearError();
-  if (id === "new") return showInterview();
-  const result = await api(`/api/jobs/${id}`);
-  // A saved, unsubmitted revision of this run turns its Revise button into "Continue saved revision".
-  state.draftRevises = (await api("/api/interview/draft").catch(() => ({}))).draft?.revises ?? null;
-  state.job = result.job;
-  state.events = result.events;
-  state.telemetry = null;
-  state.provider = state.job.provider;
-  localStorage.setItem("solofactory.currentJob", state.job.id);
-  resetRunPanels();
-  showRun();
-  renderWork();
-  renderBackgroundBanner();
-  await poll();
-  if (["completed", ...PARKED].includes(state.job.state)) stopPolling();
-  else startPolling();
-}
-
-// ---------------------------------------------------------------------------------------------------------
-// Brief workspace. One page shapes a new brief and revises a past run's: the brief reads as a document,
-// and the Guide sits in a sidebar beside it. View mode reads; Edit mode lets the owner rewrite a section,
-// and the Guide checks that edit against the rest of the brief when the owner leaves the section.
-// ---------------------------------------------------------------------------------------------------------
-
-// Each brief section, the coverage topic it answers (null: not a topic), and whether it is a list.
 const BRIEF_SECTIONS = [
   ["promise", "Promise", "promise"],
   ["primaryUser", "Primary user", "user"],
@@ -393,1023 +144,22 @@ const BRIEF_SECTIONS = [
   ["constraints", "Constraints", "constraints", true],
   ["manualChecks", "Checked by hand after install", null, true],
 ];
-const EARLIER_SHOWN = 4;
-const STAGE_NAMES = { queued: "the queue", specifying: "Specify", building: "Build", repairing: "Repair", verifying: "Verify", reviewing: "Review", deploying: "Deploy" };
-const hasValue = (value) => (Array.isArray(value) ? value.some((entry) => String(entry).trim()) : Boolean(String(value ?? "").trim()));
 const sameValue = (a, b) => JSON.stringify(a ?? (Array.isArray(b) ? [] : "")) === JSON.stringify(b ?? (Array.isArray(a) ? [] : ""));
 // Per key, so a key the review only filled with its empty default (a brief from before 0.11 has no
 // manualChecks) is not a change; a whole-object compare told the owner "adjusted" after every review.
 const briefChanged = (a, b) => Object.keys({ ...a, ...b }).some((key) => !sameValue(a?.[key], b?.[key]));
-const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
-
-function showInterview() {
-  stopPolling();
-  state.job = null;
-  state.events = [];
-  state.telemetry = null;
-  state.guide = state.config.opening;
-  state.messages = [{ role: "assistant", content: state.guide.message }];
-  state.revises = null;
-  state.replaces = null;
-  state.revisedJob = null;
-  state.baseBrief = null;
-  state.savedNotes = "";
-  state.savedAt = null;
-  state.edited = new Set();
-  state.editing = null;
-  state.showEarlier = false;
-  state.mode = "view";
-  $("#message-input").value = "";
-  localStorage.removeItem("solofactory.currentJob");
-  setPanel("docs");
-  $("#run-view").classList.add("hidden");
-  $("#brief-view").classList.remove("hidden");
-  document.body.classList.add("brief-mode");
-  document.querySelectorAll(".stages li").forEach((item) => item.classList.remove("active", "done"));
-  document.querySelector('[data-stage="interview"]').classList.add("active");
-  renderProviders();
-  renderWorkspace();
-  renderWork();
-  renderBackgroundBanner();
-  restoreDraft().catch(showError);
-}
-// The old split pages are one page now; kept so other callers read the same.
-const showReview = () => renderWorkspace();
-
-// The server saves the Guide conversation per project after every turn, so leaving the brief page
-// (board, a run, another project, a reload) no longer loses it. Queue or Start over clears it.
-async function restoreDraft() {
-  const { draft } = await api("/api/interview/draft");
-  if (!draft || state.job || state.messages.length > 1) return;
-  state.guide = draft.guide;
-  state.messages = draft.messages;
-  state.revises = draft.revises ?? null;
-  state.replaces = draft.replaces ?? null;
-  state.savedNotes = draft.notes ?? "";
-  state.savedAt = draft.savedAt ?? null;
-  $("#message-input").value = state.savedNotes;
-  if (state.config.providers.some((provider) => provider.id === draft.provider && provider.authenticated)) state.provider = draft.provider;
-  // A revision compares against the brief its run was queued with, so changes show where they are.
-  if (state.revises) {
-    const revised = await api(`/api/jobs/${state.revises}`).catch(() => null);
-    state.revisedJob = revised?.job ?? null;
-    state.baseBrief = state.revisedJob?.brief ?? null;
-    // Revising is always editing, as in the document viewer: the Read/Edit toggle hides on this page.
-    state.mode = "edit";
-  }
-  renderProviders();
-  renderWorkspace();
-}
-
-// Revising: Close goes back to the run and keeps the draft; Discard throws the draft away and puts the run
-// back as it was. Discard asks with a second click (confirm() is declined silently in some embedded browsers).
-$("#revise-close").addEventListener("click", () => selectRun(state.revises).catch(showError));
-$("#revise-discard").addEventListener("click", async () => {
-  const button = $("#revise-discard");
-  if (button.dataset.armed !== state.revises) {
-    button.dataset.armed = state.revises;
-    button.textContent = "Discard? Click again";
-    setTimeout(() => { delete button.dataset.armed; button.textContent = "Discard changes"; }, 4000);
-    return;
-  }
-  const run = state.revises;
-  delete button.dataset.armed;
-  button.textContent = "Discard changes";
-  await api("/api/interview/draft", { method: "DELETE" }).catch(showError);
-  selectRun(run).catch(showError);
-});
-
-$("#discard-draft").addEventListener("click", async () => {
-  if (!confirm("Discard this conversation and its brief and start a new one?")) return;
-  await api("/api/interview/draft", { method: "DELETE" }).catch(showError);
-  showInterview();
-});
-
-function resetRunPanels() {
-  for (const id of ["request-total", "error-total", "latency-average", "app-uptime"]) $(`#${id}`).textContent = "—";
-  $("#route-list").replaceChildren(Object.assign(document.createElement("p"), { textContent: "No app traffic yet." }));
-  $("#app-live").textContent = "Waiting";
-  $("#app-live").classList.add("muted");
-  $("#open-app").classList.add("hidden");
-  $("#relaunch-button").classList.add("hidden");
-  $("#app-url").classList.add("hidden");
-  $("#artifacts").replaceChildren(Object.assign(document.createElement("p"), { textContent: "Artifacts appear after specification." }));
-}
-
-// The subscription is chosen before the first answer and fixed after it, so the picker only shows until then.
-function renderProviders() {
-  const picker = $("#provider-picker");
-  picker.classList.toggle("hidden", state.messages.length > 1);
-  picker.replaceChildren(...state.config.providers.map((provider) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `provider ${state.provider === provider.id ? "selected" : ""}`;
-    button.disabled = !provider.authenticated || state.messages.length > 1;
-    const strong = document.createElement("strong");
-    strong.textContent = provider.label;
-    const small = document.createElement("small");
-    small.textContent = provider.detail;
-    button.append(strong, small);
-    button.addEventListener("click", () => { state.provider = provider.id; renderProviders(); });
-    return button;
-  }));
-}
-
-function renderWorkspace(busy = false) {
-  renderBar(busy);
-  renderDoc();
-  renderGuideHead();
-  renderRunContext();
-  renderMessages(busy);
-  renderQueueHint();
-}
-
-function coverageCounts() {
-  const values = Object.values(state.guide.coverage ?? {});
-  return { done: values.filter((value) => value === "complete").length, total: values.length };
-}
-
-function changedKeys() {
-  if (!state.baseBrief) return [];
-  return BRIEF_SECTIONS.map(([key]) => key).filter((key) => !sameValue(state.baseBrief[key], state.guide.brief?.[key]));
-}
-
-// The queue button names what queuing does; the notices block in the document says it in full.
-function queueLabel() {
-  const { revises, replaces } = state;
-  if (!revises) return { long: "Queue for the factory", short: "Queue" };
-  if (replaces === revises) return { long: "Resubmit to the factory", short: "Resubmit" };
-  if (replaces) return { long: `Resubmit and set aside run ${replaces}`, short: "Resubmit" };
-  return { long: "Resubmit as a new run", short: "Resubmit" };
-}
-
-function renderBar(busy = false) {
-  const project = state.projects.find((entry) => entry.id === state.project);
-  $("#brief-project").textContent = project?.name ?? "Project";
-  document.body.classList.toggle("revise-mode", Boolean(state.revises));
-  const pill = $("#revising-pill");
-  pill.classList.toggle("hidden", !state.revises);
-  if (state.revises) {
-    const stopped = state.revisedJob?.state;
-    pill.replaceChildren(el("span", { className: "lg", textContent: "Revising run " }), state.revises, ...(stopped ? [el("span", { className: "lg", textContent: ` · ${stopped}` })] : []));
-  }
-  renderBriefStatus(busy);
-  const changes = changedKeys().length;
-  $("#change-count").classList.toggle("hidden", !changes);
-  $("#change-count").textContent = `${changes} change${changes === 1 ? "" : "s"}`;
-  $("#mode-view").setAttribute("aria-pressed", String(state.mode !== "edit"));
-  $("#mode-edit").setAttribute("aria-pressed", String(state.mode === "edit"));
-  const ready = state.guide.status === "ready";
-  const button = $("#start-button");
-  button.disabled = busy || !ready;
-  if (!ready) {
-    const { done, total } = coverageCounts();
-    button.replaceChildren(el("span", { className: "lg", textContent: "Brief not ready · " }), `${done} of ${total}`);
-    button.title = "The Guide marks the brief ready once every topic is covered.";
-  } else {
-    const label = state.queueAnyway === JSON.stringify(state.guide.brief) && !state.guide.reviewed ? { long: "Queue anyway", short: "Queue anyway" } : queueLabel();
-    button.replaceChildren(el("span", { className: "lg", textContent: label.long }), el("span", { className: "sm", textContent: label.short }));
-    button.title = state.guide.reviewed ? "The Guide has reviewed this brief as it stands; queuing starts the factory." : "The Guide reviews the brief against the interview checklist first, then queues it if nothing is missing.";
-  }
-}
-
-// One status line: typed but unsaved, saved (the draft is on disk after every Guide turn), with the Guide,
-// or ready to queue. Submitted shows on the run itself once the brief is queued.
-function renderBriefStatus(busy = false) {
-  const line = $("#brief-status");
-  const typed = $("#message-input").value.trim();
-  const when = state.savedAt ? ` ${clock(state.savedAt)}` : "";
-  const started = state.messages.length > 1 || state.revises;
-  line.classList.add("lg");
-  const status = busy ? ["busy", state.reviewing ? "With the Guide · reviewing the brief before it queues" : "With the Guide · revising the brief"]
-    : typed && typed !== (state.savedNotes ?? "").trim() ? ["unsaved", "Saving…"]
-    : typed ? ["saved", `Saved${when} · message not sent yet`]
-    : state.guide.status === "ready" ? ["ready", state.guide.reviewed ? `Reviewed · ready to queue${when ? ` · saved${when}` : ""}` : `Ready · the Guide reviews it when you queue${when ? ` · saved${when}` : ""}`]
-    : started ? ["saved", `Saved${when} · not submitted`]
-    : ["new", "New idea · nothing is queued until you press Queue"];
-  line.dataset.state = status[0];
-  line.textContent = status[1];
-}
-$("#message-input").addEventListener("input", () => renderBriefStatus());
-
-function briefNoticesShown() {
-  const { revises, replaces } = state;
-  const replacing = !revises ? []
-    : replaces === revises ? [`Revising run ${revises}. Queuing this brief replaces that run: its files go back to the release before it, like Start over, and this brief goes first in line.`]
-    : replaces ? [`Revising run ${revises}. Queuing this brief also sets aside stopped run ${replaces}, which is holding this project's queue: its files go back to the release before it, like Start over.`]
-    : [`Revising run ${revises}. Queuing this brief starts a new run on the app as it is now; run ${revises} stays in the history.`];
-  return [...replacing, ...(state.guide.notices ?? [])];
-}
-
-// The topic the Guide is asking about: the first one it has started but not finished.
-function focusKey() {
-  if (state.guide.status === "ready") return null;
-  const coverage = state.guide.coverage ?? {};
-  const topic = Object.keys(coverage).find((key) => coverage[key] === "partial");
-  return BRIEF_SECTIONS.find(([, , cover]) => cover === topic)?.[0] ?? null;
-}
-
-function renderDoc() {
-  const brief = state.guide.brief ?? {};
-  const ready = state.guide.status === "ready";
-  $("#doc-eyebrow").textContent = state.revises ? `Product brief · revision of run ${state.revises}` : ready ? "Product brief · ready" : "Product brief · draft";
-  $("#doc-title").textContent = brief.workingName?.trim() || "Untitled idea";
-  const stopped = state.revisedJob?.state;
-  $("#revision-status").textContent = state.revises ? `Draft revision of run ${state.revises}${stopped ? ` (${stopped})` : ""} · nothing is building until you resubmit` : "";
-  const changes = changedKeys().map((key) => BRIEF_SECTIONS.find(([k]) => k === key)[1]);
-  $("#draft-changes").classList.toggle("hidden", !state.revises || !changes.length);
-  $("#draft-changes").replaceChildren(el("h2", { textContent: "Changed in this draft" }), el("p", { textContent: changes.join(" · ") }));
-  const notices = briefNoticesShown();
-  $("#brief-notices").classList.toggle("hidden", !notices.length);
-  $("#brief-notices").replaceChildren(el("h2", { textContent: "Before you queue" }), el("ul", {}, ...notices.map((text) => el("li", { textContent: text }))));
-  renderBrief(brief, notices, $("#brief"));
-  $("#doc-foot").classList.toggle("hidden", !ready);
-  $("#brief").classList.toggle("editing-mode", state.mode === "edit");
-}
-
-// The brief as a document. Sections not covered yet are listed at the end; a section the Guide is asking
-// about, one that changed against the run being revised, and one the owner is editing are each marked.
-function renderBrief(brief, _notices, target) {
-  const ready = state.guide.status === "ready";
-  const coverage = state.guide.coverage ?? {};
-  const focus = focusKey();
-  const changed = new Set(changedKeys());
-  const editable = state.mode === "edit";
-  const later = [];
-  const nodes = [];
-  for (const [key, label, cover, list] of BRIEF_SECTIONS) {
-    const value = brief[key];
-    const shown = hasValue(value) || (state.baseBrief && hasValue(state.baseBrief[key]));
-    // Not written yet: listed under Still to cover while the interview runs, editable in Edit mode.
-    if (!shown && !editable) {
-      if (cover && !ready) later.push(label);
-      if (!cover || !ready) continue;
-    }
-    if (!shown && editable && !cover) continue;
-    const section = el("section", { className: "doc-section" });
-    section.dataset.key = key;
-    let tag = "";
-    if (state.editing === key) { section.classList.add("is-editing"); tag = "you are editing"; }
-    else if (changed.has(key)) { section.classList.add("is-changed"); tag = state.edited.has(key) ? "edited by you" : "changed by the Guide"; }
-    else if (key === focus) { section.classList.add("is-focus"); tag = "being discussed"; }
-    else if (cover && coverage[cover] === "partial" && !ready) tag = "partly covered";
-    section.append(el("h2", { textContent: tag ? `${label} · ${tag}` : label }));
-    if (editable && state.editing === key) section.append(sectionEditor(key, label, value, list));
-    else section.append(sectionBody(key, value, list, key === "promise"));
-    // Edit mode: a section reads as normal until the owner clicks it (or presses Enter on it) to rewrite it.
-    if (editable && state.editing !== key) {
-      section.classList.add("editable");
-      section.tabIndex = state.guideBusy ? -1 : 0;
-      section.setAttribute("role", "button");
-      section.setAttribute("aria-label", `Edit ${label}`);
-      const open = () => { if (state.guideBusy) return; state.editing = key; renderDoc(); renderMessages(); };
-      section.addEventListener("click", open);
-      section.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
-    }
-    nodes.push(section);
-  }
-  if (later.length) nodes.push(el("section", { className: "doc-later" }, el("h2", { textContent: "Still to cover" }), el("p", { textContent: later.join(" · ") })));
-  target.replaceChildren(...nodes);
-}
-
-function sectionBody(key, value, list, lead) {
-  const base = state.baseBrief?.[key];
-  const diff = state.baseBrief && !sameValue(base, value);
-  if (list) {
-    const items = Array.isArray(value) ? value : [];
-    const before = Array.isArray(base) ? base : [];
-    const ul = el("ul");
-    for (const entry of items) ul.append(el("li", {}, diff && !before.includes(entry) ? el("ins", { textContent: entry }) : entry));
-    if (diff) for (const entry of before.filter((item) => !items.includes(item))) ul.append(el("li", {}, el("del", { textContent: entry })));
-    if (!ul.children.length) ul.append(el("li", { className: "empty", textContent: "Not specified" }));
-    return ul;
-  }
-  const p = el("p", { className: lead ? "lead" : "" });
-  if (diff && hasValue(base)) p.append(el("del", { textContent: base }), " ");
-  if (hasValue(value)) p.append(diff ? el("ins", { textContent: value }) : value);
-  else if (!p.childNodes.length) p.append(el("span", { className: "empty", textContent: "Not specified" }));
-  return p;
-}
-
-// Edit mode: each section is a plain text box, one line per item for a list. Leaving a changed section
-// applies the edit and sends it to the Guide, which keeps the owner's wording unless it conflicts.
-function sectionEditor(key, label, value, list) {
-  const text = list ? (value ?? []).join("\n") : value ?? "";
-  const box = el("textarea", { value: text, rows: Math.max(list ? (value?.length || 1) : 2, 2), className: "section-editor", disabled: state.guideBusy });
-  box.setAttribute("aria-label", `${label}${list ? ", one item per line" : ""}`);
-  queueMicrotask(() => { box.focus(); box.setSelectionRange(box.value.length, box.value.length); });
-  // Escape cancels the edit; Cmd/Ctrl+Enter keeps it, like leaving the section.
-  box.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") { box.value = text; box.blur(); }
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); box.blur(); }
-  });
-  box.addEventListener("blur", () => {
-    if (state.editing !== key) return;
-    state.editing = null;
-    const next = list ? box.value.split("\n").map((line) => line.trim()).filter(Boolean) : box.value.trim();
-    if (sameValue(next, state.guide.brief?.[key])) { renderDoc(); renderMessages(state.guideBusy); return; }
-    state.guide = { ...state.guide, brief: { ...state.guide.brief, [key]: next }, reviewed: false };
-    state.edited.add(key);
-    renderDoc();
-    renderMessages(state.guideBusy);
-    const shown = list ? next.map((line) => `- ${line}`).join("\n") : next;
-    // Saved at once, so the edit survives a reload or a failed Guide turn; the turn then checks it.
-    saveEdits({ [key]: next })
-      .then(() => guideTurn(`I edited the brief directly. ${label} now reads:\n${shown}\n\nKeep my wording unless it conflicts with the rest of the brief. If it does, say what conflicts and ask me.`))
-      .catch(showError);
-  });
-  return box;
-}
-
-function setMode(mode) {
-  state.mode = mode;
-  state.editing = null;
-  renderWorkspace(state.guideBusy);
-}
-$("#mode-view").addEventListener("click", () => setMode("view"));
-$("#mode-edit").addEventListener("click", () => setMode("edit"));
-
-function renderGuideHead() {
-  const hidden = Math.max(0, state.messages.length - EARLIER_SHOWN);
-  const collapse = Boolean(state.revises) && hidden > 0;
-  $("#earlier-button").classList.toggle("hidden", !collapse);
-  $("#earlier-button").textContent = state.showEarlier ? "Hide earlier messages" : `${hidden} earlier message${hidden === 1 ? "" : "s"}`;
-  const turns = state.messages.length;
-  $("#guide-meta").textContent = collapse ? "" : state.revises ? `Revision · ${turns} messages` : turns > 1 ? `New idea · ${turns} messages` : "New idea";
-  $("#discard-draft").classList.toggle("hidden", state.messages.length < 2 || Boolean(state.revises));
-}
-$("#earlier-button").addEventListener("click", () => { state.showEarlier = !state.showEarlier; renderGuideHead(); renderMessages(state.guideBusy); });
-
-// What the revised run was doing when it stopped, so the owner knows what the change is for.
-function renderRunContext() {
-  const box = $("#run-context");
-  const job = state.revisedJob;
-  box.classList.toggle("hidden", !state.revises);
-  if (!state.revises) return;
-  const stoppedIn = job?.failedState ? ` during ${STAGE_NAMES[job.failedState] ?? job.failedState}` : "";
-  const why = job?.error?.message ? ` ${job.error.message}` : "";
-  const holds = state.replaces === state.revises ? " It holds this project's queue." : "";
-  const line = !job ? "Its brief is open here for changes."
-    : job.state === "completed" ? "This run finished. The app stays live; queuing builds on it as it is now."
-    : `This run ${job.state === "paused" ? "paused" : `was ${job.state}`}${stoppedIn}.${why}${holds}`;
-  const open = el("button", { type: "button", className: "link-button", textContent: "Open the run" });
-  open.addEventListener("click", () => selectRun(state.revises).catch(showError));
-  box.replaceChildren(el("p", { className: "run-context-title", textContent: `Run ${state.revises}` }), el("p", { textContent: line }), open);
-}
-
-function renderMessages(thinking = false) {
-  const container = $("#messages");
-  const collapse = Boolean(state.revises) && !state.showEarlier;
-  const shown = collapse ? state.messages.slice(-EARLIER_SHOWN) : state.messages;
-  const focus = focusKey();
-  container.replaceChildren(...shown.map((message, index) => {
-    const item = document.createElement("div");
-    item.className = `message ${message.role}`;
-    const last = index === shown.length - 1 && message.role === "assistant";
-    if (message.role === "assistant") {
-      const about = last && focus ? ` · ${BRIEF_SECTIONS.find(([key]) => key === focus)[1]}` : "";
-      item.append(el("p", { className: "who", textContent: `Guide${about}` }));
-      if (last) item.classList.add("current");
-    }
-    item.append(el("div", { className: "text", textContent: message.content }));
-    for (const src of message.images ?? []) {
-      const img = document.createElement("img");
-      img.src = src; img.alt = "Attached image"; img.className = "attachment-image";
-      item.append(img);
-    }
-    // Long user turns (pasted specs) collapse so the transcript stays readable.
-    if (message.role === "user" && message.content.length > 1_500) {
-      item.classList.add("long");
-      const toggle = document.createElement("a");
-      toggle.className = "expand";
-      toggle.textContent = "Show full message";
-      toggle.addEventListener("click", () => {
-        const open = item.classList.toggle("open");
-        toggle.textContent = open ? "Collapse" : "Show full message";
-      });
-      item.prepend(toggle);
-    }
-    return item;
-  }));
-  if (state.mode === "edit" && state.editing) {
-    const label = BRIEF_SECTIONS.find(([key]) => key === state.editing)[1];
-    container.append(el("div", { className: "edit-note" }, "You are editing ", el("strong", { textContent: label }), ". The Guide checks your edit against the rest of the brief when you leave the section."));
-  }
-  if (state.reviewNote && !thinking) container.append(el("div", { className: "edit-note review-note", textContent: state.reviewNote }));
-  if (thinking) {
-    const item = document.createElement("div");
-    item.className = "message assistant thinking";
-    item.innerHTML = 'Thinking <span class="dots"><span>•</span><span>•</span><span>•</span></span>';
-    container.append(item);
-  }
-  container.scrollTop = container.scrollHeight;
-}
-
-function sdlcOption(id) {
-  const options = state.config?.sdlcOptions ?? [];
-  return options.find((option) => option.id === id) ?? { id: id ?? "single", label: "Single build" };
-}
-
-// Attached documents ride inside the user turn: the Guide reads inline text
-// without a tool call, and nothing is stored server-side.
-const pending = [];
-$("#attach-input").addEventListener("change", async (event) => {
-  clearError();
-  for (const file of event.target.files) {
-    try {
-      if (file.type.startsWith("image/")) {
-        const response = await fetch(`/api/interview/upload?name=${encodeURIComponent(file.name)}`, { method: "POST", body: file });
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(body.error || `Upload failed with HTTP ${response.status}.`);
-        pending.push({ name: file.name, path: body.path, url: URL.createObjectURL(file) });
-      } else {
-        pending.push({ name: file.name, text: await file.text() });
-      }
-    } catch (error) {
-      showError(new Error(`Could not read ${file.name}: ${error.message}`));
-    }
-  }
-  event.target.value = "";
-  renderAttachments();
-});
-
-function renderAttachments() {
-  $("#attachments").replaceChildren(...pending.map((file, index) => {
-    const chip = document.createElement("span");
-    chip.className = "chip";
-    chip.textContent = file.path ? `${file.name} · image` : `${file.name} · ${Math.ceil(file.text.length / 1000)}k chars`;
-    const remove = document.createElement("button");
-    remove.type = "button"; remove.title = "Remove"; remove.textContent = "×";
-    remove.addEventListener("click", () => { pending.splice(index, 1); renderAttachments(); });
-    chip.append(remove);
-    return chip;
-  }));
-  $("#message-input").required = pending.length === 0;
-}
-
-function composeMessage(typed) {
-  const parts = typed ? [typed] : [];
-  for (const file of pending) {
-    if (file.path) parts.push(`Attached image: ${file.path} (open this file to view it before answering)`);
-    else parts.push(`--- Attached document: ${file.name} ---\n${file.text.trim()}\n--- End of ${file.name} ---`);
-  }
-  return parts.join("\n\n");
-}
-
-// Every answer, change request and direct edit is one Guide turn. The server saves the draft after it,
-// so a turn also clears any notes saved for later.
-// A direct edit is saved before its Guide turn; the server keeps it in the brief the turn returns.
-async function guideTurn(content, images = [], { review = false } = {}) {
-  if (!state.provider) throw new Error(NO_PROVIDER);
-  clearError();
-  // A final review adds no owner message: the server hands the Guide the saved brief to check.
-  if (!review) state.messages.push({ role: "user", content, images });
-  state.reviewing = review;
-  state.reviewNote = null;
-  setInterviewBusy(true);
-  try {
-    const guide = await api("/api/interview/turn", { method: "POST", body: { provider: state.provider, messages: state.messages, ...(review && { review: true }) } });
-    state.guide = guide;
-    state.messages.push({ role: "assistant", content: guide.message });
-    state.savedNotes = "";
-    state.savedAt = new Date().toISOString();
-  } catch (error) {
-    if (!review) state.messages.pop();
-    throw error;
-  } finally {
-    state.reviewing = false;
-    setInterviewBusy(false);
-    renderProviders();
-  }
-}
-
-$("#message-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const input = $("#message-input");
-  const typed = input.value.trim();
-  const content = composeMessage(typed);
-  if (!content) return;
-  if (!state.provider) return showError(new Error(NO_PROVIDER));
-  const images = pending.filter((file) => file.url).map((file) => file.url);
-  clearTimeout(notesTimer);
-  notesTimer = null;
-  input.value = "";
-  pending.length = 0;
-  renderAttachments();
-  try {
-    await guideTurn(content, images);
-  } catch (error) {
-    input.value = typed;
-    showError(error);
-  }
-});
-// Enter sends, Shift+Enter adds a line, as in most chat boxes.
-$("#message-input").addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); $("#message-form").requestSubmit(); }
-});
-
-function setInterviewBusy(value) {
-  state.guideBusy = value;
-  $("#send-button").disabled = value;
-  $("#message-input").disabled = value;
-  $("#send-button").textContent = value ? "Thinking…" : "Send";
-  renderWorkspace(value);
-}
-
-async function saveEdits(edits) {
-  const { draft } = await api("/api/interview/draft", { method: "PATCH", body: { edits, provider: state.provider } });
-  state.savedAt = draft.savedAt;
-  renderBriefStatus(state.guideBusy);
-}
-
-// The Guide box saves itself: unsent text is written to the draft a moment after typing stops and when
-// the box loses focus, so a reload or a closed tab keeps it. Sending clears it.
-let notesTimer = null;
-async function saveNotes() {
-  clearTimeout(notesTimer);
-  notesTimer = null;
-  const notes = $("#message-input").value;
-  if (state.guideBusy || notes.trim() === (state.savedNotes ?? "").trim()) return;
-  try {
-    const { draft } = await api("/api/interview/draft", { method: "PATCH", body: { notes, provider: state.provider } });
-    state.savedNotes = draft.notes;
-    state.savedAt = draft.savedAt;
-  } catch (error) {
-    showError(error);
-  }
-  renderBriefStatus(state.guideBusy);
-}
-$("#message-input").addEventListener("input", () => { clearTimeout(notesTimer); notesTimer = setTimeout(saveNotes, 1200); });
-$("#message-input").addEventListener("blur", () => { if (notesTimer) saveNotes(); });
-
-// Phone width: the Guide collapses to a rail at the edge and opens over the brief.
-function setGuideOpen(open) {
-  $("#guide-side").classList.toggle("open", open);
-  $("#guide-rail").setAttribute("aria-expanded", String(open));
-  if (open) $("#message-input").focus();
-}
-$("#guide-rail").addEventListener("click", () => setGuideOpen(true));
-$("#guide-hide").addEventListener("click", () => { setGuideOpen(false); $("#guide-rail").focus(); });
-$("#guide-side").addEventListener("keydown", (event) => { if (event.key === "Escape" && $("#guide-side").classList.contains("open")) { setGuideOpen(false); $("#guide-rail").focus(); } });
-
-// Queue is a final review first: the Guide checks the exact brief that would freeze against the interview
-// checklist, sizing the change for a revision. Only a ready answer on an unchanged brief queues it; a question,
-// or a brief the review adjusted, stays here for the owner. A brief already reviewed as it stands queues at once.
-$("#start-button").addEventListener("click", async () => {
-  clearError();
-  // Queuing ignores notes the Guide has not seen; send them or clear the box first.
-  if ($("#message-input").value.trim()) return showError(new Error("You have notes the Guide has not seen yet. Send them so the Guide can apply them, or clear the box, then queue."));
-  const anyway = state.queueAnyway === JSON.stringify(state.guide.brief);
-  if (!state.guide.reviewed && !anyway) {
-    const before = state.guide.brief;
-    try {
-      await guideTurn("", [], { review: true });
-    } catch (error) {
-      return showError(error);
-    }
-    if (state.guide.status !== "ready") {
-      reviewOutcome("The Guide has a question before this brief can queue. Answer it in the Guide.");
-      return;
-    }
-    if (!state.guide.reviewed) {
-      // The review kept dropping one of the owner's direct edits; the owner decides, with one more click.
-      state.queueAnyway = JSON.stringify(state.guide.brief);
-      renderBar();
-      reviewOutcome("The Guide's review did not carry one of your direct edits, so this brief is not fully reviewed. Read its reply, then press Queue anyway to queue the brief as shown, or change it.");
-      return;
-    }
-    if (briefChanged(before, state.guide.brief)) {
-      if (!state.revises) state.baseBrief = before;
-      renderWorkspace();
-      reviewOutcome("The Guide adjusted the brief in its review. Check the marked sections, then press Queue.");
-      return;
-    }
-  }
-  $("#start-button").disabled = true;
-  try {
-    const { job } = await api("/api/jobs", {
-      method: "POST",
-      body: { provider: state.provider, transcript: state.messages, coverage: state.guide.coverage, brief: state.guide.brief, ...(state.revises && { revises: state.revises, replaces: state.replaces }) },
-    });
-    state.queueAnyway = null;
-    state.reviewNote = null;
-    // Submitted briefs queue; the owner goes straight back to shaping the next release.
-    showInterview();
-    await refreshProjects();
-    renderBackgroundBanner();
-    $("#system-status").textContent = job.queuePosition ? `Brief queued #${job.queuePosition} as run ${job.id}` : `Queued as run ${job.id}`;
-  } catch (error) {
-    $("#start-button").disabled = false;
-    // Another stopped run holds the queue than the one this brief named when opened (or it was opened before
-    // the factory tracked that). The server saved the current one to the draft; show it, one more press queues.
-    if (error.body?.code === "revise_blocker_changed") {
-      state.replaces = error.body.replaces ?? null;
-      renderBar();
-      renderWorkspace();
-    }
-    showError(error);
-  }
-});
-
-// Why Queue stopped after a review: a short status line in the bar, the reason under the Guide's reply,
-// and at phone width the Guide opens so the owner sees it. The next turn, edit or queue clears it.
-function reviewOutcome(text) {
-  state.reviewNote = text;
-  renderMessages();
-  const line = $("#brief-status");
-  line.dataset.state = "unsaved";
-  line.textContent = "Not queued yet · see the Guide";
-  line.classList.remove("lg");
-  if (matchMedia("(max-width: 700px)").matches) setGuideOpen(true);
-}
-
-function showRun() {
-  setPanel("run");
-  $("#brief-view").classList.add("hidden");
-  document.body.classList.remove("brief-mode", "revise-mode");
-  $("#run-view").classList.remove("hidden");
-  document.querySelector('[data-stage="interview"]').classList.add("done");
-  $("#run-id").textContent = state.job.id;
-  $("#run-title").textContent = state.job.brief.workingName || "Building your app";
-  renderJob();
-  renderRunCard();
-  renderAttention();
-}
-
-async function poll() {
-  if (!state.job) return;
-  try {
-    const result = await api(`/api/jobs/${state.job.id}`);
-    state.job = result.job;
-    state.events = result.events;
-    state.telemetry = await api(`/api/jobs/${state.job.id}/telemetry`);
-    renderJob();
-    renderRunCard();
-    if (PARKED.includes(state.job.state)) {
-      state.pausing = false;
-      $("#pause-button").disabled = false;
-      stopPolling();
-      refreshProjects();
-    }
-  } catch (error) { showError(error); }
-}
-
-// Stages before the current one are done; a completed run has every stage done and none active.
 function railMarks(progressState) {
   const active = progressState === "repairing" ? "verifying" : progressState;
   const at = active === "completed" ? stageOrder.length : stageOrder.indexOf(active);
   return { active, done: stageOrder.slice(0, Math.max(0, at)) };
 }
-
-function renderJob() {
-  const job = state.job;
-  $("#run-subtitle").textContent = job.blockedBy
-    ? `Waiting on recovery of run ${job.blockedBy}: resume it, start it over, or dismiss it.`
-    : job.queuePosition
-      ? `Queued #${job.queuePosition}${job.queuedFor === "resume" ? " to resume" : ""}; starts when this project's current run finishes.`
-      : job.error?.message || statusCopy(job.state);
-  // Notes the brief was queued with (size, unprovable checks): shown here too, since a brief posted
-  // by an agent never passed the review screen.
-  const notices = job.notices ?? [];
-  $("#run-notices").classList.toggle("hidden", !notices.length);
-  $("#run-notices").replaceChildren(...notices.map((text) => Object.assign(document.createElement("li"), { textContent: text })));
-  const progressState = PARKED.includes(job.state) ? job.failedState : job.state;
-  const rail = railMarks(progressState);
-  document.querySelectorAll(".stages li").forEach((item) => {
-    item.classList.toggle("active", item.dataset.stage === rail.active);
-    if (item.dataset.stage !== "interview") item.classList.toggle("done", rail.done.includes(item.dataset.stage));
-  });
-  renderSupervision();
-  renderMap();
-  renderArtifacts();
-  renderAppMetrics();
-  renderRecovery();
-  const terminalFailure = PARKED.includes(job.state);
-  $("#cancel-button").classList.toggle("hidden", terminalFailure || job.state === "completed");
-  $("#cancel-button").textContent = job.state === "queued" ? "Remove from queue" : "Cancel run";
-  $("#pause-button").classList.toggle("hidden", !["specifying", "building", "repairing", "reviewing"].includes(job.state));
-  // The server's pendingPause survives a reload; state.pausing covers the gap until the next poll.
-  if (job.pendingPause) { $("#pause-button").textContent = `Pausing after ${job.stage}…`; $("#pause-button").disabled = true; }
-  else if (!state.pausing) $("#pause-button").textContent = "Pause";
-  $("#resume-button").textContent = job.nextAction?.action === "resume" ? job.nextAction.label : job.state === "paused" ? "Resume" : "Resume current run";
-  $("#dismiss-button").classList.toggle("hidden", !terminalFailure || Boolean(job.dismissed));
-  // nextAction is derived by the server's continuation policy; a saved banner's canResume can be stale.
-  $("#resume-button").classList.toggle("hidden", job.nextAction?.action !== "resume" || !terminalFailure);
-  $("#copy-recovery-button").classList.toggle("hidden", !job.recovery || !terminalFailure);
-  $("#start-over-button").classList.toggle("hidden", !terminalFailure);
-  $("#revise-brief-button").classList.toggle("hidden", !terminalFailure && job.state !== "completed");
-  if (state.reviseArmed !== job.id) $("#revise-brief-button").textContent = state.draftRevises === job.id ? "Continue saved revision" : "Revise brief";
-  $("#report-run-button").classList.toggle("hidden", !terminalFailure);
-  const url = $("#app-url");
-  url.classList.toggle("hidden", !job.deployment?.url);
-  url.textContent = job.deployment?.url ? `${job.deployment.url}${job.deployment.status === "live" ? "" : " · not running"}` : "";
-  $("#relaunch-button").classList.toggle("hidden", !(job.state === "completed" && job.deployment && job.deployment.status !== "live"));
-  if (job.state === "completed" && job.deployment?.status === "live") {
-    $("#open-app").href = job.deployment.url;
-    $("#open-app").classList.remove("hidden");
-    $("#app-live").textContent = job.waivedProofs?.length ? `Live · owner waived ${job.waivedProofs.map((bug) => bug.id).join(", ")}` : "Live";
-    $("#app-live").classList.remove("muted");
-  } else if (job.state === "completed") {
-    $("#app-live").textContent = "Stopped";
-    $("#app-live").classList.add("muted");
-  }
-}
-
-// Supervision is shown beside the lifecycle state, never instead of it.
-function renderSupervision() {
-  const watch = state.job.supervision;
-  let line = $("#supervision");
-  if (!line) {
-    line = document.createElement("p"); line.id = "supervision"; line.className = "muted";
-    $("#run-subtitle").after(line);
-  }
-  line.classList.toggle("hidden", !watch);
-  if (!watch) return;
-  const when = (iso) => iso ? `${formatDuration(Date.now() - new Date(iso).getTime())} ago` : "none yet";
-  const worker = watch.worker;
-  const waiting = worker?.kind === "command" ? ` · waiting on ${worker.gate ?? "command"} for ${formatDuration(worker.ageMs)}${worker.hardLimitMs ? ` of ${formatDuration(worker.hardLimitMs)}` : ""}` : "";
-  const used = state.job.watch?.continuations ? Object.values(state.job.watch.continuations).reduce((sum, n) => sum + n, 0) : 0;
-  line.textContent = `Supervision: ${watch.status}${watch.stage ? ` · ${watch.stage}` : ""}${waiting} · last activity ${when(watch.lastActivityAt)} · last confirmed progress ${when(watch.lastProgressAt)}`
-    + ` · ${state.job.attempt ?? 0} repairs, ${used} automatic continuation${used === 1 ? "" : "s"} used · ${watch.monitoring ? "monitored while the factory server runs" : "not monitored while parked"}`;
-}
-
-// job.attempt counts every repair since the run began; recovery limits are points on that counter.
-// Per feature: cursor.attemptBefore is where the feature started (src/feature-recovery.mjs). Per plan:
-// totalRepairLimit = start + maxRepairs × (features + 1), and maxRepairs is the feature's own window.
-// ponytail: the derived plan cap is low if the plan limit clipped the last feature's window; send maxRepairs if that matters.
-const repairUsage = (job) => {
-  const phase = job.recoveryPhase, start = phase?.cursor?.attemptBefore;
-  if (phase?.totalRepairLimit === undefined || start === undefined || job.repairBudgetLimit == null) return null;
-  const perFeature = job.repairBudgetLimit - start, planCap = perFeature * (phase.plan.slices.length + 1);
-  return { feature: [job.attempt - start, perFeature], plan: [Math.max(0, planCap - (phase.totalRepairLimit - job.attempt)), planCap] };
-};
-// Mirrors pendingProofs in src/wbs.mjs.
-const pendingProofs = (job) => (job.outstandingProofs ?? []).filter((entry) => entry.status === "pending");
-
-// Bounded like MAX_AMENDED_PLAN_BYTES in src/factory.mjs; the server repeats every check.
 const MAX_AMENDED_PLAN_BYTES = 4_000_000;
-
-// Exhausted plan corrections: explain, offer the help packet, and take a corrected plan from a file.
-// A ready plan offers the same packet and upload as an alternative to approval, for writing a replacement.
-// The selection lives in state so polling re-renders and server errors never erase it.
-function renderAmendment(features, next, phase, action) {
-  const blocked = next.action === "amend-plan";
-  const pending = state.amendment?.jobId === state.job.id && state.amendment.phaseId === phase.id ? state.amendment : null;
-  if (!pending) state.amendment = null;
-  const note = document.createElement("p"); note.textContent = blocked ? `${next.reason} ${phase.corrections ?? 0} automatic correction${phase.corrections === 1 ? "" : "s"} used; no repairs have started.` : next.alternatives.find((item) => item.action === "amend-plan").reason;
-  const packet = document.createElement("a"); packet.href = `/api/jobs/${state.job.id}/recovery-plan-packet`; packet.download = ""; packet.className = "button"; packet.textContent = "Download plan help packet";
-  const details = document.createElement("details"); details.open = Boolean(pending); details.addEventListener("toggle", () => { state.amendmentOpen = details.open; });
-  if (state.amendmentOpen) details.open = true;
-  const summary = document.createElement("summary"); summary.textContent = "Advanced: submit corrected plan for review";
-  const label = document.createElement("label"); label.htmlFor = "amendment-file"; label.textContent = "Corrected plan file (.json)";
-  const file = document.createElement("input"); file.type = "file"; file.id = "amendment-file"; file.accept = ".json,application/json";
-  const status = document.createElement("p"); status.id = "amendment-status";
-  const submit = document.createElement("button"); submit.type = "button"; submit.textContent = "Submit corrected plan for review"; submit.disabled = !pending?.plan;
-  const show = () => {
-    status.textContent = pending ? (pending.error ? pending.error : `${pending.name} (${pending.size.toLocaleString()} bytes) will be reviewed once, for recovery phase ${phase.id}.`) : "No file selected.";
-    status.className = pending?.error ? "error" : "muted"; submit.disabled = !pending?.plan;
-  };
-  file.addEventListener("change", async () => {
-    const chosen = file.files[0]; if (!chosen) return;
-    const entry = state.amendment = { jobId: state.job.id, phaseId: phase.id, name: chosen.name, size: chosen.size, plan: null, error: null };
-    if (chosen.size > MAX_AMENDED_PLAN_BYTES) entry.error = `${chosen.name} is larger than ${MAX_AMENDED_PLAN_BYTES.toLocaleString()} bytes.`;
-    else {
-      try { const plan = JSON.parse(await chosen.text()); if (!plan || typeof plan !== "object" || Array.isArray(plan)) throw new Error("not an object"); entry.plan = plan; }
-      catch { entry.error = `${chosen.name} is not a JSON repair plan.`; }
-    }
-    renderRecovery();
-  });
-  submit.addEventListener("click", async () => {
-    if (!pending?.plan) return;
-    submit.disabled = true; clearError();
-    try { await api(`/api/jobs/${state.job.id}/recovery-review`, { method: "POST", body: { phaseId: pending.phaseId, plan: pending.plan } }); state.amendment = null; await poll(); startPolling(); }
-    catch (error) { pending.error = error.message; showError(error); show(); }
-  });
-  show();
-  // A ready plan's replacement is the advanced path, so its explanation and packet sit inside the
-  // disclosure; loose, they rendered under "Prepare repair plan" and read as that button's description.
-  if (blocked) { details.append(summary, label, file, status, submit); features.append(note, packet, details); }
-  else { packet.textContent = "Download plan packet for a replacement"; details.append(summary, note, packet, label, file, status, submit); features.append(details); }
-  const alternative = blocked && next.alternatives?.[0];
-  if (alternative) { const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = alternative.reason; features.append(hint); action(alternative.label, "recovery-plan"); }
-}
-
-// A parked follow-on's fallback (server: previousRelease in src/factory.mjs).
 function previousReleaseNote(job) {
   const prior = job.previousRelease;
   if (!prior) return null;
   if (prior.live) return { text: `Previous release still running at ${prior.url}.`, relaunch: null };
   if (prior.relaunchable) return { text: `The previous release (${prior.name}) is not running. Dismiss puts its files back; Relaunch then starts it.`, relaunch: prior.jobId, label: `Dismiss, then Relaunch ${prior.name}` };
   return { text: `The previous release (${prior.name}) is not running. It can be relaunched once every newer run is dismissed with a rollback point.`, relaunch: null };
-}
-
-function renderRecovery() {
-  const phase = state.job.recoveryPhase;
-  const recovery = state.job.recovery ?? (phase ? { title: phase.status === "planning" ? "Preparing repair plan" : "Repairs", summary: phase.status === "planning" ? "Planning repair features from the review findings and every spec and prototype input." : `${phase.done.length}/${phase.plan?.slices.length ?? 0} recovery features verified`, actions: [], workspace: "Preserved project workspace", automaticRetry: "Each feature has bounded repairs; final deployment requires the full original review." } : null);
-  const visible = recovery && (PARKED.includes(state.job.state) || phase);
-  $("#recovery-card").classList.toggle("hidden", !visible);
-  if (!visible) return;
-  let features = $("#feature-recovery-controls");
-  if (!features) {
-    features = document.createElement("section"); features.id = "feature-recovery-controls";
-    $("#recovery-card").append(features);
-  }
-  features.replaceChildren();
-  // The owner approves more spend here, so show what the run has already spent (server: runSpend in src/factory.mjs).
-  const spend = state.telemetry?.spend;
-  if (spend && PARKED.includes(state.job.state)) {
-    const count = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
-    const line = document.createElement("p"); line.id = "run-spend";
-    line.textContent = `Spent so far: ${plural(spend.workers, "worker")}, ${count(spend.tokens)} tokens, cost ${spend.costUsd == null ? "unknown" : `$${spend.costUsd.toFixed(2)}`}, ${formatSpan(spend.elapsedMs)} elapsed.${spend.grantTurns == null ? "" : ` Approving grants up to ${plural(spend.grantTurns, "repair turn")}.`}`+(spend.idleApprovals ? ` Last ${spend.idleApprovals === 1 ? "approval" : `${spend.idleApprovals} approvals`} verified no features.` : "");
-    features.append(line);
-  }
-  const fallback = PARKED.includes(state.job.state) ? previousReleaseNote(state.job) : null;
-  if (fallback) {
-    const note = document.createElement("p"); note.id = "previous-release"; note.textContent = fallback.text; features.append(note);
-    if (fallback.relaunch) {
-      const button = document.createElement("button"); button.type = "button"; button.className = "button"; button.textContent = fallback.label;
-      button.addEventListener("click", async () => {
-        button.disabled = true; clearError();
-        try {
-          await api(`/api/jobs/${state.job.id}/dismiss`, { method: "POST", body: {} });
-          await api(`/api/jobs/${fallback.relaunch}/relaunch`, { method: "POST", body: {} });
-          await poll(); refreshProjects();
-        } catch (error) { showError(error); button.disabled = false; }
-      });
-      features.append(button);
-    }
-  }
-  const action = (label, endpoint, body = {}) => {
-    const button = document.createElement("button"); button.textContent = label; button.type = "button";
-    button.addEventListener("click", async () => {
-      button.disabled = true; clearError();
-      try { await api(`/api/jobs/${state.job.id}/${endpoint}`, { method: "POST", body: endpoint === "recovery-plan" ? { ...body, guidance: $("#recovery-plan-feedback")?.value ?? "" } : endpoint === "waive-proof" ? { ...body, reason: $("#recovery-plan-feedback")?.value ?? "" } : body }); await poll(); startPolling(); }
-      catch (error) { showError(error); button.disabled = false; }
-    }); features.append(button);
-  };
-  const next = state.job.nextAction;
-  if (next?.action === "amend-plan" && phase) renderAmendment(features, next, phase, action);
-  else if (next?.action === "retry-plan" || next?.action === "revise-inputs") action(next.label, "recovery-plan");
-  // The same admission the server applies: only the policy's planning steps (and revising a ready plan) offer the planner.
-  else if (next?.action === "prepare-plan" || next?.action === "approve-plan") action("Prepare repair plan", "recovery-plan");
-  if (next?.action === "approve-plan" && phase && next.alternatives?.some((item) => item.action === "amend-plan")) renderAmendment(features, next, phase, action);
-  // The reviewer's own test is faulty: the owner's note in the box above becomes the recorded reason.
-  for (const item of next?.alternatives?.filter((entry) => entry.action === "waive-proof") ?? []) { const hint = document.createElement("p"); hint.className = "muted"; hint.textContent = item.reason; features.append(hint); if (item.repairerNote) { const note = document.createElement("pre"); note.style.whiteSpace = "pre-wrap"; note.textContent = `Last repair turn said:\n${item.repairerNote}`; features.append(note); } action(item.label, "waive-proof", { proof: item.proof }); }
-  // Owner-added specs join the run's inputs; the next plan, review or Resume sees them.
-  if (next && !["none", "factory-fix"].includes(next.action)) {
-    const label = document.createElement("label"); label.htmlFor = "input-file"; label.textContent = "Add a spec or prototype file";
-    const file = document.createElement("input"); file.type = "file"; file.id = "input-file";
-    file.addEventListener("change", async () => {
-      clearError();
-      for (const chosen of file.files) {
-        const response = await fetch(`/api/jobs/${state.job.id}/inputs?name=${encodeURIComponent(chosen.name)}`, { method: "POST", body: chosen });
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) { showError(new Error(body.error || `Upload failed with HTTP ${response.status}.`)); break; }
-      }
-      await poll();
-    });
-    features.append(label, file);
-  }
-  // Reference lists fold to one counted row and always start collapsed.
-  // Polling redraws this card, so the owner's open/closed choice is kept per title.
-  state.recoveryFolds ??= {};
-  const fold = (title) => {
-    const details = document.createElement("details"); details.className = "recovery-fold";
-    details.open = state.recoveryFolds[title] ?? false;
-    details.addEventListener("toggle", () => { state.recoveryFolds[title] = details.open; });
-    return details;
-  };
-  const list = (title, rows, folded = false) => {
-    if (!rows.length) return;
-    const items = document.createElement("ol");
-    items.append(...rows.map((text) => { const row = document.createElement("li"); row.textContent = text; return row; }));
-    if (!folded) { const heading = document.createElement("h3"); heading.textContent = title; features.append(heading, items); return; }
-    const details = fold(title);
-    const summary = document.createElement("summary"); summary.textContent = `${title} `;
-    summary.append(Object.assign(document.createElement("span"), { textContent: rows.length }));
-    details.append(summary, items); features.append(details);
-    items.scrollTop = state.recoveryFolds[`${title}:scroll`] ?? 0;
-    items.addEventListener("scroll", () => { state.recoveryFolds[`${title}:scroll`] = items.scrollTop; });
-  };
-  const incident = state.job.watch?.incident;
-  if (incident && PARKED.includes(state.job.state)) list("Incident", [`Observed: ${incident.observed}`, `Uncertain: ${incident.uncertain}`, `Tried: ${incident.tried}`, `Preserved: ${incident.preserved}`, `Next: ${state.job.nextAction?.label ?? state.job.nextAction?.reason ?? incident.nextAction}`, ...incident.logs.map((log) => `Log: ${log}`)]);
-  if (phase?.status === "plan_failed") list("Plan review blockers", phase.planBlockers ?? []);
-  if (phase?.plan) {
-    list("Remaining gaps", (phase.request?.checks ?? []).map((check) => `${check.id}: ${check.text}${check.reason ? ` — ${check.reason}` : ""}`), true);
-    // Mirrors pendingChecks in src/wbs.mjs: a check is not verified with its feature while any pending
-    // obligation in this plan, or outstanding from an earlier one, still supports it.
-    const refs = new Set([...phase.plan.slices.flatMap((slice) => slice.acceptance.filter((item) => item.proof?.pending && !(state.job.outstandingProofs ?? []).some(entry => entry.planDigest === phase.planDigest && entry.feature === slice.id && entry.obligation.id === item.id && entry.status !== "pending"))), ...pendingProofs(state.job).map((entry) => entry.obligation)].flatMap((item) => item.refs ?? []));
-    const awaiting = (slice) => (slice.closes ?? []).filter((id) => refs.has(id));
-    list("Features", phase.plan.slices.map((slice) => `${phase.done.includes(slice.id) ? "Verified" : phase.current === slice.id ? "Current" : "Pending"}: ${slice.title} (${(slice.closes ?? slice.checks).join(", ")})${awaiting(slice).length ? `; ${awaiting(slice).join(", ")} pending integration proof` : ""}`), true);
-    list("Outstanding integration proofs", pendingProofs(state.job).map((entry) => `${entry.key}: ${entry.obligation.behavior} — ${entry.obligation.proof.command.join(" ")}`));
-    list("Verification checks", phase.plan.slices.flatMap((slice) => slice.acceptance.map((item) => typeof item === "string" ? item : `${item.id}: ${item.behavior} — ${item.proof.command.join(" ")}${item.proof.pending ? " (runs at integration)" : ""}`)), true);
-    if (phase.status === "ready") { const allowance = document.createElement("p"); allowance.textContent = `Repair allowance: up to ${2 * (phase.plan.slices.length + 1)} attempts (2 per feature plus 2 for the full final review).`; features.append(allowance); }
-    const details = fold("Full plan"); const summary = document.createElement("summary"); summary.textContent = "Full plan with sources and dependencies";
-    const pre = document.createElement("pre"); pre.style.whiteSpace = "pre-wrap"; pre.textContent = JSON.stringify(phase.plan, null, 2); details.append(summary, pre); features.append(details);
-    pre.scrollTop = state.recoveryFolds["Full plan:scroll"] ?? 0; pre.addEventListener("scroll", () => { state.recoveryFolds["Full plan:scroll"] = pre.scrollTop; });
-    if (phase.status === "ready") {
-      const label = document.createElement("label"); label.htmlFor = "recovery-plan-feedback"; label.textContent = "Changes for the repair plan (optional)";
-      const feedback = document.createElement("textarea"); feedback.id = "recovery-plan-feedback"; feedback.maxLength = 6000; feedback.value = state.recoveryPlanFeedback ?? "";
-      feedback.addEventListener("input", () => { state.recoveryPlanFeedback = feedback.value; }); features.append(label, feedback);
-    }
-    if (phase.status === "ready") action("Approve and continue repairs", "recovery-start", { planDigest: phase.planDigest });
-    const usage = repairUsage(state.job);
-    if (usage) { const budget = document.createElement("p"); budget.textContent = `Repair attempts used: This feature: ${usage.feature[0]} of ${usage.feature[1]} · Plan: ${usage.plan[0]} of ${usage.plan[1]}`; features.append(budget); }
-  }
-  $("#recovery-title").textContent = recovery.title;
-  $("#recovery-summary").textContent = recovery.summary;
-  $("#recovery-actions").replaceChildren(...recovery.actions.map((action) => {
-    const item = document.createElement("li");
-    item.textContent = action;
-    return item;
-  }));
-  // Static reassurance only matters once the run has stopped.
-  $(".recovery-meta").classList.toggle("hidden", !PARKED.includes(state.job.state));
-  $("#recovery-workspace").textContent = recovery.workspace;
-  $("#recovery-retry").textContent = recovery.automaticRetry;
-  const restartable = (state.job.sliceDone ?? []).slice(1);
-  $("#recovery-restart").classList.toggle("hidden", restartable.length === 0);
-  $("#recovery-restart-buttons").replaceChildren(...restartable.map((sliceId) => {
-    const button = document.createElement("button");
-    button.className = "button ghost small";
-    button.type = "button";
-    button.textContent = sliceId;
-    button.title = `Rewind the tree to just before ${sliceId} and rebuild from there`;
-    button.addEventListener("click", () => restartFromSlice(sliceId));
-    return button;
-  }));
-}
-
-async function restartFromSlice(sliceId) {
-  clearError();
-  try {
-    await api(`/api/jobs/${state.job.id}/restart`, { method: "POST", body: { fromSlice: sliceId } });
-    await poll();
-    startPolling();
-    refreshProjects();
-  } catch (error) {
-    showError(error);
-  }
-}
-
-// The run map: the plan as a metro line, the selected stop, four status answers and the activity
-// stream. Everything is read from the job record and its event log; nothing here is a second source of truth.
-const PIPELINE_STOPS = [["specifying", "SPEC", "Write the PRD, plan and acceptance contract"], ["building", "BUILD", "Build the application"], ["verifying", "GATES", "Run the deterministic quality gates"], ["reviewing", "REVIEW", "Review against the frozen contract"], ["deploying", "DEPLOY", "Launch and check the application"]];
-const MAP_KINDS = { all: "All", agent: "Agent", file: "Files", gate: "Gates", stage: "Stages" };
-const QUIET_WARN_MS = 10 * 60_000, QUIET_BAD_MS = 30 * 60_000;
-const minutesLabel = (ms) => { const m = Math.floor(ms / 60_000); return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}` : `${m}m`; };
-const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
-
-function mapPlan(job) {
-  const phase = job.recoveryPhase, approved = job.approvedPlan;
-  if (phase?.plan?.slices) return { label: "Repair plan", slices: phase.plan.slices, done: phase.done ?? [], current: phase.current, stats: phase.stats ?? {}, start: phase.approvedAt };
-  if (approved?.plan?.slices) {
-    const slices = approved.plan.slices;
-    return { label: "Feature plan", slices, done: job.sliceDone ?? [], current: job.featureCursor?.id ?? slices[job.sliceIndex ?? 0]?.id, stats: job.sliceStats ?? {}, start: approved.approvedAt };
-  }
-  return null;
-}
-
-function mapStops(job) {
-  const parked = PARKED.includes(job.state), finished = job.state === "completed";
-  const live = (on) => !on ? "queued" : parked ? "blocked" : "current";
-  const plan = mapPlan(job);
-  if (!plan) {
-    const at = PIPELINE_STOPS.findIndex(([stage]) => stage === (parked ? job.failedState : job.state === "repairing" ? "verifying" : job.state));
-    const spent = stateRunningMs(job);
-    return { label: `${sdlcOption(job.sdlc).label} · ${job.provider}`, stops: PIPELINE_STOPS.map(([stage, id, title], index) => ({ id, title, deps: [], ms: spent[stage] ?? 0, status: finished || (at >= 0 && index < at) ? "done" : live(index === at) })) };
-  }
-  let last = Date.parse(plan.start) || null;
-  const stops = plan.slices.map((slice) => {
-    const stat = plan.stats[slice.id] ?? {}, done = plan.done.includes(slice.id), current = !done && !finished && slice.id === plan.current;
-    // Running time since the previous feature was verified: pauses, stops and long silences (job.idleGaps) are subtracted.
-    const ended = done ? Date.parse(stat.verifiedAt) : current ? (parked ? Date.parse(job.updatedAt) : Date.now()) : null;
-    const ms = ended && last ? runningMs(last, ended, job.idleGaps) : 0;
-    if (done && stat.verifiedAt) last = Date.parse(stat.verifiedAt);
-    return { id: slice.id, title: slice.title, deps: (slice.dependsOn ?? []).map((dep) => plan.slices.findIndex((other) => other.id === dep)).filter((index) => index >= 0), ms, reviews: stat.reviews ?? 0, repairs: stat.repairs ?? 0, status: done ? "done" : live(current) };
-  });
-  return { label: `${plan.label} · ${plural(stops.length, "feature")} · ${job.provider}`, stops, features: true };
-}
-
-// Health watches activity, not the event log alone: the agent's streamed tool use and the workspace
-// commands it runs both count, so a long silent stretch means nothing is happening at all.
-function mapHealth(job) {
-  if (job.state === "completed") return { tone: "ok", text: "Finished" };
-  if (job.state === "queued") return { tone: "idle", text: "Queued" };
-  if (job.state === "paused") return { tone: "warn", text: "Paused · needs you" };
-  if (PARKED.includes(job.state)) return { tone: "bad", text: "Stopped · needs you" };
-  const worker = job.supervision?.worker;
-  if (worker?.kind === "command") return { tone: "ok", text: `Running ${worker.gate ?? "a check"} · ${formatSpan(worker.ageMs)}` };
-  const quiet = lastActivityAge(job);
-  if (quiet == null) return { tone: "warn", text: "No activity seen yet" };
-  const tone = quiet < QUIET_WARN_MS ? "ok" : quiet < QUIET_BAD_MS ? "warn" : "bad";
-  return { tone, text: `${tone === "ok" ? "Alive" : "Quiet"} · last activity ${formatSpan(quiet)} ago` };
-}
-
-function lastActivityAge(job) {
-  const at = Math.max(Date.parse(job.supervision?.lastActivityAt ?? "") || 0, Date.parse(state.events.at(-1)?.at ?? "") || 0);
-  return at ? Date.now() - at : null;
 }
 
 const eventKind = (entry) => entry.type.startsWith("gate.") ? "gate"
@@ -1425,106 +175,6 @@ function streamRows(events, filter, cap = 300) {
   }
   return rows;
 }
-
-function renderMap() {
-  const job = state.job, { label, stops, features } = mapStops(job);
-  const live = stops.findIndex((stop) => stop.status === "current" || stop.status === "blocked");
-  const picked = state.mapPick?.job === job.id ? state.mapPick.stop : null;
-  const chosen = stops.findIndex((stop) => stop.id === picked);
-  const selected = picked === "health" ? -1 : chosen >= 0 ? chosen : live >= 0 ? live : Math.max(0, stops.map((stop) => stop.status).lastIndexOf("done"));
-  $("#map-title").textContent = label;
-  const health = mapHealth(job);
-  $("#health").className = `health-pill ${health.tone}`;
-  $("#health").setAttribute("aria-pressed", String(picked === "health"));
-  $("#health-text").textContent = health.text;
-  renderMetro(stops, selected, live);
-  renderStop(stops, selected, picked === "health", health);
-  renderAnswers(stops, live, features);
-  renderStream();
-}
-
-function renderMetro(stops, selected, live) {
-  const svg = $("#metro"), narrow = svg.clientWidth > 0 && svg.clientWidth < 520, width = narrow ? 340 : 680;
-  const perRow = Math.min(stops.length, narrow ? 5 : 9), rows = Math.ceil(stops.length / perRow), step = perRow > 1 ? (width - 100) / (perRow - 1) : 0;
-  const train = live >= 0 ? minutesLabel(stops[live].ms) : "";
-  // Rebuilt only when something visible changes, so the train's animation and keyboard focus survive polling.
-  const signature = `${perRow}|${state.job.id}|${stops.map((stop) => stop.status).join()}|${selected}|${train}`;
-  if (svg.dataset.signature === signature) return;
-  svg.dataset.signature = signature;
-  const focused = svg.contains(document.activeElement) ? document.activeElement.dataset.index : null;
-  const at = (index) => { const row = Math.floor(index / perRow), col = index % perRow; return [row % 2 ? width - 50 - col * step : 50 + col * step, 44 + row * 80]; };
-  const node = (parent, tag, attrs, text) => {
-    const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
-    for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
-    if (text != null) element.textContent = text;
-    parent.append(element); return element;
-  };
-  svg.setAttribute("viewBox", `0 0 ${width} ${44 + (rows - 1) * 80 + 40}`);
-  svg.replaceChildren();
-  const spurs = node(svg, "g", {}), line = node(svg, "g", {});
-  stops.slice(0, -1).forEach((stop, index) => {
-    const [x0, y0] = at(index), [x1, y1] = at(index + 1), dx = x0 > width / 2 ? 56 : -56;
-    node(line, "path", { class: `track${stop.status === "done" && stops[index + 1].status !== "queued" ? " done" : ""}`, d: y0 === y1 ? `M${x0} ${y0} L${x1} ${y1}` : `M${x0} ${y0} C${x0 + dx} ${y0} ${x1 + dx} ${y1} ${x1} ${y1}` });
-  });
-  const deps = new Set(stops[selected]?.deps ?? []);
-  for (const dep of deps) {
-    const [x, y] = at(selected), [dx, dy] = at(dep);
-    node(spurs, "path", { class: "spur", d: `M${x} ${y} Q${(x + dx) / 2} ${y === dy ? y + 40 : (y + dy) / 2} ${dx} ${dy}` });
-  }
-  stops.forEach((stop, index) => {
-    const [x, y] = at(index);
-    const group = node(line, "g", { class: `stop ${stop.status}${index === selected ? " selected" : ""}${deps.has(index) ? " dep" : ""}`, tabindex: 0, role: "button", "data-index": index, "aria-pressed": String(index === selected), "aria-label": `${index + 1}. ${stop.id}, ${stop.status === "done" ? "verified" : stop.status}` });
-    node(group, "circle", { cx: x, cy: y, r: 12 });
-    node(group, "text", { x, y: y + 4 }, index + 1);
-    const pick = () => { state.mapPick = { job: state.job.id, stop: stop.id }; renderMap(); };
-    group.addEventListener("click", pick);
-    group.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); pick(); } });
-  });
-  if (live >= 0) {
-    const [x, y] = at(live), status = stops[live].status;
-    node(line, "text", { class: `stop-name ${status}`, x, y: y - 20 }, stops[live].id);
-    const car = node(line, "g", { class: `train ${status}` });
-    node(car, "rect", { x: x + 16, y: y - 9, width: 34, height: 18, rx: 6 });
-    node(car, "text", { x: x + 33, y: y + 4 }, train);
-  }
-  if (focused != null) svg.querySelector(`[data-index="${focused}"]`)?.focus();
-}
-
-function renderStop(stops, selected, showHealth, health) {
-  const job = state.job;
-  const title = document.createElement("strong"), about = document.createElement("p"), status = document.createElement("p");
-  status.className = "stop-status";
-  if (showHealth) {
-    title.textContent = "Health";
-    about.textContent = "Watches the agent's streamed tool use, the commands it runs and the controller's events.";
-    const quiet = lastActivityAge(job);
-    status.textContent = `${health.text}${job.supervision ? ` · supervision: ${job.supervision.status}` : ""}${quiet != null ? ` · quiet ${formatSpan(quiet)}` : ""} · green under ${QUIET_WARN_MS / 60_000} minutes quiet, amber to ${QUIET_BAD_MS / 60_000}, red past that or when the run stops.`;
-    patchChildren($("#stop"), [title, about, status]);
-    return;
-  }
-  const stop = stops[selected];
-  if (!stop) { patchChildren($("#stop"), []); return; }
-  title.textContent = `${selected + 1} · ${stop.id}`;
-  about.textContent = stop.title;
-  const tone = document.createElement("span");
-  const usage = repairUsage(job);
-  if (stop.status === "done") {
-    tone.className = "ok"; tone.textContent = "Verified";
-    status.append(tone, stop.reviews || stop.repairs || stop.ms ? ` · ${formatSpan(stop.ms)} · ${stop.repairs ? plural(stop.repairs, "repair") : "no repairs"}${stop.reviews ? ` · review passed ${stop.reviews <= 1 ? "first try" : `on pass ${stop.reviews}`}` : ""}` : "");
-  } else if (stop.status === "current") {
-    tone.className = "warn"; tone.textContent = job.stage.split(" — ")[0];
-    status.append(tone, ` · ${minutesLabel(stop.ms)} so far${usage ? ` · ${usage.feature[0]} of ${usage.feature[1]} repairs used` : ""}`);
-  } else if (stop.status === "blocked") {
-    tone.className = "bad"; tone.textContent = job.state === "paused" ? "Paused" : "Stopped";
-    status.append(tone, ` · ${job.error?.message ?? statusCopy(job.state)}`);
-  } else {
-    const waiting = stop.deps.filter((dep) => stops[dep].status !== "done").map((dep) => `${dep + 1} ${stops[dep].id}`);
-    tone.className = "muted"; tone.textContent = "Queued";
-    status.append(tone, waiting.length ? ` · waits on ${waiting.join(", ")}` : " · ready when the line reaches it");
-  }
-  patchChildren($("#stop"), [title, about, status]);
-}
-
 function runningMs(from, to, gaps = []) {
   let ms = Math.max(0, to - from);
   for (const [start, end] of gaps) ms -= Math.max(0, Math.min(to, end) - Math.max(from, start));
@@ -1539,410 +189,6 @@ function stateRunningMs(job, now = Date.now()) {
   }
   return spent;
 }
-
-// Time left from running time only: median per feature (one slow feature should not drag it), the underway feature
-// credited for what it has already run, and a quartile range once there are enough samples.
-function timeLeft(stops, live) {
-  const done = stops.filter((stop) => stop.status === "done" && stop.ms > 0).map((stop) => stop.ms).sort((a, b) => a - b);
-  if (!done.length) return null;
-  const at = (q) => done[Math.min(done.length - 1, Math.floor(q * done.length))];
-  const rest = Math.max(0, stops.filter((stop) => stop.status !== "done").length - (live >= 0 ? 1 : 0));
-  const total = (per) => (live >= 0 ? Math.max(per * 0.25, per - stops[live].ms) : 0) + per * rest;
-  return { median: at(0.5), mid: total(at(0.5)), range: done.length >= 4 ? [total(at(0.25)), total(at(0.75))] : null };
-}
-
-function renderAnswers(stops, live, features) {
-  const job = state.job, parked = PARKED.includes(job.state), quiet = lastActivityAge(job);
-  const recent = state.events.findLast((entry) => eventKind(entry) !== "stage");
-  const moving = job.state === "completed" ? ["ok", "No; the run is finished."]
-    : job.state === "queued" ? ["muted", "Not yet; it is waiting in the queue."]
-      : parked ? ["bad", `No. ${job.state === "paused" ? "Paused on request." : job.error?.message ?? "The run stopped."}`]
-        : quiet != null && quiet >= QUIET_WARN_MS ? [quiet >= QUIET_BAD_MS ? "bad" : "warn", `Quiet for ${formatSpan(quiet)}. ${job.supervision?.status ?? ""}; the safety cap still bounds this turn.`]
-          : ["ok", `Yes. ${recent ? `Last activity: ${recent.message || recent.type}, ${formatSpan(Date.now() - Date.parse(recent.at))} ago.` : job.stage}`];
-  // The current feature's cases only: job.caseResults keeps every case from every feature and superseded plan.
-  const plan = mapPlan(job), slice = plan?.slices.find((item) => item.id === plan.current);
-  const usage = repairUsage(job), cases = (slice?.acceptance ?? []).flatMap((item) => item.cases ?? []).map((item) => job.caseResults?.[item.id] ?? { status: "not run" });
-  const passed = cases.filter((entry) => entry.status === "passed").length;
-  // Each figure names its scope (this feature, this plan, whole run): they differ and read alike otherwise.
-  const feature = [usage && `${usage.feature[0]} of ${usage.feature[1]} repairs used`, cases.length && `${passed} of ${cases.length} acceptance cases pass`].filter(Boolean);
-  const repairs = [feature.length && `This feature: ${feature.join(", ")}.`, usage ? `This plan: ${usage.plan[0]} of ${usage.plan[1]} repairs used.` : `Whole run: ${plural(job.attempt ?? 0, "repair")}.`].filter(Boolean).join(" ");
-  const healthy = [job.supervision?.status === "Progress needs checking" ? "warn" : usage && usage.feature[0] >= usage.feature[1] ? "warn" : "ok", repairs];
-  const verified = stops.filter((stop) => stop.status === "done");
-  const estimate = features ? timeLeft(stops, live) : null;
-  const elapsed = runningMs(Date.parse(job.startedAt || job.createdAt), job.completedAt ? Date.parse(job.completedAt) : Date.now(), job.idleGaps);
-  const far = ["", `${features ? "This plan: " : ""}${verified.length} of ${stops.length} ${features ? "features verified" : "steps done"}${live >= 0 ? `; ${features ? "feature" : "step"} ${live + 1} is ${stops[live].status === "blocked" ? "stopped" : "underway"}` : ""}.${estimate && estimate.mid > 0 ? ` About ${estimate.range ? `${formatSpan(estimate.range[0])} to ${formatSpan(estimate.range[1])}` : formatSpan(estimate.mid)} of running time left (median ${minutesLabel(estimate.median)} a feature).` : ""} Whole run${features ? " (every plan)" : ""}: ${formatSpan(elapsed)} running${usageLine(state.telemetry?.summary?.tokens?.total)}.`];
-  const next = job.nextAction;
-  const needs = parked && next && !["none", "factory-fix"].includes(next.action) ? ["bad", `Yes: ${next.label}${next.reason ? `. ${next.reason}` : ""}`]
-    : job.recoveryPhase?.status === "ready" ? ["warn", "Yes: review and approve the repair plan above."]
-      : parked ? ["bad", "Yes: the run stopped; see the recovery checkpoint above."]
-        : ["ok", "No."];
-  // Shown only where Resume is the offered step, so the owner knows whether pressing it buys progress.
-  const advice = parked && (next?.action === "resume" || job.state === "paused") ? state.telemetry?.spend?.resume : null;
-  patchChildren($("#qa"), [["Moving?", moving], ["Healthy?", healthy], ["How far?", far], ["Needs you?", needs], ...(advice ? [["Safe to resume?", [advice.tone, advice.text]]] : [])].flatMap(([question, [tone, answer]]) => [
-    Object.assign(document.createElement("dt"), { textContent: question }),
-    Object.assign(document.createElement("dd"), { textContent: answer, className: tone }),
-  ]));
-}
-
-// Polling redraws every 1.5s. Replacing nodes wholesale drops the browser's scroll anchor and the page
-// jumps, so keep each existing element and change only the text or class that differs.
-function patchChildren(parent, nodes) {
-  const old = [...parent.children];
-  if (old.length !== nodes.length || old.some((node, index) => node.tagName !== nodes[index].tagName)) { parent.replaceChildren(...nodes); return; }
-  old.forEach((node, index) => {
-    const next = nodes[index];
-    if (node.className !== next.className) node.className = next.className;
-    if (node.innerHTML !== next.innerHTML) node.replaceChildren(...next.childNodes);
-  });
-}
-
-function renderStream() {
-  state.mapFilter ??= "all";
-  if (!$("#chips").childElementCount) {
-    $("#chips").append(...Object.entries(MAP_KINDS).map(([kind, text]) => {
-      const button = Object.assign(document.createElement("button"), { type: "button", textContent: text, className: "button ghost small" });
-      button.dataset.kind = kind;
-      button.addEventListener("click", () => { state.mapFilter = kind; renderStream(); });
-      return button;
-    }));
-  }
-  for (const button of $("#chips").children) button.setAttribute("aria-pressed", String(button.dataset.kind === state.mapFilter));
-  const seen = state.streamSeen?.job === state.job.id ? state.streamSeen.at : null;
-  // Rebuild only when the rows would differ; an unchanged rebuild also resets the list's own scroll.
-  const key = `${state.job.id}|${state.mapFilter}|${state.events.length}|${state.events.at(-1)?.at}`;
-  if ($("#events").dataset.key === key) return;
-  $("#events").dataset.key = key;
-  const rows = streamRows(state.events, state.mapFilter);
-  // Newest rows land on top, so keep the row the owner is reading at the same height; at the top, stay on top for new rows.
-  const list = $("#events"), top = () => list.getBoundingClientRect().top;
-  const anchor = list.scrollTop > 4 ? [...list.children].find((row) => row.getBoundingClientRect().bottom > top()) : null;
-  const held = anchor && { at: anchor.dataset.at, offset: anchor.getBoundingClientRect().top - top() };
-  list.replaceChildren(...rows.map((entry) => {
-    const kind = eventKind(entry), failed = /failed|error/.test(entry.type);
-    const row = document.createElement("div");
-    row.className = `event${failed ? " fail" : ""}${seen && entry.at > seen ? " fresh" : ""}`;
-    const time = document.createElement("time"); time.textContent = new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
-    const badge = Object.assign(document.createElement("i"), { className: `kind ${failed ? "fail" : kind}`, textContent: MAP_KINDS[kind] });
-    const text = document.createElement("span"); text.textContent = entry.message || entry.type;
-    row.append(time, badge, text); row.dataset.at = entry.at;
-    return row;
-  }));
-  const again = held && [...list.children].find((row) => row.dataset.at === held.at);
-  if (again) list.scrollTop += again.getBoundingClientRect().top - top() - held.offset;
-  state.streamSeen = { job: state.job.id, at: state.events.at(-1)?.at ?? seen };
-}
-
-$("#health").addEventListener("click", () => {
-  if (!state.job) return;
-  state.mapPick = { job: state.job.id, stop: state.mapPick?.job === state.job.id && state.mapPick.stop === "health" ? null : "health" };
-  renderMap();
-});
-
-function renderArtifacts() {
-  const canShow = stageOrder.indexOf(state.job.state) > 0 || ["failed", "completed"].includes(state.job.state);
-  if (!canShow) return;
-  const names = [["prd", "Product requirements"], ["plan", "Build plan"], ["acceptance", "Acceptance contract"], ["requirements", "Frozen input"], ["manifest", "Runtime manifest"]];
-  if (state.job.sdlc === "slices") names.splice(4, 0, ["slices", "Slice plan"]);
-  $("#artifacts").replaceChildren(...names.map(([name, label]) => {
-    const link = document.createElement("a");
-    link.className = "artifact"; link.href = `/api/jobs/${state.job.id}/artifacts/${name}`; link.target = "_blank";
-    const text = document.createElement("strong"); text.textContent = label;
-    const arrow = document.createElement("span"); arrow.textContent = "↗";
-    link.append(text, arrow); return link;
-  }));
-}
-
-// "· 398K tokens in · 14K out". No dollar figure: members run on subscriptions, and the CLI's
-// list-price cost read as an API bill. Cost stays in runs.jsonl.
-function usageLine(usage, short = false) {
-  if (!usage) return "";
-  const count = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(n);
-  return short ? ` · ${count(usage.inputTokens)} in · ${count(usage.outputTokens)} out` : ` · ${count(usage.inputTokens)} tokens in · ${count(usage.outputTokens)} out`;
-}
-
-function renderAppMetrics() {
-  const app = state.telemetry?.app;
-  if (!app || app.unavailable) return;
-  const routes = Array.isArray(app.routes)
-    ? app.routes
-    : Object.entries(app.routes ?? {}).map(([path, count]) => ({ method: "", path, count }));
-  $("#request-total").textContent = app.requests.total;
-  $("#error-total").textContent = app.requests.errors;
-  $("#latency-average").textContent = `${app.latencyMs.average} ms`;
-  $("#app-uptime").textContent = formatDuration(app.uptimeSeconds * 1000);
-  $("#app-live").textContent = "Live";
-  $("#app-live").classList.remove("muted");
-  $("#route-list").replaceChildren(...routes.slice(0, 8).map((route) => {
-    const row = document.createElement("div"); row.className = "route";
-    for (const value of [route.method, route.path, String(route.count)]) { const span = document.createElement("span"); span.textContent = value; row.append(span); }
-    return row;
-  }));
-}
-
-$("#pause-button").addEventListener("click", async () => {
-  clearError();
-  try {
-    await api(`/api/jobs/${state.job.id}/pause`, { method: "POST", body: {} });
-    state.pausing = true; // ponytail: cleared when the run parks; the run keeps polling until then
-    $("#pause-button").textContent = `Pausing after ${state.job.stage}…`;
-    $("#pause-button").disabled = true;
-  } catch (error) {
-    showError(error);
-  }
-});
-
-$("#relaunch-button").addEventListener("click", async () => {
-  clearError();
-  $("#relaunch-button").disabled = true;
-  $("#relaunch-button").textContent = "Relaunching…";
-  await api(`/api/jobs/${state.job.id}/relaunch`, { method: "POST", body: {} }).catch(showError);
-  $("#relaunch-button").disabled = false;
-  $("#relaunch-button").textContent = "Relaunch app";
-  await poll();
-});
-
-$("#cancel-button").addEventListener("click", async () => {
-  await api(`/api/jobs/${state.job.id}/cancel`, { method: "POST", body: {} }).catch(showError);
-  await poll();
-  refreshProjects();
-});
-
-// A parked run holds its project's queue so nothing builds on a half-repaired tree; dismiss releases it.
-$("#dismiss-button").addEventListener("click", async () => {
-  clearError();
-  try {
-    await api(`/api/jobs/${state.job.id}/dismiss`, { method: "POST", body: {} });
-    await poll();
-    refreshProjects();
-  } catch (error) {
-    showError(error);
-  }
-});
-
-$("#resume-button").addEventListener("click", async () => {
-  clearError();
-  $("#resume-button").disabled = true;
-  try {
-    await api(`/api/jobs/${state.job.id}/resume`, { method: "POST", body: {} });
-    await poll();
-    startPolling();
-    refreshProjects();
-  } catch (error) {
-    showError(error);
-  } finally {
-    $("#resume-button").disabled = false;
-  }
-});
-
-$("#copy-recovery-button").addEventListener("click", async () => {
-  clearError();
-  try {
-    const response = await fetch(`/api/jobs/${state.job.id}/recovery-packet`);
-    if (!response.ok) throw new Error(`Recovery packet failed with HTTP ${response.status}.`);
-    await navigator.clipboard.writeText(await response.text());
-    $("#copy-recovery-button").textContent = "Copied — paste into Codex";
-    setTimeout(() => { $("#copy-recovery-button").textContent = "Copy recovery packet"; }, 2500);
-  } catch (error) {
-    showError(error);
-  }
-});
-
-$("#start-over-button").addEventListener("click", async () => {
-  clearError();
-  try {
-    const { job } = await api(`/api/jobs/${state.job.id}/retry`, { method: "POST", body: {} });
-    state.job = job;
-    state.events = [];
-    state.telemetry = null;
-    localStorage.setItem("solofactory.currentJob", job.id);
-    resetRunPanels();
-    showRun();
-    poll();
-    startPolling();
-    refreshProjects();
-  } catch (error) {
-    showError(error);
-  }
-});
-
-// Reopen this stopped run's brief and conversation in the interview. The run stays parked until the
-// revised brief is queued, which replaces it.
-$("#revise-brief-button").addEventListener("click", async () => {
-  clearError();
-  try {
-    const { draft } = await api("/api/interview/draft");
-    const id = state.job.id;
-    // Already revising this run: reopen that draft with its edits. Another unfinished interview needs a second
-    // click to replace (an inline step: confirm() dialogs are silently declined in some embedded browsers).
-    if (draft?.revises !== id) {
-      if (draft?.messages?.length > 1 && state.reviseArmed !== id) {
-        state.reviseArmed = id;
-        $("#revise-brief-button").textContent = "Replace unfinished interview? Click again";
-        return;
-      }
-      await api(`/api/jobs/${id}/revise`, { method: "POST", body: {} });
-    }
-    state.reviseArmed = null;
-    showInterview();
-  } catch (error) {
-    showError(error);
-  }
-});
-
-// Feedback dialog. Preview is rendered server-side; the browser only shows and copies the exact markdown it received.
-const feedback = { trigger: null, markdown: null, fingerprint: null, jobId: null };
-const feedbackDialog = $("#feedback-dialog");
-
-// Update notice: a pill in the header that stays until the owner updates; details open on click.
-// A page load reuses the server's recent answer; pressing the button when no update is known asks again.
-let updateNotice = null;
-async function checkUpdate({ manual = false } = {}) {
-  const button = $("#update-button");
-  const result = await api(`/api/update${manual ? "?force=1" : ""}`).catch(() => ({ error: true }));
-  if (result.newer) {
-    updateNotice = result;
-    $("#update-text").textContent = `SoloFactory ${result.latest} is available. You have ${result.current}.`;
-    $("#update-prompt").textContent = result.prompt;
-    button.textContent = "Update available";
-    button.classList.add("update-available");
-    button.title = `${result.current} → ${result.latest}`;
-    if (manual) $("#update-pop").showPopover();
-    return;
-  }
-  if (!manual) return;
-  button.textContent = result.disabled ? "Update checks off" : result.error ? "Couldn't check" : `Up to date (${result.current})`;
-  setTimeout(() => { if (!updateNotice) button.textContent = "Check for updates"; }, 4000);
-}
-$("#update-button").addEventListener("click", () => (updateNotice ? $("#update-pop").togglePopover() : checkUpdate({ manual: true })));
-$("#update-copy").addEventListener("click", () => navigator.clipboard?.writeText($("#update-prompt").textContent).then(() => { $("#update-copy").textContent = "Copied"; }).catch(() => {}));
-$("#feedback-button").addEventListener("click", (event) => openFeedback(event.currentTarget, { mode: "improvement" }));
-$("#report-run-button").addEventListener("click", (event) => openFeedback(event.currentTarget, { mode: "problem", jobId: state.job?.id }));
-$("#feedback-close-button").addEventListener("click", () => feedbackDialog.close());
-feedbackDialog.addEventListener("close", () => feedback.trigger?.focus());
-// Native <dialog> closes on Escape via the cancel event; some embedded browsers skip it, so close explicitly too.
-feedbackDialog.addEventListener("keydown", (event) => { if (event.key === "Escape") { event.preventDefault(); feedbackDialog.close(); } });
-for (const radio of document.querySelectorAll('#feedback-form input[name="mode"]')) radio.addEventListener("change", renderFeedbackMode);
-
-function openFeedback(trigger, { mode, jobId = null }) {
-  Object.assign(feedback, { trigger, markdown: null, fingerprint: null, jobId });
-  const form = $("#feedback-form");
-  form.reset();
-  form.querySelector(`input[name="mode"][value="${mode}"]`).checked = true;
-  $("#feedback-diagnostics-row").classList.toggle("hidden", !jobId);
-  // Cancelled runs are reportable, but the user chose to stop, so diagnostics start unticked.
-  $("#feedback-diagnostics").checked = Boolean(jobId) && state.job?.state !== "cancelled";
-  const issues = state.config?.issues;
-  $("#feedback-privacy").textContent = `Nothing is sent anywhere until you send the email${issues ? " or open GitHub" : ""} yourself.`;
-  $("#feedback-search-button").classList.toggle("hidden", !issues);
-  $("#feedback-github-button").classList.toggle("hidden", !issues);
-  setFeedbackPreview(null);
-  renderFeedbackMode();
-  feedbackDialog.showModal();
-}
-
-function renderFeedbackMode() {
-  const problem = feedbackMode() === "problem";
-  // Disabled fieldsets drop out of FormData and constraint validation, so hidden required fields never block submit.
-  $("#feedback-problem-fields").disabled = !problem;
-  $("#feedback-problem-fields").classList.toggle("hidden", !problem);
-  $("#feedback-improvement-fields").disabled = problem;
-  $("#feedback-improvement-fields").classList.toggle("hidden", problem);
-  setFeedbackPreview(null);
-}
-
-function feedbackMode() { return $("#feedback-form").elements.mode.value; }
-
-function setFeedbackPreview(result) {
-  feedback.markdown = result?.markdown ?? null;
-  feedback.fingerprint = result?.fingerprint ?? null;
-  $("#feedback-preview").textContent = feedback.markdown ?? "Choose Preview report to see exactly what will be copied.";
-  $("#feedback-redacted").classList.toggle("hidden", !result?.redacted);
-  for (const id of ["email", "copy", "search", "github"]) $(`#feedback-${id}-button`).disabled = !feedback.markdown;
-  $("#feedback-copy-button").textContent = "Copy report";
-  $("#feedback-email-button").innerHTML = "Copy &amp; open email <span>↗</span>";
-}
-
-$("#feedback-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const form = event.currentTarget;
-  $("#feedback-error").classList.add("hidden");
-  if (!form.reportValidity()) return;
-  const fields = Object.fromEntries([...new FormData(form)].filter(([key]) => key !== "mode"));
-  $("#feedback-preview-button").disabled = true;
-  try {
-    const includeDiagnostics = Boolean(feedback.jobId) && $("#feedback-diagnostics").checked;
-    setFeedbackPreview(await api("/api/feedback/preview", { method: "POST", body: { mode: feedbackMode(), fields, jobId: feedback.jobId, includeDiagnostics } }));
-  } catch (error) {
-    $("#feedback-error").textContent = error.message;
-    $("#feedback-error").classList.remove("hidden");
-  } finally {
-    $("#feedback-preview-button").disabled = false;
-  }
-});
-
-async function copyFeedback(button) {
-  if (!feedback.markdown) return false;
-  try {
-    await navigator.clipboard.writeText(feedback.markdown);
-    button.textContent = "Copied";
-    return true;
-  } catch {
-    // Clipboard API needs a secure context; a LAN-hosted http:// page falls back to selecting the preview.
-    window.getSelection().selectAllChildren($("#feedback-preview"));
-    button.textContent = "Press ⌘C / Ctrl+C to copy";
-    return false;
-  }
-}
-
-$("#feedback-copy-button").addEventListener("click", (event) => copyFeedback(event.currentTarget));
-
-$("#feedback-email-button").addEventListener("click", async (event) => {
-  // Subject only; the body goes via the clipboard because reports can exceed mailto length limits.
-  const button = event.currentTarget; // currentTarget is null after the await
-  if (!(await copyFeedback(button))) return;
-  button.textContent = "Copied — paste into the email";
-  window.location.href = `mailto:support@coachlou.com?subject=${encodeURIComponent("SoloFactory Feedback")}`;
-});
-
-$("#feedback-search-button").addEventListener("click", () => {
-  const query = feedback.fingerprint ?? $("#feedback-title").value.trim().slice(0, 100);
-  window.open(`${state.config.issues.base}?q=${encodeURIComponent(`is:issue ${query}`)}`, "_blank", "noopener");
-});
-
-$("#feedback-github-button").addEventListener("click", () => {
-  const problem = feedbackMode() === "problem";
-  const title = `${problem ? "[Problem]" : "[Improvement]"} ${$("#feedback-title").value.trim()}`;
-  // Title only. The report body travels via the clipboard, never in a URL.
-  window.open(`${state.config.issues.base}/new?template=${problem ? "problem" : "improvement"}.yml&title=${encodeURIComponent(title)}`, "_blank", "noopener");
-});
-
-function startPolling() {
-  stopPolling();
-  state.poller = setInterval(poll, 1500);
-}
-
-function stopPolling() {
-  if (state.poller) clearInterval(state.poller);
-  state.poller = null;
-}
-
-function statusCopy(status) {
-  return ({ queued: "The run is queued.", specifying: "Turning the interview into a build contract.", building: "The coding agent is implementing the app.", verifying: "The controller is running the real checks.", repairing: "A failed gate is being repaired, then every gate runs again.", reviewing: "The implementation is being audited against the frozen contract.", deploying: "The app is starting and its health and metrics endpoints are being checked.", completed: "The app is live and its evidence is preserved." })[status] || "Factory activity is recorded below.";
-}
-
-// Readable at any length: 45s, 12m 05s, 2h 05m, 6d 1h.
-function formatSpan(milliseconds) {
-  const s = Math.max(0, Math.floor(milliseconds / 1000)), m = Math.floor(s / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
-  const pad = (n) => String(n).padStart(2, "0");
-  return d ? `${d}d ${h % 24}h` : h ? `${h}h ${pad(m % 60)}m` : m ? `${m}m ${pad(s % 60)}s` : `${s}s`;
-}
-
-function formatDuration(milliseconds) {
-  const seconds = Math.max(0, Math.floor(milliseconds / 1000));
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
-}
-
 async function api(url, options = {}) {
   const response = await fetch(url, {
     ...options,
@@ -1953,13 +199,6 @@ async function api(url, options = {}) {
   if (!response.ok && !options.allow?.includes(response.status)) throw Object.assign(new Error(body.error || `Request failed with HTTP ${response.status}.`), { body });
   return body;
 }
-
-function showError(error) {
-  $("#notice").textContent = error.message || String(error);
-  $("#notice").classList.remove("hidden");
-  reportError(error);
-}
-
 // Every error the owner sees also lands in the factory's error log. Fire-and-forget: a failed report stays silent.
 function reportError(error, action = "notice") {
   fetch("/api/errors", {
@@ -1971,4 +210,1062 @@ function reportError(error, action = "notice") {
 window.addEventListener("error", (event) => reportError(event.error ?? event.message, "uncaught"));
 window.addEventListener("unhandledrejection", (event) => reportError(event.reason, "unhandled rejection"));
 
-function clearError() { $("#notice").classList.add("hidden"); }
+class Component extends DCLogic {
+  state = {
+    pid: 'nm', panel: 'run', docName: '', draft: '', nextId: 100,
+    themeMode: 'auto', themeOpen: false, groupsOpen: { needs: true, running: true, queued: true, done: false }, selRun: 0, pmOpen: false, navOpen: false, rowMenu: 0, info: null, np: null, cfgOpen: false, cfgVals: {}, cfgTouched: false, extra: [], provider: {},
+    viewer: '', viewerEdit: false, vdraft: '', activeSec: -1, secDraft: '', docEdits: {}, docAdds: {}, docChat: {},
+    runs: [
+      { id: 1, pid: 'nm', kind: 'feature', title: 'Batch re-run report', state: 'building', idx: 2, trap: true, repairs: 0 },
+      { id: 11, pid: 'nm', kind: 'fix', title: 'Pattern counts round off the last decimal', state: 'queued', idx: 0, repairs: 0 },
+      { id: 13, pid: 'nm', kind: 'feature', title: 'CSV export of the results table', state: 'queued', idx: 0, repairs: 0 },
+      { id: 15, pid: 'nm', kind: 'feature', title: 'Tag transcripts by coaching client', state: 'queued', idx: 0, repairs: 0 }
+    ],
+    threads: {
+      nm: [
+        { id: 1, type: 'user', text: 'Add a batch re-run report so I can see which transcripts changed between runs.' },
+        { id: 2, type: 'pick', kind: 'feature', sent: true, ask: 'Batch re-run report', runId: 1 },
+        { id: 3, type: 'run', runId: 1 },
+        { id: 4, type: 'guide', text: 'It is with the factory. When the gates pass I will add the report to FEATURES.md and its checks to ACCEPTANCE.md. Keep going here or switch projects. Nothing stops.' },
+        { id: 10, type: 'user', text: 'Pattern counts round off the last decimal.' },
+        { id: 11, type: 'pick', kind: 'fix', sent: true, ask: 'Pattern counts round off the last decimal', runId: 11 },
+        { id: 12, type: 'run', runId: 11 },
+        { id: 13, type: 'user', text: 'Add CSV export of the results table.' },
+        { id: 14, type: 'pick', kind: 'feature', sent: true, ask: 'CSV export of the results table', runId: 13 },
+        { id: 15, type: 'run', runId: 13 },
+        { id: 16, type: 'user', text: 'Let me tag transcripts by coaching client.' },
+        { id: 17, type: 'pick', kind: 'feature', sent: true, ask: 'Tag transcripts by coaching client', runId: 15 },
+        { id: 18, type: 'run', runId: 15 },
+        { id: 19, type: 'guide', text: 'Three runs are queued behind the batch report, in the order you sent them. Each starts by itself when the one before it ships, so each builds on the last. Reorder or remove them in the Run panel.' }
+      ],
+      al: [
+        { id: 5, type: 'user', text: 'The search box drops the last word when I paste a long title.' },
+        { id: 6, type: 'pick', kind: 'fix', sent: false, ask: 'Search drops the last word of a pasted title' }
+      ],
+      mp: [
+        { id: 7, type: 'guide', text: 'Member Portal has no documents yet. Tell me what you want to build and I will start a full brief. If the app already exists in a folder, say so and I will adopt it and write the baseline from the code.' }
+      ]
+    }
+  };
+
+  componentDidMount() { this.timer = setInterval(() => this.tick(), 3500); }
+  componentWillUnmount() { clearInterval(this.timer); }
+  componentDidUpdate(prevProps, prevState) {
+    if (this.state.activeSec >= 0 && (!prevState || prevState.activeSec !== this.state.activeSec)) {
+      try { const el = document.getElementById('sec-edit'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } } catch (e) {}
+    }
+  }
+
+  projectList() {
+    return [
+      { id: 'nm', name: 'Nugget Mining', live: 'Live at 127.0.0.1:4310 · release 12', hasDocs: true, url: 'http://127.0.0.1:4310', release: 'release 12' },
+      { id: 'al', name: 'Ambient Library', live: 'Live at 127.0.0.1:4322 · release 4', hasDocs: true, url: 'http://127.0.0.1:4322', release: 'release 4' },
+      { id: 'mp', name: 'Member Portal', live: 'Not built yet', hasDocs: false }
+    ].concat((this.state && this.state.extra) || []);
+  }
+
+  kinds() {
+    return {
+      fix: { label: 'Quick fix', chipBg: 'var(--raise)', chipFg: 'var(--text2)', cta: 'Send to the factory', steps: ['Fix note', 'Build', 'Gates', 'Deploy', 'Update docs'] },
+      feature: { label: 'Feature', chipBg: 'var(--raise2)', chipFg: 'var(--fg)', cta: 'Send to the factory', steps: ['Feature spec', 'Plan', 'Build', 'Gates', 'Review', 'Deploy', 'Update docs'] },
+      prd: { label: 'Full brief', chipBg: 'var(--raise)', chipFg: 'var(--text2)', cta: 'Start the interview', steps: ['Interview', 'PRD and plan', 'Planned features', 'Gates', 'Review', 'Deploy', 'Update docs'] }
+    };
+  }
+
+  why(kind, proj) {
+    if (!proj.hasDocs) return 'This project has no PRD.md, so there is no baseline to build on. One interview writes it. After that, small requests stay small.';
+    if (kind === 'fix') return 'FEATURES.md already describes this behavior, so it is a correction, not new scope. One rule changes. No new data, screen or flow. No interview needed.';
+    if (kind === 'feature') return 'PRD.md covers the product and its users. This adds one capability beside the existing ones, so a short feature spec is enough. I will ask only what the documents do not answer.';
+    return 'This changes what the product is for or how its data is shaped, so PRD.md itself has to change before anything is built.';
+  }
+
+  sizeUp(text, proj) {
+    if (!proj.hasDocs) return 'prd';
+    const t = text.toLowerCase();
+    if (/(fix|bug|typo|broken|wrong|crash|drops|error|fails)/.test(t)) return 'fix';
+    if (/(rebuild|redesign|from scratch|new app|version 2|v2|rewrite|multi-user|new prd)/.test(t)) return 'prd';
+    return 'feature';
+  }
+
+  slug(text) {
+    return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 26);
+  }
+
+  short(text) {
+    return text.length > 60 ? text.slice(0, 57) + '...' : text;
+  }
+
+  activeIn(runs, pid) {
+    return runs.find((r) => r.pid === pid && ['building', 'pausing', 'paused', 'stuck', 'revising'].indexOf(r.state) >= 0) || null;
+  }
+
+  startNext(runs) {
+    const out = runs.slice();
+    out.forEach((r, i) => {
+      if (r.state !== 'queued') return;
+      const slots = out.filter((x) => x.state === 'building' || x.state === 'pausing').length;
+      if (slots < 2 && !this.activeIn(out, r.pid)) out[i] = { ...r, state: 'building', idx: 0 };
+    });
+    return out;
+  }
+
+  tick() {
+    const s = this.state;
+    const K = this.kinds();
+    const notes = [];
+    let runs = s.runs.map((r) => {
+      const steps = K[r.kind].steps;
+      if (r.state === 'pausing') {
+        if (r.idx + 1 >= steps.length) { notes.push([r.pid, 'Shipped. The new release is live, and I updated the documents to match what was built.']); return { ...r, state: 'shipped', idx: steps.length }; }
+        notes.push([r.pid, 'Paused before ' + steps[r.idx + 1] + '. The work so far is committed and passing. Resume, restart from an earlier step, or cancel from the run panel.']);
+        return { ...r, state: 'paused', idx: r.idx + 1 };
+      }
+      if (r.state !== 'building') return r;
+      if (r.trap && steps[r.idx] === 'Gates') {
+        notes.push([r.pid, 'I parked the run. One check failed twice, even after a repair, so I stopped instead of burning more turns. Open the run to let me plan a different repair, restart from an earlier step, or cancel. Queued work in this project waits for your call.']);
+        return { ...r, state: 'stuck', trap: false };
+      }
+      if (r.idx + 1 >= steps.length) { notes.push([r.pid, 'Shipped. The new release is live, and I updated FEATURES.md and ACCEPTANCE.md to match what was built.']); return { ...r, state: 'shipped', idx: steps.length }; }
+      return { ...r, idx: r.idx + 1 };
+    });
+    runs = this.startNext(runs);
+    const threads = { ...s.threads };
+    let id = s.nextId;
+    notes.forEach((n) => { threads[n[0]] = threads[n[0]].concat([{ id: id++, type: 'guide', text: n[1] }]); });
+    this.setState({ runs: runs, threads: threads, nextId: id });
+  }
+
+  patchRun(id, patch) {
+    const runs = this.state.runs.map((r) => (r.id === id ? { ...r, ...patch } : r));
+    this.setState({ runs: this.startNext(runs) });
+  }
+
+  runLine(r, runs) {
+    const steps = this.kinds()[r.kind].steps;
+    const at = steps[Math.min(r.idx, steps.length - 1)];
+    if (r.state === 'queued') return this.activeIn(runs, r.pid) ? 'Queued · starts when the current run in this project finishes' : 'Queued · waiting for a free build slot';
+    if (r.state === 'building') return 'Step ' + (r.idx + 1) + ' of ' + steps.length + ' · ' + at + (r.repairs ? ' · repair in progress' : '');
+    if (r.state === 'pausing') return 'Pausing as soon as ' + at + ' finishes';
+    if (r.state === 'paused') return 'Paused before ' + at + ' · work so far is committed';
+    if (r.state === 'stuck') return 'Parked at ' + at + ' · the same check failed twice';
+    if (r.state === 'shipped') return 'Shipped · live · documents updated';
+    if (r.state === 'revising') return 'Revising the spec · nothing is building';
+    return 'Cancelled · nothing was deployed · the spec is kept';
+  }
+
+  alertOf(r) {
+    if (!r) return '';
+    if (r.state === 'stuck') return 'var(--red)';
+    if (r.state === 'paused') return 'var(--amber)';
+    return '';
+  }
+
+  runSegs(r) {
+    return this.kinds()[r.kind].steps.map((x, i) => ({
+      bg: r.state === 'shipped' ? 'var(--dim)' : r.state === 'cancelled' || r.state === 'queued' || r.state === 'revising' ? 'var(--track)' : i < r.idx ? 'var(--dim)' : i > r.idx ? 'var(--track)' : (this.alertOf(r) || 'var(--inv)')
+    }));
+  }
+
+  runCtrls(r) {
+    const plain = { bg: 'transparent', fg: 'var(--fg)', border: 'var(--line3)' };
+    const main = { bg: 'var(--inv)', fg: 'var(--inv-fg)', border: 'var(--inv)' };
+    const risk = { bg: 'transparent', fg: 'var(--fg)', border: 'var(--line2)' };
+    const cancel = { label: 'Cancel run', act: () => this.patchRun(r.id, { state: 'cancelled' }), ...risk };
+    const revise = { label: 'Revise the spec', act: () => this.revise(r), ...plain };
+    if (r.state === 'queued') return [{ label: 'Remove from queue', act: () => this.patchRun(r.id, { state: 'cancelled' }), ...risk }];
+    if (r.state === 'building') return [{ label: 'Pause after this step', act: () => this.patchRun(r.id, { state: 'pausing' }), ...plain }, cancel];
+    if (r.state === 'paused') return [{ label: 'Resume', act: () => this.patchRun(r.id, { state: 'building' }), ...main }, revise, cancel];
+    if (r.state === 'stuck') return [{ label: 'Let the Guide plan a repair', act: () => this.patchRun(r.id, { state: 'building', repairs: r.repairs + 1 }), ...main }, revise, cancel];
+    if (r.state === 'cancelled') return [{ ...revise, label: 'Revise and resubmit' }];
+    if (r.state === 'revising') return [{ label: 'Resubmit to the factory', act: () => this.patchRun(r.id, { state: 'queued', idx: 0, trap: false, rev: (r.rev || 1) + 1 }), ...main }, { label: 'Discard changes', act: () => this.discard(r), ...risk }];
+    return [];
+  }
+
+  showInfo(title, text) {
+    this.setState({ info: { title: title, text: text } });
+  }
+
+  moreCtrls(r) {
+    const out = [];
+    if (r.state === 'stuck' || r.state === 'paused') {
+      out.push({ label: 'Copy recovery packet', act: () => this.showInfo('Copy recovery packet', 'Copies a summary of the parked run, with its stage, error, last check output and changed files, to paste into Claude Code or Codex for help.') });
+    }
+    if (r.state === 'stuck' || r.state === 'cancelled') {
+      out.push({ label: 'Start over from scratch', act: () => {
+        const st = this.state;
+        const runs = st.runs.map((x) => (x.id === r.id ? { ...x, state: 'dismissed' } : x)).concat([{ id: st.nextId, pid: r.pid, kind: r.kind, title: r.title, state: 'queued', idx: 0, repairs: 0 }]);
+        const th = st.threads[r.pid].map((m) => (m.runId === r.id ? { ...m, runId: st.nextId } : m));
+        this.setState({ nextId: st.nextId + 1, runs: this.startNext(runs), selRun: st.nextId, threads: { ...st.threads, [r.pid]: th } });
+      } });
+    }
+    if (r.state === 'stuck' || r.state === 'paused' || r.state === 'cancelled') {
+      out.push({ label: 'Report this run', act: () => this.showInfo('Report this run', 'Opens the Feedback form with this run\'s diagnostics: version, platform, error code, failed stage, check, counts and recent event types. Never your brief, transcript, agent output or file paths. Nothing is sent until you send it.') });
+    }
+    if (r.state === 'cancelled') {
+      out.push({ label: 'Dismiss', act: () => this.patchRun(r.id, { state: 'dismissed' }) });
+    }
+    return out;
+  }
+
+  settingsDefs() {
+    const lv = [['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
+    return [
+      { title: 'AI and models', fields: [
+        { key: 'provider', label: 'Builds with', type: 'select', def: 'Claude Code', options: [['Claude Code', 'Claude Code'], ['Codex', 'Codex']], help: 'For new requests. You can switch one project from the Guide box.' },
+        { key: 'claudeModel', label: 'Claude: coding model', type: 'select', def: 'sonnet', options: [['sonnet', 'sonnet'], ['opus', 'opus'], ['haiku', 'haiku']], env: 'SOLOFACTORY_CLAUDE_MODEL', help: 'Writes and repairs the code.' },
+        { key: 'claudeEffort', label: 'Claude: coding effort', type: 'select', def: 'medium', options: lv, env: 'SOLOFACTORY_CLAUDE_EFFORT', help: 'More effort is slower and uses more of your subscription.' },
+        { key: 'claudeReason', label: 'Claude: planning and review model', type: 'select', def: 'opus', options: [['opus', 'opus'], ['sonnet', 'sonnet']], env: 'SOLOFACTORY_CLAUDE_REASONING_MODEL', help: 'Specification, feature plan, plan review and final review.' },
+        { key: 'claudeReasonEffort', label: 'Claude: planning and review effort', type: 'select', def: 'low', options: lv, env: 'SOLOFACTORY_CLAUDE_REASONING_EFFORT', help: '' },
+        { key: 'guideModel', label: 'Claude: Guide model', type: 'select', def: 'opus', options: [['opus', 'opus'], ['sonnet', 'sonnet']], env: 'SOLOFACTORY_CLAUDE_GUIDE_MODEL', help: 'Runs the conversation with you.' },
+        { key: 'guideEffort', label: 'Claude: Guide effort', type: 'select', def: 'medium', options: lv, env: 'SOLOFACTORY_CLAUDE_GUIDE_EFFORT', help: '' },
+        { key: 'guideAdvisor', label: 'Claude: Guide advisor', type: 'toggle', def: true, env: 'SOLOFACTORY_CLAUDE_GUIDE_ADVISOR', help: 'A second opus opinion on the Guide\'s answers. Off uses less of your subscription.' },
+        { key: 'codexModel', label: 'Codex: model', type: 'text', def: 'gpt-6.1-sol', env: 'SOLOFACTORY_CODEX_MODEL', locked: true, help: 'Used for every Codex stage.' },
+        { key: 'codexEffort', label: 'Codex: reasoning effort', type: 'select', def: 'medium', options: lv, env: 'SOLOFACTORY_CODEX_REASONING_EFFORT', help: '' }
+      ] },
+      { title: 'Capacity', fields: [
+        { key: 'maxActive', label: 'Runs building at once', type: 'number', def: '1', min: '1', max: '8', env: 'SOLOFACTORY_MAX_ACTIVE_RUNS', help: 'Across different projects. Runs in one project always go one after another. More runs at once reach your subscription limits sooner.' },
+        { key: 'featureReview', label: 'Feature review', type: 'select', def: 'all', options: [['all', 'Every feature'], ['risky', 'Risky features only']], env: 'SOLOFACTORY_FEATURE_REVIEW', help: 'Reviewing every feature is safer and slower.' }
+      ] },
+      { title: 'Run safeguards', fields: [
+        { key: 'maxRepairs', label: 'Repairs per failed check', type: 'number', def: '2', min: '0', max: '10', env: 'SOLOFACTORY_MAX_REPAIRS', help: 'Repair attempts before a feature parks and asks you.' },
+        { key: 'loop', label: 'Stop after identical failures', type: 'number', def: '3', min: '2', max: '10', env: 'SOLOFACTORY_LOOP_THRESHOLD', help: 'Parks a run when the same failure repeats on unchanged code.' },
+        { key: 'workers', label: 'Agent turns per run', type: 'number', def: '150', min: '0', max: '', env: 'SOLOFACTORY_MAX_RUN_WORKERS', help: '0 turns this cap off. A parked run can be granted more.' },
+        { key: 'tokens', label: 'Tokens per run', type: 'number', def: '40000000', min: '0', max: '', env: 'SOLOFACTORY_MAX_RUN_TOKENS', help: 'Reported tokens, cached input included. 0 turns this cap off.' },
+        { key: 'cost', label: 'Cost per run', type: 'number', def: '30', min: '0', max: '', unit: 'USD', env: 'SOLOFACTORY_MAX_RUN_COST_USD', help: 'Reported cost. 0 turns this cap off.' },
+        { key: 'progress', label: 'Progress warning', type: 'number', def: '20', min: '0', max: '240', unit: 'min', env: 'SOLOFACTORY_PROGRESS_MINUTES', help: 'Warns when no feature or plan lands for this long. It never stops a run.' },
+        { key: 'gate', label: 'Check time limit', type: 'number', def: '5', min: '1', max: '60', unit: 'min', env: 'SOLOFACTORY_GATE_MINUTES', help: 'A test or proof check that runs longer is stopped. Install gets 10 minutes.' },
+        { key: 'idle', label: 'Agent silence limit', type: 'number', def: '6', min: '1', max: '', unit: 'min', env: 'SOLOFACTORY_AGENT_IDLE_MINUTES', help: 'An agent turn with no output for this long is stopped.' },
+        { key: 'hard', label: 'Agent turn limit', type: 'number', def: '45', min: '1', max: '', unit: 'min', env: 'SOLOFACTORY_AGENT_HARD_MINUTES', help: 'The longest any one agent turn may run.' }
+      ] },
+      { title: 'Updates and feedback', fields: [
+        { key: 'updateCheck', label: 'Check for updates', type: 'toggle', def: true, env: 'SOLOFACTORY_UPDATE_CHECK', help: 'One small request on start and when you ask. No background polling. It never updates by itself.' },
+        { key: 'issues', label: 'Issue tracker', type: 'text', def: '', env: 'SOLOFACTORY_ISSUES_URL', help: 'A GitHub issues page, such as https://github.com/owner/repo/issues. Turns on Search existing issues and Open GitHub in Feedback.' }
+      ] },
+      { title: 'Folders and network', restart: true, fields: [
+        { key: 'root', label: 'Projects folder', type: 'text', def: '.solofactory/', env: 'SOLOFACTORY_ROOT', help: 'Projects live in projects/ under this folder.' },
+        { key: 'home', label: 'Factory home', type: 'text', def: '.solofactory/', env: 'SOLOFACTORY_HOME', help: 'Holds the active project, the error log and factory state.' },
+        { key: 'port', label: 'Port', type: 'number', def: '4173', min: '1024', max: '65535', env: 'PORT', help: 'Where this page is served.' },
+        { key: 'host', label: 'Address', type: 'text', def: '127.0.0.1', env: 'HOST', help: 'Loopback addresses only. Anything else is refused, because the factory has no sign-in.' }
+      ] }
+    ];
+  }
+
+  specName(r) {
+    return (r.kind === 'fix' ? 'fixes/' : 'specs/') + this.slug(r.title) + '.md';
+  }
+
+  discard(r) {
+    const st = this.state;
+    const key = r.pid + '|' + this.specName(r);
+    const edits = { ...st.docEdits }; delete edits[key];
+    const adds = { ...st.docAdds }; delete adds[key];
+    const runs = st.runs.map((x) => (x.id === r.id ? { ...x, state: r.from, change: '' } : x));
+    this.setState({ runs: this.startNext(runs), docEdits: edits, docAdds: adds, activeSec: -1, secDraft: '', viewerEdit: false });
+  }
+
+  revise(r) {
+    const runs = this.state.runs.map((x) => (x.id === r.id ? { ...x, state: 'revising', from: r.state, change: '' } : x));
+    this.setState({ runs: this.startNext(runs), viewer: this.specName(r), viewerEdit: true });
+  }
+
+  submit(text) {
+    const t = (text || '').trim();
+    if (!t) return;
+    const s = this.state;
+    const pid = s.pid;
+    const proj = this.projectList().find((p) => p.id === pid);
+    const kind = this.sizeUp(t, proj);
+    const msgs = s.threads[pid].concat([
+      { id: s.nextId, type: 'user', text: t },
+      { id: s.nextId + 1, type: 'pick', kind: kind, sent: false, ask: this.short(t) }
+    ]);
+    this.setState({ draft: '', nextId: s.nextId + 2, threads: { ...s.threads, [pid]: msgs } });
+  }
+
+  setKind(pid, id, kind) {
+    const s = this.state;
+    const msgs = s.threads[pid].map((m) => (m.id === id ? { ...m, kind: kind } : m));
+    this.setState({ threads: { ...s.threads, [pid]: msgs } });
+  }
+
+  sendPick(pid, id) {
+    const s = this.state;
+    const pick = s.threads[pid].find((m) => m.id === id);
+    if (pick.kind === 'prd') {
+      const msgs = s.threads[pid].map((m) => (m.id === id ? { ...m, sent: true } : m)).concat([{ id: s.nextId, type: 'guide', text: 'Interview started. First question: who uses this, and what should they be able to do on day one? I will skip any topic your documents already answer, and you can leave and come back; the brief saves as we go.' }]);
+      this.setState({ nextId: s.nextId + 1, threads: { ...s.threads, [pid]: msgs } });
+      return;
+    }
+    const runId = s.nextId;
+    const runs = this.startNext(s.runs.concat([{ id: runId, pid: pid, kind: pick.kind, title: pick.ask, state: 'queued', idx: 0, repairs: 0 }]));
+    const started = runs.find((r) => r.id === runId).state === 'building';
+    const msgs = s.threads[pid].map((m) => (m.id === id ? { ...m, sent: true, runId: runId } : m)).concat([
+      { id: s.nextId + 1, type: 'run', runId: runId },
+      { id: s.nextId + 2, type: 'guide', text: started ? 'It is with the factory. This card stays live, so you can watch or manage the run from here. Switch projects and send the next thing whenever you like.' : 'Queued. Runs in one project go one after another, so each builds on the last. It starts by itself when the way is clear.' }
+    ]);
+    this.setState({ nextId: s.nextId + 3, runs: runs, panel: 'run', threads: { ...s.threads, [pid]: msgs } });
+  }
+
+  baseDocs(pid) {
+    const proj = this.projectList().find((x) => x.id === pid);
+    if (!proj || !proj.hasDocs) return [];
+    const who = pid === 'nm' ? 'People mining coaching transcripts for reusable insights.' : 'One reader keeping a personal library of ambient recordings.';
+    return [
+      { name: 'PRD.md', tag: 'Product', note: 'Baseline · rewritten as built after the last release', sections: [{ h: 'Who it is for', t: who }, { h: 'What it does today', t: 'Every shipped capability, in plain language. The Guide treats this as settled and does not ask about it again.' }, { h: 'Not in scope', t: 'Things you already ruled out, so a request that crosses this line is flagged as a product change.' }] },
+      { name: 'FEATURES.md', tag: 'Feature map', note: 'One entry per capability, with screens and files', sections: [{ h: 'Purpose', t: 'The map the Guide uses to tell a fix from a feature. If a request lands inside an entry, it is a fix. If it lands beside the entries, it is a feature.' }, { h: 'Entries', t: 'Ingest · Patterns · Search · Dashboard · Re-run' }] },
+      { name: 'ACCEPTANCE.md', tag: 'Checks', note: 'Every check the gates prove on each run', sections: [{ h: 'Purpose', t: 'One observable scenario per capability. A fix adds or corrects one check. A feature adds a few. A full brief rewrites the set.' }] },
+      { name: '.aai/context.md', tag: 'Context', note: 'Yours to edit · read on every turn', sections: [{ h: 'Purpose', t: 'Standing rules and preferences for this project, so you never repeat them in a request.' }] }
+    ];
+  }
+
+  docsFor(pid) {
+    const K = this.kinds();
+    const extra = this.state.threads[pid]
+      .filter((m) => m.type === 'pick' && m.sent && m.kind !== 'prd')
+      .map((m) => ({
+        name: (m.kind === 'fix' ? 'fixes/' : 'specs/') + this.slug(m.ask) + '.md',
+        tag: m.kind === 'fix' ? 'Fix note' : 'Feature spec',
+        note: 'Written by the Guide from this conversation',
+        sections: [
+          { h: 'Request', t: m.ask },
+          { h: 'Size', t: K[m.kind].label + '. Steps: ' + K[m.kind].steps.join(', ') + '.' },
+          { h: 'Builds on', t: 'PRD.md and FEATURES.md as they stand. Nothing already decided there was asked again.' },
+          { h: 'After the run', t: 'FEATURES.md and ACCEPTANCE.md are updated to the behavior that actually shipped.' }
+        ]
+      }));
+    return extra.reverse().concat(this.baseDocs(pid));
+  }
+
+  renderVals() {
+    const s = this.state;
+    const K = this.kinds();
+    const list = this.projectList();
+    const current = list.find((p) => p.id === s.pid);
+    const tones = { run: 'var(--fg)', ask: 'var(--text2)', idle: 'var(--muted2)' };
+    const shownRun = (pid) => {
+      const mine = s.runs.filter((r) => r.pid === pid && r.state !== 'dismissed');
+      return this.activeIn(s.runs, pid) || mine[mine.length - 1] || null;
+    };
+    const statusOf = (p) => {
+      const act = this.activeIn(s.runs, p.id);
+      const th = s.threads[p.id] || [];
+      if (act && act.state === 'stuck') return { t: 'Needs you · run parked', tone: 'ask' };
+      if (act && act.state === 'paused') return { t: 'Paused · waiting for you', tone: 'ask' };
+      if (act && act.state === 'revising') return { t: 'Revising a spec', tone: 'ask' };
+      if (th.some((m) => m.type === 'pick' && !m.sent)) return { t: 'Needs you · confirm the plan', tone: 'ask' };
+      if (th.some((m) => m.type === 'pick' && m.sent && m.kind === 'prd')) return { t: 'Needs you · interview in progress', tone: 'ask' };
+      if (act) return { t: 'Building · step ' + (act.idx + 1) + ' of ' + K[act.kind].steps.length, tone: 'run' };
+      return { t: p.hasDocs ? 'Idle · live' : 'New · no documents yet', tone: 'idle' };
+    };
+    const building = s.runs.filter((r) => r.state === 'building' || r.state === 'pausing').length;
+
+    const projects = list.map((p) => {
+      const on = p.id === s.pid;
+      const run = this.activeIn(s.runs, p.id);
+      const st0 = statusOf(p);
+      const waiting = s.runs.filter((x) => x.pid === p.id && x.state === 'queued').length;
+      const st = waiting ? { ...st0, t: st0.t + ' · ' + waiting + ' queued' } : st0;
+      const n = this.docsFor(p.id).length;
+      return {
+        name: p.name, status: st.t, dot: tones[st.tone],
+        pressed: on ? 'true' : 'false',
+        bg: on ? 'var(--raise)' : 'transparent', border: on ? 'var(--line2)' : 'transparent',
+        border2: on ? 'var(--line3)' : 'var(--line)',
+        goLabel: on ? 'You are here' : 'Open',
+        go: () => this.setState({ pid: p.id, docName: '', viewer: '', selRun: 0, pmOpen: false, rowMenu: 0 }),
+        weight: on ? '700' : '500',
+        hasRun: !!run && run.state !== 'revising',
+        segs: run ? this.runSegs(run) : [],
+        docsLine: n ? n + ' documents the Guide reads before it answers' : 'No documents yet · the first brief writes them'
+      };
+    });
+
+    const stateWord = { queued: 'Queued', building: 'Building', pausing: 'Pausing', paused: 'Paused', stuck: 'Parked · needs you', revising: 'Revising the spec', shipped: 'Shipped', cancelled: 'Cancelled' };
+    const qList = s.runs.filter((x) => x.pid === s.pid && x.state === 'queued').map((x) => x.id);
+    const ordinal = (k) => k + (k === 1 ? 'st' : k === 2 ? 'nd' : k === 3 ? 'rd' : 'th');
+    const work = s.threads[s.pid].filter((m) => m.type === 'pick').map((m) => {
+      const run = s.runs.find((r) => r.id === m.runId);
+      return {
+        title: m.ask, kind: K[m.kind].label, chipBg: K[m.kind].chipBg, chipFg: K[m.kind].chipFg,
+        state: !m.sent ? 'Draft · waiting for you' : m.kind === 'prd' ? 'Interview' : run && run.state === 'queued' ? 'Queued · ' + ordinal(qList.indexOf(run.id) + 1) + ' in line' : run ? stateWord[run.state] : 'Sent'
+      };
+    }).reverse();
+
+    const messages = s.threads[s.pid].map((m) => {
+      const run = m.type === 'run' ? s.runs.find((r) => r.id === m.runId) : null;
+      const kind = run ? run.kind : m.kind;
+      const k = kind ? K[kind] : null;
+      const v = { isUser: m.type === 'user', isGuide: m.type === 'guide', isPick: m.type === 'pick', isRun: m.type === 'run', text: m.text };
+      if (k) { v.kindLabel = k.label; v.chipBg = k.chipBg; v.chipFg = k.chipFg; }
+      if (m.type === 'pick') {
+        v.read = current.hasDocs ? ['PRD.md', 'FEATURES.md', 'ACCEPTANCE.md'] : ['no documents found'];
+        v.why = this.why(m.kind, current);
+        v.steps = k.steps.map((label, i) => ({ n: i + 1, label: label }));
+        v.cta = k.cta;
+        v.open = !m.sent; v.sent = m.sent;
+        v.sentLine = m.kind === 'prd' ? 'Confirmed as a full brief. The interview continues below.' : 'Sent to the factory as a ' + k.label.toLowerCase() + '.';
+        v.send = () => this.sendPick(s.pid, m.id);
+        v.alts = Object.keys(K).filter((key) => key !== m.kind).map((key) => ({ label: 'Make it a ' + K[key].label.toLowerCase(), set: () => this.setKind(s.pid, m.id, key) }));
+      }
+      if (run) {
+        v.title = run.title; v.line = this.runLine(run, s.runs);
+        const al = this.alertOf(run);
+        v.cardBorder = run.state === 'stuck' ? 'var(--red-line)' : run.state === 'paused' ? 'var(--amber-line)' : 'var(--line)';
+        v.lineColor = al || 'var(--text2)'; v.lineWeight = al ? '600' : '400';
+        v.segs = this.runSegs(run);
+        v.ctrls = this.runCtrls(run);
+        v.openRun = () => this.setState({ panel: 'run' });
+        v.openSpec = () => this.setState({ viewer: this.specName(run), viewerEdit: false });
+      }
+      return v;
+    }).reverse();
+
+    const tab = (id, label) => {
+      const on = s.panel === id;
+      return { label: label, pressed: on ? 'true' : 'false', bg: on ? 'var(--raise2)' : 'transparent', fg: on ? 'var(--fg)' : 'var(--fg)', border: on ? 'var(--line3)' : 'var(--line)', toggle: () => this.setState({ panel: on ? '' : id }) };
+    };
+
+    const docsRaw = this.docsFor(s.pid);
+    const docs = docsRaw.map((d) => {
+      const on = d.name === s.docName;
+      return { name: d.name, tag: d.tag, note: d.note, pressed: on ? 'true' : 'false', bg: on ? 'var(--raise)' : 'var(--card)', border: on ? 'var(--line3)' : 'var(--line)', open: () => this.setState({ viewer: d.name, viewerEdit: false }) };
+    });
+    const doc = null;
+    const key = s.pid + '|' + s.viewer;
+    const vRaw = s.viewer ? docsRaw.find((d) => d.name === s.viewer) || null : null;
+    const vRun = vRaw ? s.runs.filter((x) => x.pid === s.pid && this.specName(x) === vRaw.name).pop() || null : null;
+    const canEdit = !!vRaw && (!vRun || vRun.state === 'revising' || vRun.state === 'shipped');
+    const editing = canEdit && (s.viewerEdit || (!!vRun && vRun.state === 'revising'));
+    const edits = s.docEdits[key] || {};
+    const vAdds = s.docAdds[key] || {};
+    const reword = (t) => {
+      let r = t.trim().replace(/^(please|can you|could you|i want to|i would like to|i'd like to|let's|lets|we should|it should)\s+/i, '').replace(/[.!?]+$/, '');
+      r = r.charAt(0).toUpperCase() + r.slice(1);
+      return r + '.';
+    };
+    const pickSec = (t) => {
+      const hs = vRaw.sections.map((x) => x.h.toLowerCase());
+      const want = /(check|test|prove|proof|accept|gate)/i.test(t) ? ['proof', 'after the run', 'purpose'] : ['request', 'what changes', 'what it does today', 'purpose'];
+      for (let w = 0; w < want.length; w++) { const at = hs.indexOf(want[w]); if (at >= 0) return at; }
+      return 0;
+    };
+    const vsend = () => {
+      const t = (this.state.vdraft || '').trim();
+      if (!t || !vRaw) return;
+      const st = this.state;
+      const chat = (st.docChat[key] || []).concat([{ who: 'you', text: t }]);
+      const locked = vRun && ['building', 'pausing', 'queued'].indexOf(vRun.state) >= 0;
+      if (locked) {
+        this.setState({ vdraft: '', docChat: { ...st.docChat, [key]: chat.concat([{ who: 'guide', text: 'This spec is with the factory right now, so I will not change it under the run. Pause or cancel the run and I will reopen it, or send this as a new request and I will queue it as a follow-up.' }]) } });
+        return;
+      }
+      const at = pickSec(t);
+      const where = '"' + vRaw.sections[at].h + '"';
+      const mine = st.docAdds[key] || {};
+      const next = { vdraft: '', activeSec: -1, secDraft: '', docAdds: { ...st.docAdds, [key]: { ...mine, [at]: (mine[at] || []).concat([reword(t)]) } } };
+      let reply = 'Done. I rewrote ' + where + ' to cover that. My change is highlighted. Click the section to adjust my wording.';
+      if (vRun && vRun.state !== 'revising' && vRun.state !== 'shipped') {
+        next.runs = this.startNext(st.runs.map((x) => (x.id === vRun.id ? { ...x, state: 'revising', from: vRun.state, change: '' } : x)));
+        next.viewerEdit = true;
+        reply = 'I reopened the spec as a draft of the next revision and rewrote ' + where + ' to cover that. My change is highlighted. Nothing is building. Resubmit when it reads right.';
+      } else if (vRun && vRun.state === 'revising') {
+        reply = 'Done. I rewrote ' + where + ' to cover that. My change is highlighted. Click the section to adjust my wording, then resubmit.';
+      }
+      next.docChat = { ...st.docChat, [key]: chat.concat([{ who: 'guide', text: reply }]) };
+      this.setState(next);
+    };
+    const vw = vRaw ? {
+      open: true, name: vRaw.name, tag: vRaw.tag,
+      hasLine: !!vRun, line: vRun ? 'Run: ' + this.runLine(vRun, s.runs) : '',
+      revising: !!vRun && vRun.state === 'revising',
+      revTitle: vRun ? 'Draft of revision ' + ((vRun.rev || 1) + 1) + ' · nothing is building' : '',
+      ctrls: vRun ? this.runCtrls(vRun).filter((c) => /Revis|Resubmit|Discard/.test(c.label)) : [],
+      modes: canEdit && !(vRun && vRun.state === 'revising') ? [['Read', false], ['Edit', true]].map((m) => {
+        const on = editing === m[1];
+        return { label: m[0], pressed: on ? 'true' : 'false', bg: on ? 'var(--raise2)' : 'transparent', fg: on ? 'var(--fg)' : 'var(--fg)', border: on ? 'var(--line3)' : 'var(--line)', set: () => this.setState({ viewerEdit: m[1] }) };
+      }) : [],
+      hasNotes: false, notes: [],
+      sections: vRaw.sections.map((x, n) => {
+        const text = edits[n] !== undefined ? edits[n] : x.t;
+        const added = (vAdds[n] || []).join(' ');
+        const whole = added ? text + ' ' + added : text;
+        const active = editing && s.activeSec === n;
+        const keep = () => {
+          const st = this.state;
+          if (st.activeSec !== n) return;
+          const next = { activeSec: -1, secDraft: '' };
+          if (st.secDraft.trim() && st.secDraft !== whole) {
+            next.docEdits = { ...st.docEdits, [key]: { ...(st.docEdits[key] || {}), [n]: st.secDraft } };
+            next.docAdds = { ...st.docAdds, [key]: { ...(st.docAdds[key] || {}), [n]: [] } };
+          }
+          this.setState(next);
+        };
+        return {
+          h: x.h + (added ? ' · changed by the Guide' : edits[n] !== undefined ? ' · edited' : ''), label: 'Edit ' + x.h, t: text, added: added, hasAdd: !!added,
+          view: !editing, click: editing && !active, edit: active, draft: s.secDraft,
+          start: () => this.setState({ activeSec: n, secDraft: whole }),
+          onChange: (e) => this.setState({ secDraft: e.target.value }),
+          keep: keep,
+          onKey: (e) => {
+            if (e.key === 'Escape') { e.preventDefault(); this.setState({ activeSec: -1, secDraft: '' }); }
+            else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); keep(); }
+          }
+        };
+      }),
+      footer: editing ? 'Click any section to edit it. Click away or press Cmd/Ctrl+Enter to keep the edit. Escape cancels. Each edit saves at once, and the Guide checks it before anything is built.' : canEdit ? 'Read only. Press Edit to change it, or ask the Guide.' : 'Read only while the run is active. Use Revise the spec on a parked or cancelled run, or ask the Guide.',
+      chat: [{ mine: false, guide: true, text: 'I have ' + vRaw.name + ' open with you. Tell me what to change and I will edit it, or edit it yourself and I will check your changes against the rest of the project documents.' }]
+        .concat((s.docChat[key] || []).map((m) => ({ mine: m.who === 'you', guide: m.who === 'guide', text: m.text }))).reverse(),
+      draft: s.vdraft,
+      onDraft: (e) => this.setState({ vdraft: e.target.value }),
+      onKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); vsend(); } },
+      send: vsend,
+      close: () => this.setState({ viewer: '', viewerEdit: false, activeSec: -1, secDraft: '' })
+    } : { open: false, name: '', tag: '', hasLine: false, line: '', revising: false, revTitle: '', ctrls: [], modes: [], hasNotes: false, notes: [], sections: [], footer: '', chat: [], draft: '' };
+
+    const r = s.runs.find((x) => x.id === s.selRun && x.pid === s.pid && x.state !== 'dismissed') || shownRun(s.pid);
+    const parked = r && (r.state === 'paused' || r.state === 'stuck');
+    const run = r ? {
+      title: r.title, line: this.runLine(r, s.runs), kindLabel: K[r.kind].label, chipBg: K[r.kind].chipBg, chipFg: K[r.kind].chipFg,
+      ctrls: this.runCtrls(r), stuck: r.state === 'stuck', lineColor: this.alertOf(r) || 'var(--muted)', lineWeight: this.alertOf(r) ? '600' : '400',
+      openSpec: () => this.setState({ viewer: this.specName(r), viewerEdit: false }),
+      more: this.moreCtrls(r), hasMore: this.moreCtrls(r).length > 0,
+      revising: r.state === 'revising', change: r.change || '', fieldId: 'revise-a', revTitle: 'Spec reopened · draft of revision ' + ((r.rev || 1) + 1),
+      onChange: (e) => this.patchRun(r.id, { change: e.target.value }),
+      note: parked ? 'A parked run keeps everything that already passed. Use Restart from here on any finished step to redo the work from that point.' : 'The last stop rewrites the project documents to match what was built, so the next request starts from the truth.',
+      stops: K[r.kind].steps.map((label, i) => {
+        const idle = ['queued', 'cancelled', 'revising'].indexOf(r.state) >= 0;
+        const done = r.state === 'shipped' || (!idle && i < r.idx);
+        const now = !done && !idle && i === r.idx;
+        const bad = now && r.state === 'stuck';
+        const held = now && r.state === 'paused';
+        return {
+          n: i + 1, label: label,
+          state: done ? 'Done' : bad ? 'Failed twice' : held ? 'Paused here' : now ? 'Now' : 'To do',
+          bg: done ? 'var(--raise2)' : bad ? 'var(--red)' : held ? 'var(--amber)' : now ? 'var(--inv)' : 'transparent',
+          fg: done ? 'var(--fg)' : now ? 'var(--inv-fg)' : 'var(--muted)',
+          ring: bad ? 'var(--red)' : held ? 'var(--amber)' : done ? 'var(--fg)' : now ? 'var(--inv)' : 'var(--line2)',
+          text: done || now ? 'var(--fg)' : 'var(--muted)',
+          canRestart: parked && i < r.idx,
+          restart: () => this.patchRun(r.id, { state: 'building', idx: i })
+        };
+      })
+    } : null;
+    const qRuns = s.runs.filter((q) => q.pid === s.pid && q.state === 'queued');
+    const queue = qRuns.map((q, k) => ({
+      pos: k + 1, title: q.title, kindLabel: K[q.kind].label, chipBg: K[q.kind].chipBg, chipFg: K[q.kind].chipFg,
+      canUp: k > 0, upLabel: 'Move ' + q.title + ' up',
+      up: () => {
+        const prev = qRuns[k - 1];
+        const arr = this.state.runs.slice();
+        const a = arr.findIndex((x) => x.id === prev.id);
+        const b = arr.findIndex((x) => x.id === q.id);
+        arr[a] = q; arr[b] = prev;
+        this.setState({ runs: arr });
+      },
+      remove: () => this.patchRun(q.id, { state: 'cancelled' })
+    }));
+    const blocked = r && (r.state === 'stuck' || r.state === 'paused' || r.state === 'revising');
+
+    const suggestions = (current.hasDocs
+      ? ['Fix the date format on the dashboard', 'Add CSV export to the results table', 'Rebuild it for multi-user sign in']
+      : ['Build a portal where members see their coaching notes', 'Adopt the app in my existing folder']
+    ).map((text) => ({ text: text, use: () => this.setState({ draft: text }) }));
+
+    const pickRows = s.threads[s.pid].filter((m) => m.type === 'pick').map((m) => {
+      const rr = s.runs.find((x) => x.id === m.runId);
+      if (rr && rr.state === 'dismissed') return null;
+      let g = 'done';
+      let st = 'Sent';
+      let order = 0;
+      if (!m.sent) { g = 'needs'; st = 'Plan waiting for you in the chat'; }
+      else if (m.kind === 'prd') { g = 'needs'; st = 'Interview in progress'; }
+      else if (rr && ['paused', 'stuck', 'revising'].indexOf(rr.state) >= 0) { g = 'needs'; st = stateWord[rr.state]; }
+      else if (rr && (rr.state === 'building' || rr.state === 'pausing')) { g = 'running'; st = this.runLine(rr, s.runs); order = -1; }
+      else if (rr && rr.state === 'queued') { g = 'queued'; order = qList.indexOf(rr.id); const act = this.activeIn(s.runs, s.pid); st = ordinal(order + 1) + ' in line' + (!act ? ' · waiting for a build slot' : act.state === 'building' || act.state === 'pausing' ? '' : ' · held until you resolve the run above'); }
+      else if (rr) { st = stateWord[rr.state]; }
+      const qi = rr ? queue.findIndex((q, k) => qRuns[k].id === rr.id) : -1;
+      const picked = !!rr && !!r && rr.id === r.id && s.panel === 'run';
+      const swapWith = (other) => {
+        const arr = this.state.runs.slice();
+        const a = arr.findIndex((x) => x.id === other.id);
+        const b = arr.findIndex((x) => x.id === rr.id);
+        arr[a] = rr; arr[b] = other;
+        this.setState({ runs: arr });
+      };
+      return {
+        g: g, order: order,
+        title: m.ask, kind: K[m.kind].label, chipBg: K[m.kind].chipBg, chipFg: K[m.kind].chipFg, state: st,
+        aria: rr ? 'Open the run: ' + m.ask : m.ask + ', in the chat',
+        bg: picked ? 'var(--raise)' : 'transparent', weight: g === 'needs' ? '600' : '500',
+        stColor: this.alertOf(rr) || 'var(--muted)', stWeight: this.alertOf(rr) ? '600' : '400',
+        menuOpen: qi >= 0 && s.rowMenu === rr.id, menuExpanded: qi >= 0 && s.rowMenu === rr.id ? 'true' : 'false',
+        menuLabel: 'Queue actions for ' + m.ask,
+        toggleMenu: () => this.setState({ rowMenu: this.state.rowMenu === (rr && rr.id) ? 0 : rr.id }),
+        noUp: qi <= 0, noDown: qi < 0 || qi >= qRuns.length - 1,
+        upOpacity: qi > 0 ? '1' : '0.35', downOpacity: qi >= 0 && qi < qRuns.length - 1 ? '1' : '0.35',
+        down: () => { if (qi >= 0 && qi < qRuns.length - 1) swapWith(qRuns[qi + 1]); },
+        open: () => (rr ? this.setState({ panel: 'run', selRun: rr.id }) : this.setState({ panel: '' })),
+        queued: qi >= 0, canUp: qi > 0, upLabel: qi >= 0 ? queue[qi].upLabel : '',
+        up: () => { if (qi > 0) swapWith(qRuns[qi - 1]); }, remove: qi >= 0 ? () => { this.setState({ rowMenu: 0 }); queue[qi].remove(); } : null
+      };
+    }).filter((x) => x);
+    const gdefs = [['needs', 'Needs you', 'Nothing needs you right now.'], ['running', 'Running', 'Nothing is building.'], ['queued', 'Queued', 'Nothing is waiting.'], ['done', 'Done', 'Nothing finished yet.']];
+    const groups = gdefs.map((d) => {
+      let items = pickRows.filter((x) => x.g === d[0]);
+      if (d[0] === 'queued') items = items.slice().sort((a, b) => a.order - b.order);
+      else items = items.slice().reverse();
+      const open = !!s.groupsOpen[d[0]];
+      const hot = d[0] === 'needs' && items.length > 0;
+      return {
+        label: d[1], count: items.length, items: items, open: open, empty: items.length === 0, emptyText: d[2],
+        expanded: open ? 'true' : 'false', chev: open ? '▾' : '▸',
+        countW: hot ? '700' : '400', countFg: hot ? 'var(--amber)' : 'var(--muted)',
+        toggle: () => this.setState({ groupsOpen: { ...this.state.groupsOpen, [d[0]]: !open } })
+      };
+    });
+
+    const closeNav = (fn) => () => { this.setState({ navOpen: false }); fn(); };
+    const railLinks = [
+      { label: '+ New project', hasBadge: false, badge: '', act: closeNav(() => this.setState({ np: { name: '', mode: 'empty', folder: '', where: 'default', repo: '' } })) },
+      { label: 'Settings', hasBadge: false, badge: '', act: closeNav(() => this.setState({ cfgOpen: true })) },
+      { label: 'Manual', hasBadge: false, badge: '', act: closeNav(() => this.showInfo('Manual', 'Opens the illustrated user manual, served at /manual.')) },
+      { label: 'Feedback', hasBadge: false, badge: '', act: closeNav(() => this.showInfo('Feedback', 'Opens the Feedback form: Problem or Improvement, a preview of the report, Copy and open email, and optional run diagnostics. Nothing is sent until you send it.')) },
+      { label: 'Updates', hasBadge: true, badge: 'Update available', act: closeNav(() => this.showInfo('Update available', 'Shows your version, the latest version, and the prompt to paste into Claude Code or Codex when you are ready. It never updates by itself.')) }
+    ];
+
+    const app = current.url ? {
+      none: false, live: true, url: current.url, release: current.release,
+      relaunch: () => this.showInfo('Relaunch', 'Restarts the live app on the same port, then checks its health again.'),
+      stats: [{ label: 'Requests', value: '—' }, { label: 'Errors', value: '—' }, { label: 'Average response', value: '—' }, { label: 'Uptime', value: '—' }]
+    } : { none: true, live: false, url: '', release: '', stats: [] };
+
+    const provider = s.provider[s.pid] || s.cfgVals.provider || 'Claude Code';
+
+    const npSlug = (n) => (n || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || '<name>';
+    const npRoot = (s.cfgVals.root !== undefined ? s.cfgVals.root : '.solofactory/').replace(/\/?$/, '/');
+    const npDefault = (n) => npRoot + 'projects/' + npSlug(n) + '/';
+    const npv = s.np ? {
+      open: true, name: s.np.name, folder: s.np.folder, adopt: s.np.mode === 'adopt',
+      cta: s.np.mode === 'adopt' ? 'Adopt the app' : 'Create project',
+      custom: s.np.where === 'custom', repo: s.np.repo,
+      onRepo: (e) => this.setState({ np: { ...this.state.np, repo: e.target.value } }),
+      repoModes: [['default', "In SoloFactory's projects folder", npDefault(s.np.name), 'ui-monospace, Menlo, monospace'], ['custom', 'Somewhere else', 'Pick any folder on this computer.', 'inherit']].map((o) => {
+        const on = (s.np.where || 'default') === o[0];
+        return { label: o[1], help: o[2], font: o[3], checked: on ? 'true' : 'false', bg: on ? 'var(--raise2)' : 'transparent', border: on ? 'var(--line3)' : 'var(--line)', pick: () => this.setState({ np: { ...this.state.np, where: o[0] } }) };
+      }),
+      onName: (e) => this.setState({ np: { ...this.state.np, name: e.target.value } }),
+      onFolder: (e) => this.setState({ np: { ...this.state.np, folder: e.target.value } }),
+      modes: [['empty', 'Start empty', 'The Guide starts with a full interview.'], ['adopt', 'Adopt an existing app', 'Copies a folder in, never touching the original, and writes the baseline documents from its code.']].map((o) => {
+        const on = s.np.mode === o[0];
+        return { label: o[1], help: o[2], checked: on ? 'true' : 'false', bg: on ? 'var(--raise2)' : 'transparent', border: on ? 'var(--line3)' : 'var(--line)', pick: () => this.setState({ np: { ...this.state.np, mode: o[0] } }) };
+      }),
+      close: () => this.setState({ np: null }),
+      create: () => {
+        const st = this.state;
+        const name = (st.np.name || '').trim();
+        if (!name) return;
+        const id = 'x' + st.nextId;
+        const adopt = st.np.mode === 'adopt';
+        const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const custom = st.np.where === 'custom' && (st.np.repo || '').trim();
+        const repo = custom ? st.np.repo.trim().replace(/\/?$/, '/') : npDefault(name);
+        const text = adopt
+          ? 'I will copy ' + (st.np.folder || 'that folder') + ' into ' + repo + ', never touching the original. Then I read the code and tests and write PRD.md, FEATURES.md and ACCEPTANCE.md from what is there. You review that baseline before anything new is built.'
+          : name + ' lives in ' + repo + ' and has no documents yet. Tell me what you want to build and I will start a full brief.';
+        this.setState({
+          nextId: st.nextId + 1, pid: id, np: null, viewer: '', selRun: 0,
+          extra: (st.extra || []).concat([{ id: id, name: name, repo: repo, live: adopt ? 'Adopting · not built here yet' : 'Not built yet', hasDocs: false }]),
+          threads: { ...st.threads, [id]: [{ id: st.nextId, type: 'guide', text: text }] }
+        });
+      }
+    } : { open: false, name: '', folder: '', adopt: false, cta: '', modes: [], custom: false, repo: '', repoModes: [] };
+
+    const defs = this.settingsDefs();
+    const valOf = (fd) => (s.cfgVals[fd.key] !== undefined ? s.cfgVals[fd.key] : fd.def);
+    const setVal = (key, v) => this.setState({ cfgVals: { ...this.state.cfgVals, [key]: v }, cfgTouched: true });
+    const cfg = {
+      open: s.cfgOpen,
+      status: s.cfgTouched ? 'All changes saved' : 'Showing the defaults',
+      close: () => this.setState({ cfgOpen: false }),
+      sections: defs.map((sec) => {
+        const changed = sec.restart && sec.fields.some((fd) => s.cfgVals[fd.key] !== undefined && String(s.cfgVals[fd.key]) !== String(fd.def));
+        return {
+          title: sec.title + (sec.restart ? ' (applies after a restart)' : ''),
+          hasNote: !!changed, note: 'Restart the factory to apply these changes. Pause active runs first; they resume where they stopped.',
+          fields: sec.fields.map((fd) => {
+            const v = valOf(fd);
+            return {
+              id: 'cfg-' + fd.key, label: fd.label, help: fd.help,
+              envLine: fd.locked ? 'Set by ' + fd.env + ' in your environment' : (fd.env || ''),
+              envColor: fd.locked ? 'var(--text2)' : 'var(--muted)',
+              locked: !!fd.locked,
+              isSelect: fd.type === 'select', isInput: fd.type === 'number' || fd.type === 'text', isToggle: fd.type === 'toggle',
+              inputType: fd.type === 'number' ? 'number' : 'text', min: fd.min || '', max: fd.max || '',
+              hasUnit: !!fd.unit, unit: fd.unit || '',
+              value: String(v), on: !!v, toggleText: v ? 'On' : 'Off',
+              options: (fd.options || []).map((o) => ({ v: o[0], label: o[1] })),
+              onChange: (e) => setVal(fd.key, e.target.value),
+              onToggle: (e) => setVal(fd.key, !!e.target.checked)
+            };
+          })
+        };
+      })
+    };
+
+    const titles = { app: 'Live app · ' + current.name, docs: 'Documents · ' + current.name, run: 'Run · ' + current.name };
+
+    return {
+      projects: projects, current: current, work: work, noWork: work.length === 0,
+      slots: building + ' of 2 build slots in use',
+      messages: messages, suggestions: suggestions,
+      draft: s.draft,
+      placeholder: 'Tell the Guide what ' + current.name + ' needs',
+      onDraft: (e) => this.setState({ draft: e.target.value }),
+      onKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.submit(this.state.draft); } },
+      onSend: () => this.submit(this.state.draft),
+      theme: {
+        mode: s.themeMode, isAuto: s.themeMode === 'auto', isLight: s.themeMode === 'light', isDark: s.themeMode === 'dark',
+        open: s.themeOpen, expanded: s.themeOpen ? 'true' : 'false',
+        aria: 'Theme: ' + ({ auto: 'Auto', light: 'Light', dark: 'Dark' })[s.themeMode] + '. Change theme',
+        toggle: () => this.setState({ themeOpen: !this.state.themeOpen, pmOpen: false, navOpen: false }),
+        opts: [['auto', 'Auto', 'Match the system'], ['light', 'Light', ''], ['dark', 'Dark', '']].map((o) => {
+          const on = s.themeMode === o[0];
+          return { label: o[1], help: o[2], checked: on ? 'true' : 'false', bg: on ? 'var(--raise)' : 'transparent', weight: on ? '700' : '500', pick: () => this.setState({ themeMode: o[0], themeOpen: false }) };
+        })
+      },
+      panelTabs: [tab('run', 'Run'), tab('docs', 'Documents'), tab('app', 'Live app')],
+      panelOpen: s.panel !== '', panelTitle: titles[s.panel] || '',
+      closePanel: () => this.setState({ panel: '' }),
+      showDocs: s.panel === 'docs', showRun: s.panel === 'run', showApp: s.panel === 'app', app: app,
+      groups: groups, railLinks: railLinks,
+      nav: { open: s.navOpen, expanded: s.navOpen ? 'true' : 'false', hint: 'Update available', toggle: () => this.setState({ navOpen: !this.state.navOpen, pmOpen: false }) },
+      pm: (() => {
+        const others = projects.filter((p) => p.pressed === 'false' && /^Needs you|Paused|Revising/.test(p.status)).length;
+        return {
+          open: s.pmOpen, expanded: s.pmOpen ? 'true' : 'false', others: others > 0,
+          othersText: others === 1 ? '1 other project needs you' : others + ' other projects need you',
+          aria: 'Switch project. Now ' + current.name + (others ? '. ' + others + ' other projects need you.' : ''),
+          toggle: () => this.setState({ pmOpen: !this.state.pmOpen, navOpen: false }),
+          newProject: () => this.setState({ pmOpen: false, np: { name: '', mode: 'empty', folder: '', where: 'default', repo: '' } })
+        };
+      })(), np: npv, cfg: cfg,
+      info: s.info ? { open: true, title: s.info.title, text: s.info.text, close: () => this.setState({ info: null }) } : { open: false, title: '', text: '' },
+      provider: provider, providerAria: 'Builds with ' + provider + '. Switch the AI for this project.',
+      toggleProvider: () => this.setState({ provider: { ...this.state.provider, [this.state.pid]: provider === 'Codex' ? 'Claude Code' : 'Codex' } }),
+      onAttach: () => this.showInfo('Attach', 'Drops a spec or notes into the conversation (markdown, text, JSON, YAML, CSV) or lets the Guide look at a mockup or screenshot (png, jpg, gif, webp). Images are saved under the project\'s .factory/uploads/.'),
+      vw: vw,
+      docs: docs, noDocs: docsRaw.length === 0, hasDoc: !!doc, doc: doc || { name: '', sections: [], ctrls: [], hasLine: false, line: '', revising: false, change: '', revTitle: '' },
+      closeDoc: () => this.setState({ docName: '' }),
+      hasRun: !!run, noRun: !run, run: run || { more: [], hasMore: false, title: '', line: '', kindLabel: '', chipBg: 'var(--raise)', chipFg: 'var(--fg)', lineColor: 'var(--muted)', lineWeight: '400', stops: [], ctrls: [], stuck: false, note: '', revising: false, change: '', fieldId: 'revise-a', revTitle: '' },
+      queue: queue, hasQueue: queue.length > 0,
+      queueTitle: queue.length + ' queued behind it',
+      queueNote: blocked ? 'Waiting for your call on the run above. Nothing here starts until it is resolved.' : 'They start one at a time, top first, each building on the last.'
+    };
+  }
+}
+
+// ---- Live layer: design A's component, fed from the factory API instead of its demo data.
+// Anything design A shows that the factory cannot do from here yet answers with `later()`; the list is in
+// docs/project-hub-ui-spec.md under "Left out for later".
+function showError(error) { reportError(error, "action"); hub?.showInfo("Something went wrong", error?.message || String(error)); }
+const later = (what) => hub.showInfo(what, "Not wired to the factory yet. It is on the left-out-for-later list.");
+const JOB_STATE = { specifying: "building", planning: "building", building: "building", verifying: "building", repairing: "building", reviewing: "building", deploying: "building", failed: "stuck", interrupted: "stuck", paused: "paused", completed: "shipped", cancelled: "cancelled", dismissed: "dismissed", queued: "queued" };
+const JOB_IDX = { specifying: 0, planning: 1, building: 2, verifying: 3, repairing: 3, reviewing: 4, deploying: 5, completed: 7 };
+const PLAN_STEPS = ["retry-plan", "amend-plan", "revise-inputs", "prepare-plan", "approve-plan"];
+
+class Live extends Component {
+  constructor() {
+    super();
+    this.state = { ...this.state, runs: [], threads: { "": [] }, pid: "", nextId: 1, busy: false };
+    try { this.state.themeMode = localStorage.getItem("solofactory.theme") || "auto"; } catch {}
+  }
+
+  async componentDidMount() {
+    try {
+      state.config = await api("/api/config");
+      state.provider = state.config.providers.find((provider) => provider.authenticated)?.id ?? null;
+      await this.loadDraft();
+      await this.refresh();
+    } catch (error) { showError(error); }
+    this.timer = setInterval(() => { if (!this.polling) this.refresh().catch(() => {}); }, 2000);
+  }
+
+  componentDidUpdate(props, prev) {
+    super.componentDidUpdate(props, prev);
+    if (prev.themeMode !== this.state.themeMode) { try { localStorage.setItem("solofactory.theme", this.state.themeMode); } catch {} }
+    if (prev.docEdits !== this.state.docEdits) this.saveEdits();
+  }
+
+  // An edited section of the brief under revision goes straight into the interview draft.
+  saveEdits() {
+    const run = this.state.runs.find((r) => r.state === "revising" && r.title === this.state.viewer);
+    if (!run) return;
+    const edits = this.state.docEdits[run.pid + "|" + run.title] || {};
+    const out = {};
+    for (const [n, text] of Object.entries(edits)) {
+      const [key, , , isList] = BRIEF_SECTIONS[n];
+      out[key] = isList ? text.split("\n").map((line) => line.trim()).filter(Boolean) : text;
+    }
+    if (Object.keys(out).length) api("/api/interview/draft", { method: "PATCH", body: { edits: out, provider: state.provider } }).then((saved) => { const guide = saved?.draft?.guide ?? saved?.guide; if (guide) state.guide = guide; }).catch(showError);
+  }
+
+  async loadDraft() {
+    const draft = (await api("/api/interview/draft", { allow: [404] }).catch(() => null))?.draft;
+    state.messages = draft?.messages ?? [];
+    state.guide = draft?.guide ?? state.config.opening;
+    state.revises = draft?.revises ?? null;
+    state.replaces = draft?.replaces ?? null;
+    if (state.config.providers.some((provider) => provider.id === draft?.provider && provider.authenticated)) state.provider = draft.provider;
+    this.sync();
+  }
+
+  async refresh() {
+    this.polling = true;
+    try {
+      const projects = await api("/api/projects");
+      state.projects = projects.projects;
+      state.project = projects.active;
+      state.board = projects;
+      state.jobs = (await api("/api/jobs")).jobs;
+      this.sync();
+    } finally { this.polling = false; }
+  }
+
+  // Rebuilds design A's runs and threads from the factory's jobs and the interview draft.
+  sync() {
+    const runs = [], threads = {};
+    let id = 1;
+    const runOf = (pid, job) => {
+      const st = job.id === state.revises ? "revising" : job.pendingPause ? "pausing" : JOB_STATE[job.state] || "building";
+      const run = { id: id++, jobId: job.id, pid, kind: "feature", title: job.brief?.workingName || job.brief?.promise || job.workingName || "Run", state: st, idx: JOB_IDX[job.state] ?? 0, repairs: 0, job };
+      runs.push(run);
+      threads[pid].push({ id: id++, type: "pick", kind: "feature", sent: true, ask: run.title, runId: run.id }, { id: id++, type: "run", runId: run.id });
+    };
+    for (const p of state.projects) {
+      threads[p.id] = [];
+      if (p.id === state.project) [...state.jobs].reverse().forEach((job) => runOf(p.id, job));
+      else if (p.lastRun) runOf(p.id, p.lastRun);
+    }
+    const here = threads[state.project] ?? (threads[state.project || ""] = []);
+    const talk = state.messages.length ? state.messages : [{ role: "assistant", content: state.guide?.message ?? "" }];
+    for (const m of talk) here.push({ id: id++, type: m.role === "user" ? "user" : "guide", text: m.content });
+    if (this.state.busy) here.push({ id: id++, type: "guide", text: "Thinking…" });
+    else if (state.guide?.status === "ready") here.push({ id: id++, type: "pick", kind: "brief", sent: false, ask: state.guide.brief?.workingName || "The brief" });
+    const pid = this.state.pid && threads[this.state.pid] ? this.state.pid : state.project || "";
+    this.setState({ runs, threads, nextId: id, pid });
+  }
+
+  kinds() {
+    const k = super.kinds();
+    return { ...k, brief: { ...k.prd, label: "Full brief", cta: "Send to the factory" } };
+  }
+
+  why(kind, proj) {
+    if (kind === "brief") return "The Guide has what it needs. Sending runs one last review of the brief, then queues it.";
+    return super.why(kind, proj);
+  }
+
+  projectList() {
+    const list = (state.projects || []).map((p) => {
+      const shipped = p.id === state.project ? state.jobs.find((job) => job.state === "completed" && job.deployment?.url) : null;
+      const url = shipped?.deployment?.url || "";
+      return { id: p.id, name: p.name, hasDocs: p.runCount > 0, url, release: url ? "release " + p.runCount : "", live: url ? "Live at " + url : p.runCount ? "Built here" : "Not built yet" };
+    });
+    return list.length ? list : [{ id: "", name: "No project yet", hasDocs: false, live: "Not built yet" }];
+  }
+
+  startNext(runs) { return runs; }
+  tick() {}
+  specName(r) { return r.title; }
+
+  runLine(r, runs) {
+    if (r.state === "stuck") return "Parked · " + (r.job?.error?.message || "needs you").slice(0, 90);
+    return super.runLine(r, runs);
+  }
+
+  docsFor(pid) {
+    const runs = this.state.runs.filter((r) => r.pid === pid && r.job?.brief);
+    return runs.slice().reverse().map((r) => {
+      const brief = r.state === "revising" && state.guide?.brief ? state.guide.brief : r.job.brief;
+      return {
+        name: r.title, tag: "Brief", note: r.state === "revising" ? "Draft of the next revision" : "The brief this run was queued with",
+        sections: BRIEF_SECTIONS.filter(([key]) => brief[key] != null && brief[key] !== "" && !(Array.isArray(brief[key]) && !brief[key].length))
+          .map(([key, label, , isList]) => ({ h: label, t: isList ? [].concat(brief[key]).join("\n") : String(brief[key]), k: key, list: isList }))
+      };
+    });
+  }
+
+  post(r, action, body = {}) {
+    return api(`/api/jobs/${r.jobId}/${action}`, { method: "POST", body }).then(() => this.refresh()).catch(showError);
+  }
+
+  // The server's continuation policy decides: nextAction?.action !== "resume" means Resume would not move it.
+  resumeOf(r) { return r.job?.nextAction?.action !== "resume" && r.state !== "paused" ? "retry" : "resume"; }
+
+  // Planning steps go to the Guide's repair planner; the recovery-review amendment upload is left out.
+  repairOf(r) {
+    const next = r.job?.nextAction;
+    if (next?.action === "retry-plan" || next?.action === "amend-plan" || PLAN_STEPS.includes(next?.action)) return this.post(r, "recovery-plan", { guidance: "" });
+    return this.post(r, "retry");
+  }
+
+  async reviseRun(r) {
+    const draft = (await api("/api/interview/draft", { allow: [404] }).catch(() => null))?.draft;
+    if (draft?.revises !== r.jobId) await api(`/api/jobs/${r.jobId}/revise`, { method: "POST", body: {} });
+    await this.loadDraft();
+    this.setState({ viewer: r.title, viewerEdit: true });
+  }
+
+  async discardDraft() {
+    await api("/api/interview/draft", { method: "DELETE", allow: [404] });
+    this.setState({ viewer: "", viewerEdit: false, docEdits: {}, docAdds: {} });
+    await this.loadDraft();
+  }
+
+  // The recovery-plan-packet download is left out; the packet text goes to the clipboard.
+  async copyPacket(r) {
+    const response = await fetch(`/api/jobs/${r.jobId}/recovery-packet`);
+    if (!response.ok) throw new Error(`Recovery packet failed with HTTP ${response.status}.`);
+    await navigator.clipboard.writeText(await response.text());
+    this.showInfo("Copy recovery packet", "Copied. Paste it into Claude Code or Codex for help.");
+  }
+
+  wire(c, r) {
+    const acts = {
+      "Remove from queue": () => this.post(r, "cancel"),
+      "Cancel run": () => this.post(r, "cancel"),
+      "Pause after this step": () => this.post(r, "pause"),
+      "Resume": () => this.post(r, this.resumeOf(r)),
+      "Let the Guide plan a repair": () => this.repairOf(r),
+      "Revise the spec": () => this.reviseRun(r).catch(showError),
+      "Revise and resubmit": () => this.reviseRun(r).catch(showError),
+      "Resubmit to the factory": () => this.queue().catch(showError),
+      "Discard changes": () => this.discardDraft().catch(showError),
+      "Copy recovery packet": () => this.copyPacket(r).catch(showError),
+      "Start over from scratch": () => this.post(r, "retry"),
+      "Dismiss": () => this.post(r, "dismiss"),
+    };
+    return { ...c, act: acts[c.label] || (() => later(c.label)) };
+  }
+  runCtrls(r) { return super.runCtrls(r).map((c) => this.wire(c, r)); }
+  moreCtrls(r) { return super.moreCtrls(r).map((c) => this.wire(c, r)); }
+
+  async turn(content, review = false) {
+    if (!state.provider) throw new Error("Sign in to Claude Code or Codex first.");
+    if (!review) state.messages.push({ role: "user", content });
+    this.setState({ busy: true }); this.sync();
+    try {
+      const guide = await api("/api/interview/turn", { method: "POST", body: { provider: state.provider, messages: state.messages, ...(review && { review: true }) } });
+      state.guide = guide;
+      state.messages.push({ role: "assistant", content: guide.message });
+    } catch (error) {
+      if (!review) state.messages.pop();
+      throw error;
+    } finally { this.setState({ busy: false }); this.sync(); }
+  }
+
+  submit(text) {
+    const t = (text || "").trim();
+    if (!t || this.state.busy) return;
+    this.setState({ draft: "" });
+    const go = this.state.pid && this.state.pid !== state.project ? this.select(this.state.pid) : Promise.resolve();
+    go.then(() => this.turn(t)).catch(showError);
+  }
+
+  sendPick() { this.queue().catch(showError); }
+
+  // Same order as before: a final review turn, stop if it changed the brief, then queue.
+  async queue() {
+    const before = state.guide?.brief;
+    if (!state.guide?.reviewed) await this.turn("", true);
+    if (state.guide?.status !== "ready" || !state.guide?.reviewed || briefChanged(before, state.guide.brief)) {
+      this.showInfo("Check the brief", "The final review changed the brief or asked a question. Read the Guide's reply, then send again.");
+      return;
+    }
+    const body = { provider: state.provider, transcript: state.messages, coverage: state.guide.coverage, brief: state.guide.brief, ...(state.revises && { revises: state.revises, replaces: state.replaces }) };
+    try { await api("/api/jobs", { method: "POST", body }); }
+    catch (error) {
+      if (error.body?.code !== "revise_blocker_changed") throw error;
+      state.replaces = error.body.replaces;
+      await api("/api/jobs", { method: "POST", body: { ...body, replaces: state.replaces } });
+    }
+    state.amendment = null;
+    this.setState({ viewer: "", viewerEdit: false, docEdits: {}, docAdds: {}, panel: "run" });
+    await this.loadDraft();
+    await this.refresh();
+  }
+
+  async select(id) {
+    await api("/api/projects/select", { method: "POST", body: { id } });
+    await this.refresh();
+    await this.loadDraft();
+  }
+
+  renderVals() {
+    const v = super.renderVals();
+    const s = this.state;
+    const list = this.projectList();
+    v.projects.forEach((p, i) => {
+      const id = list[i]?.id;
+      const go = p.go;
+      p.go = () => { go(); if (id && id !== state.project) this.select(id).catch(showError); };
+    });
+    if (v.np.open) {
+      v.np.create = () => {
+        const name = (s.np.name || "").trim();
+        if (!name) return;
+        if (s.np.mode === "adopt") return later("Adopt an existing app");
+        if (s.np.where === "custom") return later("A project somewhere else");
+        this.setState({ np: null });
+        api("/api/projects", { method: "POST", body: { name } }).then(() => this.refresh()).then(() => this.loadDraft()).catch(showError);
+      };
+    }
+    for (const sec of v.cfg.sections) for (const f of sec.fields) { f.locked = true; f.onChange = () => later("Changing settings here"); f.onToggle = f.onChange; }
+    v.cfg.status = "Read only for now";
+    for (const m of v.messages) m.alts = [];
+    for (const q of v.queue) { q.canUp = false; q.up = () => later("Reordering the queue"); }
+    for (const g of v.groups) for (const it of g.items) { it.canUp = false; it.noUp = true; it.noDown = true; it.upOpacity = "0.35"; it.downOpacity = "0.35"; it.up = it.down = () => later("Reordering the queue"); }
+    if (v.run.stops) for (const stop of v.run.stops) stop.canRestart = false;
+    const board = state.board;
+    if (board) v.slots = (board.activeRuns?.length ?? 0) + " of " + board.maxActiveRuns + " build slots in use";
+    for (const link of v.railLinks) {
+      if (link.label === "Manual") link.act = () => { this.setState({ navOpen: false }); window.open("/manual", "_blank"); };
+      else if (link.label === "Feedback" || link.label === "Updates") link.act = () => { this.setState({ navOpen: false }); later(link.label); };
+      if (link.label === "Updates") { link.hasBadge = false; link.badge = ""; }
+    }
+    v.nav.hint = "";
+    const live = (state.config?.providers || []).filter((provider) => provider.authenticated);
+    const now = live.find((provider) => provider.id === state.provider);
+    v.provider = now?.label || "No AI signed in";
+    v.providerAria = "Builds with " + v.provider + ". Switch the AI.";
+    v.toggleProvider = () => {
+      if (live.length < 2) return this.showInfo("Builds with", live.length ? "Only " + v.provider + " is signed in." : "Sign in to Claude Code or Codex first.");
+      state.provider = live[(live.indexOf(now) + 1) % live.length].id;
+      this.setState({});
+    };
+    v.onAttach = () => { const input = document.createElement("input"); input.type = "file"; later("Attaching files"); };
+    if (v.app.live) { v.app.relaunch = () => later("Relaunch"); }
+    if (v.vw.open && !v.vw.revising) {
+      v.vw.modes = [];
+      v.vw.footer = "Read only. Revise the spec to change it.";
+      for (const sec of v.vw.sections) { sec.view = true; sec.click = false; sec.edit = false; }
+    }
+    v.vw.send = () => {
+      const t = (this.state.vdraft || "").trim();
+      if (!t) return;
+      if (!v.vw.revising) return later("Asking the Guide to edit a document");
+      this.setState({ vdraft: "" });
+      this.turn(t).catch(showError);
+    };
+    v.vw.onKey = (e) => { if (e.key === "Enter") { e.preventDefault(); v.vw.send(); } };
+    v.suggestions = [];
+    if (v.run.stops) for (const stop of v.run.stops) if (stop.state === "Failed twice") stop.state = "Failed";
+    const job = (s.runs.find((r) => r.id === s.selRun && r.pid === s.pid && r.state === "stuck") || s.runs.find((r) => r.pid === s.pid && r.state === "stuck"))?.job;
+    v.run.stuckText = [job?.error?.message, job?.nextAction?.reason].filter(Boolean).join(" ") || "The factory stopped this run. Nothing was deployed and the last release is still live.";
+    if (typeof v.run.note === "string" && v.run.note.startsWith("A parked run")) v.run.note = "A parked run keeps everything that already passed.";
+    return v;
+  }
+}
+
+const hub = new Live();
+hub.mount(document.getElementById("app"));

@@ -1,110 +1,60 @@
 # Project hub UI (version A): implementation spec
 
-Source design: `notes/project-hub-ui-mockups/Main.dc.html` (version A). This spec maps every
-control the current page has onto that layout, says what changes and what is deferred, and lists
-the checks a live preview must pass.
+Source design: `notes/project-hub-ui-mockups/Main.dc.html` (version A, also published as the design A
+canvas). The hub is now that design and nothing else: the page is design A's own markup and styles,
+and its component logic is wired to the factory API. No markup, styles or controls from the earlier
+hub remain. The rollback point is the tag `hub-ui-pre-design-a-rebuild`.
+
+## How the page is built
+
+- `public/index.html` holds design A's template (`<script type="text/x-template" id="tpl">`).
+- `public/app.js` has three parts: a small template engine (`{{path}}`, `sc-if`, `sc-for`, a DOM
+  morph that keeps focus and scroll), design A's component class unchanged in behaviour, and a
+  `Live` class that replaces the demo data with factory state (`/api/board`, `/api/jobs`,
+  `/api/interview/draft`) and turns each design A button into the matching API call.
+- `public/styles.css` is design A's stylesheet. Colours are its neutral grays; amber and red only
+  mark attention (needs you, failed, stopped).
 
 ## Layout
 
-```
-.hub                                   (flex, wraps to one column on narrow screens)
-  nav.hub-nav                          left rail, neutral panel
-    brand tile "SF", system status line, active-run capacity
-    WORK list, grouped from /api/board: Needs you · Running · Queued · Done
-    update pill (#update-button), Menu (popover): New project, Feedback, Manual
-  .hub-body
-    header.hub-head
-      project switcher (button + popover menu, "+ New project")
-      attention line (amber, only when a run needs the owner)
-      theme menu (Auto / Light / Dark), panel tabs Run · Documents · Live app
-    .hub-cols
-      main.hub-main
-        error notice, background-run banner
-        brief mode: the Guide thread and composer (#brief-view)
-        run mode: a run summary card (project, title, feature bar, state, Open the run, New brief)
-      aside.hub-aside                  the panel the tabs choose; Close hides it
-        Run: stage list + the full run view (recovery, run map, actions)
-        Documents: brief mode, the brief document and its bar (View/Edit, Queue);
-                   run mode, the run's artifacts
-        Live app: run mode, live traffic and Open/Relaunch; brief mode, a placeholder
-```
+Left rail (brand, WORK list grouped Needs you · Running · Queued · Done, Menu), header (project
+switcher, attention line, theme menu, Run · Documents · Live app tabs), the Guide thread with its
+composer in the middle, and the panel on the right. Revising a spec puts the brief in the wide
+column with Resubmit to the factory and Discard changes, exactly as design A shows it.
 
-Mode switching reuses the existing `body.brief-mode` class: `.brief-only` and `.run-only` elements
-show in one mode each. In run mode the aside takes the wide share of the row and the main column
-narrows to the summary card, so the run map keeps its room; in brief mode the Guide takes the wide
-share. Opening a run selects the Run tab; opening the brief selects Documents.
+## Left out for later
 
-Revise mode (`body.revise-mode`, set while a brief revises an earlier run) follows mockup A: the
-brief document takes the wide left share and opens in Edit, the Guide sits on the right ("Working on
-this document with you"), and the bar holds the run pill, **Discard changes** (two clicks; deletes
-the draft and returns to the run), **Resubmit** and **Close** (returns to the run, keeps the draft).
-A status line says nothing builds until you resubmit, and "Changed in this draft" lists the edited
-sections.
+These worked in the earlier hub and are not in design A, so this build drops them. Retrofit them
+into design A's layout one at a time.
 
-Panes resize: drag the divider after the WORK rail or between the two columns, or focus it and use
-the arrow keys; double-click resets. Widths are kept per layout (brief, revise, run) in this
-browser's localStorage under `solofactory.pane.*`. Phone widths drop the dividers.
-
-## What changes
-
-| Old control | New home |
-|---|---|
-| Top bar project `<select>` | Project switcher button and menu; same `switchProject` |
-| Top bar run `<select>` | WORK rail; every run in every project, click opens it |
-| Factory button and board page | Removed; the WORK rail is the board, fed by `/api/board` on every poll |
-| Feedback, Manual | Menu at the foot of the rail |
-| Check for updates | Pill above the menu (unchanged popover) |
-| Stage rail (left) | Top of the Run panel |
-| Attention banner | Amber line in the header (same ids and action) |
-| Guide sidebar | Main column (Guide thread); the phone rail is no longer shown |
-| Brief document | Documents panel |
-| Artifacts, Live app cards | Documents panel (run mode), Live app panel |
-
-New: a queued run in the rail has a `···` toggle with **Remove from queue** (POST
-`/api/jobs/:id/cancel`, which already dequeues). Open menus and the composer survive the 5-second
-poll: the rail keeps its open row in state and is only rebuilt when the board changes, and
-popovers are never rebuilt while open.
-
-Palette: neutral grays from the mockup tokens in dark and light; hierarchy by weight, size and caps;
-primary buttons use the inverted tile colour; amber and red appear only on attention (needs you,
-errors, blocked stops, recovery). The brief document keeps its paper colour.
-
-## Deferred (not in this build)
-
-- Pick card, sizing, and suggestion pills from the mockup's thread.
-- Queue reorder (Move up / Move down): no server endpoint yet.
-- Adopt an existing folder or custom repo at New project; editable settings; a settings page.
-- Guide chat inside the document viewer; per-document list beyond the brief and artifacts.
+- Run detail: the metro run map, live stream, health line and Q&A; supervision controls; the stage
+  rail; restart from a chosen step.
+- Recovery: waiving a proof, extra inputs, uploading a plan amendment, spend figures. The recovery
+  packet is copied to the clipboard instead of downloaded as a file.
+- Queue: reordering queued runs (no server endpoint yet). Remove from queue and Cancel remain.
+- Guide thread: the earlier-messages pager, attachments, design A's pick card sizing alternatives and
+  suggestion chips (the demo chips are hidden), and Guide edits to a document outside revise mode.
+- Documents: editing a shipped brief in place; only revise mode edits.
+- Live app: traffic stats and Relaunch; the panel shows "Nothing is live yet" or the live link.
+- Projects: adopting an existing folder or custom repo at New project; editing settings.
+- Hub chrome: resizable panes, the feedback form, the report-a-run form, update and background-run
+  banners.
 - Manual screenshots of the new layout.
 
 ## Function checklist (live preview)
 
-Filled in by driving an isolated fixture server (temporary home, seeded projects and runs).
+Driven on an isolated seed server (:4380, temporary home, projects habit-tracker and recipe-box).
 
 | # | Function | Result |
 |---|---|---|
-| 1 | Page loads with no console errors, dark theme | Pass: no console errors; dark by default |
-| 2 | WORK rail groups runs (Needs you / Running / Queued / Done) across projects | Pass: Needs you 2, Queued 2, Done 2 across habit-tracker and recipe-box |
-| 3 | Clicking a rail item in another project switches project and opens the run | Pass: "Import recipes from a link" switched to recipe-box and opened its run |
-| 4 | Queued item `···` → Remove from queue dequeues it | Pass: POST cancel 202; the row moved to Done as "Removed from queue" |
-| 5 | Rail menu row stays open across a poll (>5 s) | Pass: open row survived a 7 s wait (rail rebuilds only when the board changes) |
-| 6 | Project switcher lists projects, switches, marks the current one | Pass: `aria-current` on the current project; switching works |
-| 7 | "+ New project" opens the name dialog and creates the project | Pass: "Garden planner" created and selected as garden-planner |
-| 8 | Attention line shows for a parked run and Open goes to it | Pass: "2 runs are stopped or paused and need you"; Open went to Streak calendar; tab title "(2) needs you" |
-| 9 | Tabs Run / Documents / Live app switch the panel; Close hides it | Pass: each tab shows its panel with `aria-pressed`; Close hides the aside |
-| 10 | Brief mode: Guide thread and composer work; draft text survives a poll | Pass: draft text and focus kept across a 6.5 s wait |
-| 11 | Documents (brief): View/Edit toggle and Queue button present | Pass: View/Edit toggle `aria-pressed`; Queue disabled ("Brief not ready · 0 of 13") |
-| 12 | Run mode: summary card, Open the run, New brief | Pass: summary card with Open the run and New brief |
-| 13 | Run panel: stages, run map, actions (Resume/Dismiss on a parked run) | Pass: six stages, run map, Resume current run, Dismiss, recovery checkpoint |
-| 14 | Theme menu: Light and Dark apply and persist across reload; Auto follows the system | Pass: Light kept after reload (`solofactory.theme`); Auto followed emulated dark and light |
-| 15 | Menu: Feedback dialog opens, Manual link, Update pill | Pass: Feedback dialog opens; Manual link returns 200; update pill runs a forced check |
-| 16 | Narrow width (390 px): columns stack, no sideways scroll | Pass: 390 px stacks rail, header, main and aside; scrollWidth equals viewport |
-
-Notes from the run:
-
-- The attention line counts each project's latest run; the rail lists every parked run, so the two can
-  differ when an older run in a project is parked behind a newer one.
-- "Cancel run" keeps its red outline: it is destructive, which the colour rule allows.
-- Done shows at most five completed runs per project (server cap), so no "Show all" was added.
-- A completed run's elapsed time now falls back to `completedAt` when it has no stage history, so a
-  Done row never keeps counting.
+| 1 | Page loads with no console errors | Pass after guarding projects with no thread yet |
+| 2 | WORK rail lists runs across projects; clicking one switches project and opens it | Pass |
+| 3 | Project switcher lists projects and switches | Pass |
+| 4 | Guide thread and composer render for the selected project | Pass |
+| 5 | Documents panel lists one brief per run and opens it read-only | Pass |
+| 6 | Live app panel with no deployment says nothing is live | Pass |
+| 7 | Stopped run shows the factory's own stop reason, not demo text | Pass |
+| 8 | Revise the spec marks the run as revising and opens the brief for editing | Pass |
+| 9 | Discard changes deletes the draft and returns the run to stopped | Pass |
+| 10 | Let the Guide plan a repair resumes the run | Pass (fixture provider shipped it; next queued run started) |
+| 11 | Theme menu: Light applies and persists (`solofactory.theme`) | Pass |
