@@ -1087,6 +1087,22 @@ test("The draft spec lists only filled brief fields and maps edits back by field
   assert.deepEqual(briefEdits({ sections }, { 0: "Track habits daily", 1: " Add a habit \n\nStreaks " }), { promise: "Track habits daily", mustHaves: ["Add a habit", "Streaks"] });
 });
 
+test("The run names the feature that Build, Gates and Review are on and lists every feature's state", async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf("function featureProgress(job) {"), source.indexOf("function jobIdx(job) {"));
+  const featureProgress = new Function(`${code}; return featureProgress;`)();
+  const job = { state: "building", slicePlanIds: ["F1", "F2", "F3"], sliceDone: ["F1"], featureCursor: { id: "F2" },
+    approvedPlan: { plan: { slices: [{ id: "F1", title: "Setup" }, { id: "F2", title: "Stopwatch" }, { id: "F3", title: "Countdown" }] } } };
+  const fp = featureProgress(job);
+  assert.deepEqual([fp.total, fp.done, fp.now.n, fp.now.title], [3, 1, 2, "Stopwatch"]);
+  assert.deepEqual(fp.list.map((f) => f.state), ["Done", "Now", "To do"]);
+  // A cursor left on a finished feature points at the next one still to build.
+  assert.equal(featureProgress({ ...job, featureCursor: { id: "F1" } }).now.id, "F2");
+  assert.equal(featureProgress({ ...job, state: "completed", sliceDone: ["F1", "F2", "F3"] }).now, null);
+  assert.equal(featureProgress({ state: "specifying" }), null);
+  assert.match(source, /Feature \$\{f\.n\} of \$\{fp\.total\}: \$\{f\.title\}/);
+});
+
 test("The steps list shows the engine's real stage, including planning and a stopped run's last step", async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const code = source.slice(source.indexOf("const JOB_IDX = {"), source.indexOf("  return JOB_IDX[cur.state];\n}") + 30);

@@ -368,6 +368,20 @@
 </li>
 </sc-for>
 </ol>
+<sc-if value="{{run.hasFeatures}}" hint-placeholder-val="{{false}}">
+<section aria-label="Features" style="margin-top: 10px">
+<strong style="display: block; font-size: 13px; font-weight: 600; color: var(--fg-strong); margin-bottom: 4px">{{run.featureHead}}</strong>
+<ol style="list-style: none; margin: 0; padding: 0; font-size: 13px">
+<sc-for list="{{run.features}}" as="f">
+<li style="display: flex; gap: 10px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--raise2); color: {{f.color}}; font-weight: {{f.weight}}">
+<span style="flex: none; width: 22px; color: var(--muted); font-weight: 400">{{f.n}}</span>
+<span style="flex: 1 1 auto; min-width: 0">{{f.title}}</span>
+<span style="flex: none; font-size: 12px; color: var(--muted); font-weight: 400">{{f.state}}</span>
+</li>
+</sc-for>
+</ol>
+</section>
+</sc-if>
 <p style="margin: 6px 0 0; font-size: 13px; color: var(--muted)">{{run.note}}</p>
 <sc-if value="{{run.hasQa}}" hint-placeholder-val="{{false}}">
 <dl style="display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 10px 0 0; font-size: 13px">

@@ -102,8 +102,9 @@ The 1-7 steps list and the progress bar follow the engine's own stage. The engin
 and the plan audit as part of the spec stage, and the check before each feature as a gate run, so the hub
 reads the stage label for those: planning shows as Plan, and the pre-build check as Build. Before this, a run
 that was planning still showed Feature spec, one step behind. A paused or stopped run shows the step it
-stopped at, not step 1. Inside the feature loop the list still moves between Build, Gates and Review for
-each feature, because the engine runs all three per feature.
+stopped at, not step 1. Build, Gates and Review run once for each planned feature, so while the run is on one of
+them the run card names the feature (for example "Step 3 of 7 · Build · Feature 3 of 7: Countdown"), and
+the run panel lists every feature under the steps with Done, Now or To do and a count of features done.
 
 ## Function checklist (live preview)
 
@@ -143,3 +144,4 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 30 | Resubmitting a revised spec replaces the stopped run: the old run leaves the rail, the thread and the run panel | Pass (stop-watch run on the live copy) |
 | 31 | A second Send during the final review starts no second review; a brief the ready review rewrote queues on the next press without another review | Pass (unit test on the send flow) |
 | 32 | The steps list shows Plan while the engine plans features, Build during the pre-build check, and a stopped run's last step | Pass (unit test on the mapping; live run on :4381 planning) |
+| 33 | During Build, Gates and Review the run card names the current feature, and the run panel lists every feature's state | Pass (unit test on the feature progress; live run on :4381 at feature 3 of 7) |

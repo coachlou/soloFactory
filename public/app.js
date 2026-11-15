@@ -1029,6 +1029,18 @@ const JOB_STATE = { specifying: "building", planning: "building", building: "bui
 const JOB_IDX = { specifying: 0, planning: 1, building: 2, verifying: 3, repairing: 3, reviewing: 4, deploying: 5, completed: 7 };
 // The engine reports feature planning as "specifying" and the pre-build check as "verifying", so the stage label
 // decides those. A stopped run keeps the step it stopped at (its last working stage), not step 1.
+// Build, Gates and Review repeat for every planned feature: which feature is current, and each one's state.
+function featureProgress(job) {
+  const ids = job?.slicePlanIds || [];
+  if (!ids.length) return null;
+  const titles = Object.fromEntries((job.approvedPlan?.plan?.slices || []).map((f) => [f.id, f.title]));
+  const done = new Set(job.sliceDone || []);
+  const cursor = job.featureCursor?.id;
+  const current = job.state === "completed" ? null : cursor && !done.has(cursor) ? cursor : ids.find((id) => !done.has(id)) ?? null;
+  const list = ids.map((id, i) => ({ id, n: i + 1, title: titles[id] || id, state: done.has(id) ? "Done" : id === current ? "Now" : "To do" }));
+  const now = list.find((f) => f.id === current) || null;
+  return { total: ids.length, done: done.size, now, list };
+}
 function jobIdx(job) {
   if (job.state === "completed") return JOB_IDX.completed;
   const cur = job.state in JOB_IDX ? { state: job.state, label: job.stage } : (job.stageHistory || []).findLast((h) => h.state in JOB_IDX && h.state !== "completed");
@@ -1167,7 +1179,9 @@ class Live extends Component {
       bg: filter === k ? "var(--inv)" : "transparent", fg: filter === k ? "var(--inv-fg)" : "var(--fg)", border: filter === k ? "var(--inv)" : "var(--line2)",
     }));
 
-    return { hasQa: job.state !== "queued", qa, hasStream: job.state !== "queued", stream, streamEmpty: !stream.length, chips,
+    const fp = featureProgress(job);
+    const features = (fp?.list || []).map((f) => ({ ...f, color: f.state === "To do" ? "var(--muted)" : "var(--fg)", weight: f.state === "Now" ? "600" : "400" }));
+    return { hasFeatures: features.length > 0, features, featureHead: fp ? `Features · ${fp.done} of ${fp.total} done` : "", hasQa: job.state !== "queued", qa, hasStream: job.state !== "queued", stream, streamEmpty: !stream.length, chips,
       hasRecov: parked || Boolean(phase && job.state !== "completed"), recov: parked || phase ? this.recovVals(r, job, spend, next, phase, usage, parked) : null };
   }
 
@@ -1303,7 +1317,10 @@ class Live extends Component {
 
   runLine(r, runs) {
     if (r.state === "stuck") return "Parked · " + (r.job?.error?.message || "needs you").slice(0, 90);
-    return super.runLine(r, runs);
+    const f = featureProgress(r.job)?.now, fp = featureProgress(r.job);
+    // Steps 3-5 (Build, Gates, Review) run once per feature: name the feature they are on.
+    const each = f && r.idx >= JOB_IDX.building && r.idx <= JOB_IDX.reviewing && ["building", "pausing", "paused"].includes(r.state);
+    return super.runLine(r, runs) + (each ? ` · Feature ${f.n} of ${fp.total}: ${f.title}` : "");
   }
 
   docsFor(pid) {
