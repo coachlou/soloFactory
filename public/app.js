@@ -1389,15 +1389,25 @@ class Live extends Component {
 
   sendPick() { this.queue().catch(showError); }
 
-  // Same order as before: a final review turn, stop if it changed the brief, then queue.
+  // Same order as before: a final review turn, stop if it changed the brief, then queue. One send at a time: a
+  // press while the review runs used to start another identical review (three ran at once on 2026-11-14).
   async queue() {
+    if (this.sending) return;
+    this.sending = true;
+    try { await this.sendBrief(); } finally { this.sending = false; }
+  }
+
+  async sendBrief() {
     const before = state.guide?.brief;
     // A second press on a brief the review left unchanged but unmarked queues it as shown (the old hub's Queue anyway).
     const anyway = state.queueAnyway === JSON.stringify(before);
     if (!state.guide?.reviewed && !anyway) {
       await this.turn("", true);
       if (state.guide?.status !== "ready" || briefChanged(before, state.guide.brief)) {
-        this.showInfo("Check the brief", "The final review changed the brief or asked a question. Read the Guide's reply, then send again.");
+        // A ready review that rewrote the brief already read it: the next press queues that brief as shown, without
+        // reviewing it a second time, unless the owner or the Guide changes it first.
+        state.queueAnyway = state.guide?.status === "ready" ? JSON.stringify(state.guide.brief) : null;
+        this.showInfo("Check the brief", "The final review changed the brief or asked a question. Read the Guide's reply, then send again; an unchanged ready brief is not reviewed twice.");
         return;
       }
       if (!state.guide.reviewed) {

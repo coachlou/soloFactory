@@ -89,6 +89,13 @@ every later stage builds against; resuming the old run would build the old spec.
 stopped run's files back and marks it dismissed, and the hub hides dismissed runs, so the revised run
 replaces the stopped one and a spec never shows two runs.
 
+## One final review per send
+
+Send to the factory and Resubmit run the Guide's final review once. A press while that review runs does
+nothing (before this, each press started another identical review, and three ran at once). A brief the
+review marked reviewed queues at once, and a ready brief the review rewrote queues on the next press as
+shown, without a second review, unless the owner or the Guide changes it first.
+
 ## Function checklist (live preview)
 
 Driven on an isolated seed server (:4380, temporary home, projects habit-tracker, recipe-box and notes-app).
@@ -125,3 +132,4 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 28 | The draft spec shows in Documents while the interview runs, edits save into the draft, and the pick card opens it | Pass (unit test on the section and edit mapping) |
 | 29 | A stopped run's spec viewer offers Revise the spec, the Guide box stays in view, asking the Guide reopens the spec as a draft, and list fields read as lists | Pass (stop-watch run on the live copy; unit test on the list rendering) |
 | 30 | Resubmitting a revised spec replaces the stopped run: the old run leaves the rail, the thread and the run panel | Pass (stop-watch run on the live copy) |
+| 31 | A second Send during the final review starts no second review; a brief the ready review rewrote queues on the next press without another review | Pass (unit test on the send flow) |

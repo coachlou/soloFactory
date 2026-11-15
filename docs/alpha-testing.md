@@ -25,7 +25,7 @@ You can change the two new limits in the Manual's Settings table:
 2. **View** shows the brief. **Edit** lets you click a section and change it directly. Your edits are saved at once.
 3. Nothing needs a save button. The Guide box and the brief save on their own.
 4. **Revise brief** on a stopped or finished run opens that run's brief in Edit mode. Changed sections are marked.
-5. **Queue** first asks the Guide for a final review of the exact brief. A small change gets a short confirmation. A wide change can get a question before anything queues.
+5. **Queue** first asks the Guide for a final review of the exact brief. A small change gets a short confirmation. A wide change can get a question before anything queues. Pressing again while the review runs does nothing, and a brief the review rewrote queues on the next press without a second review.
 
 ## What to try
 

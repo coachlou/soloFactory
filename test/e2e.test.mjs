@@ -1086,3 +1086,26 @@ test("The draft spec lists only filled brief fields and maps edits back by field
   // Position 1 is mustHaves here, not BRIEF_SECTIONS[1] (primaryUser).
   assert.deepEqual(briefEdits({ sections }, { 0: "Track habits daily", 1: " Add a habit \n\nStreaks " }), { promise: "Track habits daily", mustHaves: ["Add a habit", "Streaks"] });
 });
+
+test("Send runs one final review at a time and does not review an unchanged ready brief twice", async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const methods = source.slice(source.indexOf("  async queue() {"), source.indexOf("  async select(id) {"));
+  const state = { provider: "fixture", messages: [], guide: { status: "ready", brief: { promise: "a" } } };
+  const posted = [], infos = [];
+  let reviews = 0, release;
+  const api = async (url) => { posted.push(url); return {}; };
+  const Hub = new Function("state", "api", "briefChanged", `return class { ${methods} }`)(state, api, (a, b) => JSON.stringify(a) !== JSON.stringify(b));
+  const hub = Object.assign(new Hub(), {
+    showInfo: (title) => infos.push(title), setState() {}, loadDraft: async () => {}, refresh: async () => {},
+    // The review rewrites the brief and comes back ready, but only once the test lets it finish.
+    turn: () => { reviews += 1; return new Promise((done) => { release = () => { state.guide = { status: "ready", brief: { promise: "b" } }; done(); }; }); },
+  });
+  const first = hub.queue();
+  await hub.queue(); // pressed again while the review runs
+  assert.equal(reviews, 1, "a second press during the review starts no second review");
+  release(); await first;
+  assert.deepEqual(infos, ["Check the brief"]);
+  await hub.queue();
+  assert.equal(reviews, 1, "the brief the ready review wrote is queued without another review");
+  assert.deepEqual(posted, ["/api/jobs"]);
+});
