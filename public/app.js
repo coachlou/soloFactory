@@ -1245,6 +1245,9 @@ class Live extends Component {
     const runs = [], threads = {};
     let id = 1;
     const runOf = (pid, job) => {
+      // A run set aside by a resubmitted revision or Start over (the server marks it dismissed and rolls its files
+      // back) is replaced by the new run, so one spec shows one run.
+      if (job.dismissed) return;
       const st = job.id === state.revises ? "revising" : job.pendingPause ? "pausing" : JOB_STATE[job.state] || "building";
       const run = { id: id++, jobId: job.id, pid, kind: "feature", title: job.brief?.workingName || job.brief?.promise || job.workingName || "Run", state: st, idx: JOB_IDX[job.state] ?? 0, repairs: 0, job };
       runs.push(run);

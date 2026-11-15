@@ -84,6 +84,11 @@ the viewer shows that conversation. While a run is building or pausing the spec 
 Guide says to pause the run first. List fields such as must-haves, the core workflow and acceptance
 scenarios read as lists.
 
+Resubmit to the factory queues the revised spec as a new run, because the spec stage freezes the contract
+every later stage builds against; resuming the old run would build the old spec. The server rolls the
+stopped run's files back and marks it dismissed, and the hub hides dismissed runs, so the revised run
+replaces the stopped one and a spec never shows two runs.
+
 ## Function checklist (live preview)
 
 Driven on an isolated seed server (:4380, temporary home, projects habit-tracker, recipe-box and notes-app).
@@ -119,3 +124,4 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 27 | Guide replies show Markdown headings, lists, bold, code and links; script tags and javascript links stay text | Pass (unit test on the renderer) |
 | 28 | The draft spec shows in Documents while the interview runs, edits save into the draft, and the pick card opens it | Pass (unit test on the section and edit mapping) |
 | 29 | A stopped run's spec viewer offers Revise the spec, the Guide box stays in view, asking the Guide reopens the spec as a draft, and list fields read as lists | Pass (stop-watch run on the live copy; unit test on the list rendering) |
+| 30 | Resubmitting a revised spec replaces the stopped run: the old run leaves the rail, the thread and the run panel | Pass (stop-watch run on the live copy) |
