@@ -66,6 +66,14 @@ headings). The hub renders it with a small built-in renderer that escapes the re
 only markup on the page is what the renderer adds; links open only for http and https addresses.
 The owner's own messages stay plain text.
 
+## Draft spec before sending
+
+As soon as the Guide's brief holds anything, Documents lists it first as **Draft spec**, and it follows
+every Guide turn and every edit. It opens with Read and Edit: an edited section saves into the
+interview draft at once, and asking the Guide in the viewer runs a normal interview turn. The pick
+card names the draft spec as what the Guide read and offers **Read the draft spec** beside Send to the
+factory, so the owner can read and revise it first. Nothing is queued until Send to the factory.
+
 ## Function checklist (live preview)
 
 Driven on an isolated seed server (:4380, temporary home, projects habit-tracker, recipe-box and notes-app).
@@ -99,3 +107,4 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 25 | Let the Guide plan a repair at an exhausted plan points to the upload and posts nothing | Pass |
 | 26 | Recovery box reads as neutral gray in light and dark at desktop width | Pass |
 | 27 | Guide replies show Markdown headings, lists, bold, code and links; script tags and javascript links stay text | Pass (unit test on the renderer) |
+| 28 | The draft spec shows in Documents while the interview runs, edits save into the draft, and the pick card opens it | Pass (unit test on the section and edit mapping) |

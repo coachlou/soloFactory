@@ -154,6 +154,7 @@
 </sc-if>
 <sc-if value="{{m.open}}" hint-placeholder-val="{{true}}">
 <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 4px">
+<sc-if value="{{m.hasDraft}}" hint-placeholder-val="{{false}}"><button onClick="{{m.review}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid var(--line3); border-radius: 10px; background: transparent; color: var(--fg); font-weight: 600">Read the draft spec</button></sc-if>
 <button onClick="{{m.send}}" style="min-height: 44px; padding: 10px 16px; border: 0; border-radius: 10px; background: var(--inv); color: var(--inv-fg); font-weight: 700">{{m.cta}}</button>
 <span style="margin-left: 6px; font-size: 12px; color: var(--muted)">Wrong size?</span>
 <sc-for list="{{m.alts}}" as="a" hint-placeholder-count="2">

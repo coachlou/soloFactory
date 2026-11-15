@@ -149,6 +149,22 @@ const BRIEF_SECTIONS = [
   ["constraints", "Constraints", "constraints", true],
   ["manualChecks", "Checked by hand after install", null, true],
 ];
+const DRAFT_SPEC = "Draft spec";
+// A brief's non-empty fields as document sections, in BRIEF_SECTIONS order.
+function briefSections(brief) {
+  if (!brief) return [];
+  return BRIEF_SECTIONS.filter(([key]) => brief[key] != null && brief[key] !== "" && !(Array.isArray(brief[key]) && !brief[key].length))
+    .map(([key, label, , isList]) => ({ h: label, t: isList ? [].concat(brief[key]).join("\n") : String(brief[key]), k: key, list: isList }));
+}
+// Edited section texts (keyed by position in the shown doc) as brief edits for PATCH /api/interview/draft.
+function briefEdits(doc, edits) {
+  const out = {};
+  for (const [n, text] of Object.entries(edits || {})) {
+    const sec = doc?.sections[n];
+    if (sec) out[sec.k] = sec.list ? text.split("\n").map((line) => line.trim()).filter(Boolean) : text;
+  }
+  return out;
+}
 const sameValue = (a, b) => JSON.stringify(a ?? (Array.isArray(b) ? [] : "")) === JSON.stringify(b ?? (Array.isArray(a) ? [] : ""));
 // Per key, so a key the review only filled with its empty default (a brief from before 0.11 has no
 // manualChecks) is not a change; a whole-object compare told the owner "adjusted" after every review.
@@ -1052,17 +1068,22 @@ class Live extends Component {
     if (prev.docEdits !== this.state.docEdits) this.saveEdits();
   }
 
-  // An edited section of the brief under revision goes straight into the interview draft.
+  // An edited section of the brief under revision, or of the draft spec, goes straight into the interview draft.
   saveEdits() {
-    const run = this.state.runs.find((r) => r.state === "revising" && r.title === this.state.viewer);
-    if (!run) return;
-    const edits = this.state.docEdits[run.pid + "|" + run.title] || {};
-    const out = {};
-    for (const [n, text] of Object.entries(edits)) {
-      const [key, , , isList] = BRIEF_SECTIONS[n];
-      out[key] = isList ? text.split("\n").map((line) => line.trim()).filter(Boolean) : text;
-    }
-    if (Object.keys(out).length) api("/api/interview/draft", { method: "PATCH", body: { edits: out, provider: state.provider } }).then((saved) => { const guide = saved?.draft?.guide ?? saved?.guide; if (guide) state.guide = guide; }).catch(showError);
+    const { viewer } = this.state;
+    const run = this.state.runs.find((r) => r.state === "revising" && r.title === viewer);
+    if (!run && viewer !== DRAFT_SPEC) return;
+    const pid = run ? run.pid : this.state.pid;
+    const key = pid + "|" + viewer;
+    const out = briefEdits(this.docsFor(pid).find((d) => d.name === viewer), this.state.docEdits[key]);
+    if (!Object.keys(out).length) return;
+    api("/api/interview/draft", { method: "PATCH", body: { edits: out, provider: state.provider } }).then((saved) => {
+      const guide = saved?.draft?.guide ?? saved?.guide;
+      if (guide) state.guide = guide;
+      // The saved brief now holds the edit; drop the overlay, since section positions shift as the brief fills in.
+      const rest = { ...this.state.docEdits }; delete rest[key];
+      this.setState({ docEdits: rest });
+    }).catch(showError);
   }
 
   async loadDraft() {
@@ -1274,14 +1295,14 @@ class Live extends Component {
 
   docsFor(pid) {
     const runs = this.state.runs.filter((r) => r.pid === pid && r.job?.brief);
-    return runs.slice().reverse().map((r) => {
-      const brief = r.state === "revising" && state.guide?.brief ? state.guide.brief : r.job.brief;
-      return {
-        name: r.title, tag: "Brief", note: r.state === "revising" ? "Draft of the next revision" : "The brief this run was queued with",
-        sections: BRIEF_SECTIONS.filter(([key]) => brief[key] != null && brief[key] !== "" && !(Array.isArray(brief[key]) && !brief[key].length))
-          .map(([key, label, , isList]) => ({ h: label, t: isList ? [].concat(brief[key]).join("\n") : String(brief[key]), k: key, list: isList }))
-      };
-    });
+    const docs = runs.slice().reverse().map((r) => ({
+      name: r.title, tag: "Brief", note: r.state === "revising" ? "Draft of the next revision" : "The brief this run was queued with",
+      sections: briefSections(r.state === "revising" && state.guide?.brief ? state.guide.brief : r.job.brief)
+    }));
+    // The brief the Guide is writing shows as soon as it holds anything, and follows every turn and edit.
+    const draft = pid === (state.project || "") && !state.revises ? briefSections(state.guide?.brief) : [];
+    if (draft.length) docs.unshift({ name: DRAFT_SPEC, tag: "Draft", note: state.guide.status === "ready" ? "Ready to send. Read or edit it first." : "Fills in as you talk with the Guide. Not sent yet.", sections: draft });
+    return docs;
   }
 
   post(r, action, body = {}) {
@@ -1423,7 +1444,15 @@ class Live extends Component {
     }
     for (const sec of v.cfg.sections) for (const f of sec.fields) { f.locked = true; f.onChange = () => later("Changing settings here"); f.onToggle = f.onChange; }
     v.cfg.status = "Read only for now";
-    for (const m of v.messages) m.alts = [];
+    // The pick card names the draft spec the Guide wrote and opens it in Documents, so it can be read and revised before sending.
+    const hasDraft = this.docsFor(this.state.pid).some((d) => d.name === DRAFT_SPEC);
+    for (const m of v.messages) {
+      m.alts = [];
+      if (!m.isPick) continue;
+      m.read = hasDraft ? [DRAFT_SPEC] : ["your answers so far"];
+      m.hasDraft = hasDraft && m.open;
+      m.review = () => this.setState({ panel: "docs", viewer: DRAFT_SPEC, viewerEdit: false });
+    }
     for (const q of v.queue) { q.canUp = false; q.up = () => later("Reordering the queue"); }
     for (const g of v.groups) for (const it of g.items) { it.canUp = false; it.noUp = true; it.noDown = true; it.upOpacity = "0.35"; it.downOpacity = "0.35"; it.up = it.down = () => later("Reordering the queue"); }
     if (v.run.stops) for (const stop of v.run.stops) stop.canRestart = false;
@@ -1446,7 +1475,8 @@ class Live extends Component {
     };
     v.onAttach = () => { const input = document.createElement("input"); input.type = "file"; later("Attaching files"); };
     if (v.app.live) { v.app.relaunch = () => later("Relaunch"); }
-    if (v.vw.open && !v.vw.revising) {
+    const draftOpen = v.vw.open && v.vw.name === DRAFT_SPEC;
+    if (v.vw.open && !v.vw.revising && !draftOpen) {
       v.vw.modes = [];
       v.vw.footer = "Read only. Revise the spec to change it.";
       for (const sec of v.vw.sections) { sec.view = true; sec.click = false; sec.edit = false; }
@@ -1454,7 +1484,7 @@ class Live extends Component {
     v.vw.send = () => {
       const t = (this.state.vdraft || "").trim();
       if (!t) return;
-      if (!v.vw.revising) return later("Asking the Guide to edit a document");
+      if (!v.vw.revising && !draftOpen) return later("Asking the Guide to edit a document");
       this.setState({ vdraft: "" });
       this.turn(t).catch(showError);
     };

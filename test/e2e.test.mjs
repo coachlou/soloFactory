@@ -1059,3 +1059,15 @@ test("Guide replies render as Markdown with nothing from the reply left as marku
   assert.doesNotMatch(html, /<script|<img|href="javascript/);
   assert.match(html, /\[bad\]\(javascript:alert\(1\)\)/, "a non-http link stays as plain text");
 });
+
+test("The draft spec lists only filled brief fields and maps edits back by field, not by position", async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const lift = (re) => source.match(re)[0];
+  const { briefSections, briefEdits } = new Function(`${lift(/const BRIEF_SECTIONS = \[[\s\S]*?\n\];\n/)}${lift(/function briefSections\([\s\S]*?\n}\n/)}${lift(/function briefEdits\([\s\S]*?\n}\n/)}; return { briefSections, briefEdits };`)();
+  assert.deepEqual(briefSections(null), []);
+  const sections = briefSections({ promise: "Track habits", problem: "", mustHaves: ["Add a habit", "Mark done"], nonGoals: [] });
+  assert.deepEqual(sections.map((sec) => sec.k), ["promise", "mustHaves"]);
+  assert.equal(sections[1].t, "Add a habit\nMark done");
+  // Position 1 is mustHaves here, not BRIEF_SECTIONS[1] (primaryUser).
+  assert.deepEqual(briefEdits({ sections }, { 0: "Track habits daily", 1: " Add a habit \n\nStreaks " }), { promise: "Track habits daily", mustHaves: ["Add a habit", "Streaks"] });
+});
