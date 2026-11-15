@@ -1060,6 +1060,21 @@ test("Guide replies render as Markdown with nothing from the reply left as marku
   assert.match(html, /\[bad\]\(javascript:alert\(1\)\)/, "a non-http link stays as plain text");
 });
 
+test("The spec viewer shows list fields such as must-haves as a list, one item per line", async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const page = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  const engine = source.slice(source.indexOf("const VOID"), source.indexOf("// Index-wise morph"));
+  const { parseTpl, draw } = new Function(`${engine}; return { parseTpl, draw };`)();
+  const tpl = page.match(/<script type="text\/x-template" id="tpl">([\s\S]*?)<\/script>/)[1];
+  const vw = { open: true, name: "Stop Watch", modes: [], ctrls: [], chat: [], sections: [
+    { h: "Promise", view: true, t: "Time tasks" },
+    { h: "Must-haves", viewList: true, items: ["MH-1: Stopwatch", "MH-2: Countdown"] },
+  ] };
+  const html = draw(parseTpl(tpl), new Proxy({ vw }, { get: (t, k) => (k in t ? t[k] : undefined), has: () => true }), []);
+  assert.match(html, /<li>MH-1: Stopwatch<\/li><li>MH-2: Countdown<\/li>/);
+  assert.match(html, /Time tasks/);
+});
+
 test("The draft spec lists only filled brief fields and maps edits back by field, not by position", async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const lift = (re) => source.match(re)[0];

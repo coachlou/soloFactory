@@ -74,6 +74,16 @@ interview draft at once, and asking the Guide in the viewer runs a normal interv
 card names the draft spec as what the Guide read and offers **Read the draft spec** beside Send to the
 factory, so the owner can read and revise it first. Nothing is queued until Send to the factory.
 
+## Revising a stopped run's spec
+
+As in design A, a paused, parked or cancelled run offers Revise the spec on the run card, in the run
+panel and in the spec viewer (a cancelled run says Revise and resubmit). Revising reopens the brief as a
+draft of the next revision with Resubmit to the factory and Discard changes. In the viewer, telling the
+Guide what to change on a stopped run reopens the draft first and then runs the turn; the Guide's side of
+the viewer shows that conversation. While a run is building or pausing the spec stays read only, and the
+Guide says to pause the run first. List fields such as must-haves, the core workflow and acceptance
+scenarios read as lists.
+
 ## Function checklist (live preview)
 
 Driven on an isolated seed server (:4380, temporary home, projects habit-tracker, recipe-box and notes-app).
@@ -108,3 +118,4 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 26 | Recovery box reads as neutral gray in light and dark at desktop width | Pass |
 | 27 | Guide replies show Markdown headings, lists, bold, code and links; script tags and javascript links stay text | Pass (unit test on the renderer) |
 | 28 | The draft spec shows in Documents while the interview runs, edits save into the draft, and the pick card opens it | Pass (unit test on the section and edit mapping) |
+| 29 | A stopped run's spec viewer offers Revise the spec, the Guide box stays in view, asking the Guide reopens the spec as a draft, and list fields read as lists | Pass (stop-watch run on the live copy; unit test on the list rendering) |

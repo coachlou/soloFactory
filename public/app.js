@@ -758,7 +758,7 @@ class Component extends DCLogic {
         };
         return {
           h: x.h + (added ? ' · changed by the Guide' : edits[n] !== undefined ? ' · edited' : ''), label: 'Edit ' + x.h, t: text, added: added, hasAdd: !!added,
-          view: !editing, click: editing && !active, edit: active, draft: s.secDraft,
+          view: !editing && !x.list, viewList: !editing && !!x.list, isList: !!x.list, items: text.split('\n').map((l) => l.trim()).filter(Boolean), click: editing && !active, edit: active, draft: s.secDraft,
           start: () => this.setState({ activeSec: n, secDraft: whole }),
           onChange: (e) => this.setState({ secDraft: e.target.value }),
           keep: keep,
@@ -769,7 +769,7 @@ class Component extends DCLogic {
         };
       }),
       footer: editing ? 'Click any section to edit it. Click away or press Cmd/Ctrl+Enter to keep the edit. Escape cancels. Each edit saves at once, and the Guide checks it before anything is built.' : canEdit ? 'Read only. Press Edit to change it, or ask the Guide.' : 'Read only while the run is active. Use Revise the spec on a parked or cancelled run, or ask the Guide.',
-      chat: [{ mine: false, guide: true, text: 'I have ' + vRaw.name + ' open with you. Tell me what to change and I will edit it, or edit it yourself and I will check your changes against the rest of the project documents.' }]
+      chat: [{ mine: false, guide: true, text: 'I have ' + vRaw.name + ' open with you. Tell me what to change and I will edit it, or edit it yourself and I will check your changes against the rest of the project documents.' }].map((m) => ({ ...m, html: md(m.text) }))
         .concat((s.docChat[key] || []).map((m) => ({ mine: m.who === 'you', guide: m.who === 'guide', text: m.text, html: md(m.text) }))).reverse(),
       draft: s.vdraft,
       onDraft: (e) => this.setState({ vdraft: e.target.value }),
@@ -1476,18 +1476,27 @@ class Live extends Component {
     v.onAttach = () => { const input = document.createElement("input"); input.type = "file"; later("Attaching files"); };
     if (v.app.live) { v.app.relaunch = () => later("Relaunch"); }
     const draftOpen = v.vw.open && v.vw.name === DRAFT_SPEC;
+    const vRun = v.vw.open ? this.state.runs.filter((x) => x.pid === this.state.pid && this.specName(x) === v.vw.name).pop() : null;
+    const parked = !!vRun && ["paused", "stuck", "cancelled"].includes(vRun.state);
     if (v.vw.open && !v.vw.revising && !draftOpen) {
       v.vw.modes = [];
-      v.vw.footer = "Read only. Revise the spec to change it.";
-      for (const sec of v.vw.sections) { sec.view = true; sec.click = false; sec.edit = false; }
+      v.vw.footer = parked ? "Read only. Press Revise the spec, or tell the Guide what to change and it reopens the spec as a draft." : "Read only while the run is with the factory. Pause it to revise the spec.";
+      for (const sec of v.vw.sections) { sec.view = !sec.isList; sec.viewList = sec.isList; sec.click = false; sec.edit = false; }
     }
+    // Design A: asking the Guide about a stopped run's spec reopens it as a revision draft first.
     v.vw.send = () => {
       const t = (this.state.vdraft || "").trim();
-      if (!t) return;
-      if (!v.vw.revising && !draftOpen) return later("Asking the Guide to edit a document");
+      if (!t || this.state.busy) return;
+      if (!v.vw.revising && !draftOpen && !parked) return this.showInfo("The spec is with the factory", "I will not change the spec under a running build. Pause the run, then ask again or press Revise the spec.");
       this.setState({ vdraft: "" });
-      this.turn(t).catch(showError);
+      (v.vw.revising || draftOpen ? this.turn(t) : this.reviseRun(vRun).then(() => this.turn(t))).catch(showError);
     };
+    if (v.vw.revising || draftOpen) {
+      const talk = state.messages.filter((m) => m.content).map((m) => ({ mine: m.role === "user", guide: m.role !== "user", text: m.content, html: md(m.content) }));
+      if (this.state.busy) talk.push({ mine: false, guide: true, text: "Thinking…", html: md("Thinking…") });
+      // The chat is newest first; design A's opening note stays at the bottom.
+      v.vw.chat = talk.reverse().concat(v.vw.chat.slice(-1));
+    }
     v.vw.onKey = (e) => { if (e.key === "Enter") { e.preventDefault(); v.vw.send(); } };
     v.suggestions = [];
     if (v.run.stops) for (const stop of v.run.stops) if (stop.state === "Failed twice") stop.state = "Failed";
