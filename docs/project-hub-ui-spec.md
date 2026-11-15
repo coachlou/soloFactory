@@ -61,7 +61,7 @@ These came back in design A's own style rather than as the earlier hub's panels.
 
 ## Function checklist (live preview)
 
-Driven on an isolated seed server (:4380, temporary home, projects habit-tracker and recipe-box).
+Driven on an isolated seed server (:4380, temporary home, projects habit-tracker, recipe-box and notes-app).
 
 | # | Function | Result |
 |---|---|---|
@@ -80,11 +80,14 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 13 | Resubmit to the factory queues the revised brief (a second press queues an unconfirmed review as shown) | Pass |
 | 14 | Remove from queue cancels a queued run | Pass |
 | 15 | Cancel run shows only on active runs; parked runs offer repair, revise, start over instead | Pass (matches the earlier hub) |
-| 16 | Run Q&A and Activity list render for a parked run, and the filter chips switch | Pass |
+| 16 | Run Q&A and Activity list render for a parked run; each chip shows only its kind of real factory event (agent, file edit, gate, stage) | Pass |
 | 17 | Recovery box shows the summary, spend and the actions `nextAction` allows | Pass |
 | 18 | Waive with an empty note asks for a reason; with a reason it posts `waive-proof` (200) | Pass |
 | 19 | Exhausted plan: blockers listed, help packet link, choosing a JSON plan shows its size and phase | Pass |
 | 20 | Review this plan posts `recovery-review`; the server's refusal shows inline | Pass (a dummy plan was refused with 400 as expected) |
 | 21 | Add a spec or prototype file posts `inputs` (200) | Pass |
 | 22 | Revise inputs posts `recovery-plan` with the note as guidance (202) | Pass (the seed's thin run then parked with the planner's error, shown on the run) |
-| 23 | Approve and continue repairs | Not driven: needs a reviewed plan, which the seed cannot fake |
+| 23 | Approve and continue repairs posts `recovery-start` with the ready plan's digest | Pass (the server accepted the digest, then refused the seed's thin plan with 409, shown inline; a real start needs a planner-made plan) |
+| 24 | A ready plan also offers the corrected-plan upload and lists its repair features and allowance | Pass |
+| 25 | Let the Guide plan a repair at an exhausted plan points to the upload and posts nothing | Pass |
+| 26 | Recovery box reads as neutral gray in light and dark at desktop width | Pass |
