@@ -1087,6 +1087,22 @@ test("The draft spec lists only filled brief fields and maps edits back by field
   assert.deepEqual(briefEdits({ sections }, { 0: "Track habits daily", 1: " Add a habit \n\nStreaks " }), { promise: "Track habits daily", mustHaves: ["Add a habit", "Streaks"] });
 });
 
+test("The steps list shows the engine's real stage, including planning and a stopped run's last step", async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf("const JOB_IDX = {"), source.indexOf("  return JOB_IDX[cur.state];\n}") + 30);
+  const jobIdx = new Function(`${code}; return jobIdx;`)();
+  const steps = ["Feature spec", "Plan", "Build", "Gates", "Review", "Deploy", "Update docs"];
+  const at = (job) => steps[jobIdx(job)];
+  assert.equal(at({ state: "specifying", stage: "Writing PRD, plan, and acceptance contract" }), "Feature spec");
+  assert.equal(at({ state: "specifying", stage: "Planning features against the frozen contract" }), "Plan");
+  assert.equal(at({ state: "specifying", stage: "Auditing the slice plan (second opinion)" }), "Plan");
+  assert.equal(at({ state: "verifying", stage: "Checking feature 2 before building — Search" }), "Build");
+  assert.equal(at({ state: "verifying", stage: "Running deterministic quality gates" }), "Gates");
+  assert.equal(at({ state: "paused", stage: "Paused before deploying", stageHistory: [{ state: "building" }, { state: "reviewing" }, { state: "paused" }] }), "Review");
+  assert.equal(jobIdx({ state: "queued" }), 0);
+  assert.equal(jobIdx({ state: "completed" }), 7);
+});
+
 test("Send runs one final review at a time and does not review an unchanged ready brief twice", async () => {
   const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
   const methods = source.slice(source.indexOf("  async queue() {"), source.indexOf("  async select(id) {"));

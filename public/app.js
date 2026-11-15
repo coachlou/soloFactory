@@ -1027,6 +1027,16 @@ function showError(error) { reportError(error, "action"); hub?.showInfo("Somethi
 const later = (what) => hub.showInfo(what, "Not wired to the factory yet. It is on the left-out-for-later list.");
 const JOB_STATE = { specifying: "building", planning: "building", building: "building", verifying: "building", repairing: "building", reviewing: "building", deploying: "building", failed: "stuck", interrupted: "stuck", paused: "paused", completed: "shipped", cancelled: "cancelled", dismissed: "dismissed", queued: "queued" };
 const JOB_IDX = { specifying: 0, planning: 1, building: 2, verifying: 3, repairing: 3, reviewing: 4, deploying: 5, completed: 7 };
+// The engine reports feature planning as "specifying" and the pre-build check as "verifying", so the stage label
+// decides those. A stopped run keeps the step it stopped at (its last working stage), not step 1.
+function jobIdx(job) {
+  if (job.state === "completed") return JOB_IDX.completed;
+  const cur = job.state in JOB_IDX ? { state: job.state, label: job.stage } : (job.stageHistory || []).findLast((h) => h.state in JOB_IDX && h.state !== "completed");
+  if (!cur) return 0;
+  if (cur.state === "specifying" && /^(Planning features|Auditing the slice plan)/.test(cur.label || "")) return JOB_IDX.planning;
+  if (cur.state === "verifying" && /before building/.test(cur.label || "")) return JOB_IDX.building;
+  return JOB_IDX[cur.state];
+}
 const PLAN_STEPS = ["retry-plan", "amend-plan", "revise-inputs", "prepare-plan", "approve-plan"];
 const PARKED = ["failed", "cancelled", "interrupted", "paused"];
 const QUIET_WARN_MS = 10 * 60_000, QUIET_BAD_MS = 30 * 60_000;
@@ -1249,7 +1259,7 @@ class Live extends Component {
       // back) is replaced by the new run, so one spec shows one run.
       if (job.dismissed) return;
       const st = job.id === state.revises ? "revising" : job.pendingPause ? "pausing" : JOB_STATE[job.state] || "building";
-      const run = { id: id++, jobId: job.id, pid, kind: "feature", title: job.brief?.workingName || job.brief?.promise || job.workingName || "Run", state: st, idx: JOB_IDX[job.state] ?? 0, repairs: 0, job };
+      const run = { id: id++, jobId: job.id, pid, kind: "feature", title: job.brief?.workingName || job.brief?.promise || job.workingName || "Run", state: st, idx: jobIdx(job), repairs: 0, job };
       runs.push(run);
       threads[pid].push({ id: id++, type: "pick", kind: "feature", sent: true, ask: run.title, runId: run.id }, { id: id++, type: "run", runId: run.id });
     };

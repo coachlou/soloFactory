@@ -96,6 +96,15 @@ nothing (before this, each press started another identical review, and three ran
 review marked reviewed queues at once, and a ready brief the review rewrote queues on the next press as
 shown, without a second review, unless the owner or the Guide changes it first.
 
+## Steps that match the engine
+
+The 1-7 steps list and the progress bar follow the engine's own stage. The engine reports feature planning
+and the plan audit as part of the spec stage, and the check before each feature as a gate run, so the hub
+reads the stage label for those: planning shows as Plan, and the pre-build check as Build. Before this, a run
+that was planning still showed Feature spec, one step behind. A paused or stopped run shows the step it
+stopped at, not step 1. Inside the feature loop the list still moves between Build, Gates and Review for
+each feature, because the engine runs all three per feature.
+
 ## Function checklist (live preview)
 
 Driven on an isolated seed server (:4380, temporary home, projects habit-tracker, recipe-box and notes-app).
@@ -133,3 +142,4 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 29 | A stopped run's spec viewer offers Revise the spec, the Guide box stays in view, asking the Guide reopens the spec as a draft, and list fields read as lists | Pass (stop-watch run on the live copy; unit test on the list rendering) |
 | 30 | Resubmitting a revised spec replaces the stopped run: the old run leaves the rail, the thread and the run panel | Pass (stop-watch run on the live copy) |
 | 31 | A second Send during the final review starts no second review; a brief the ready review rewrote queues on the next press without another review | Pass (unit test on the send flow) |
+| 32 | The steps list shows Plan while the engine plans features, Build during the pre-build check, and a stopped run's last step | Pass (unit test on the mapping; live run on :4381 planning) |
