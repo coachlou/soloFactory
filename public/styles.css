@@ -17,3 +17,6 @@ a{color:var(--fg)}a:hover{color:var(--fg-strong)}
 .md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;padding:1px 5px;border-radius:4px;background:var(--raise2)}
 .md pre{padding:10px 12px;border-radius:8px;background:var(--raise2);overflow-x:auto}
 .md pre code{padding:0;background:none}
+
+.split{background:transparent}.split:hover,.split:focus-visible{background:var(--line2);outline:none}
+@media (max-width: 900px){.split{display:none}}

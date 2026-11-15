@@ -1889,6 +1889,28 @@ export class SoloFactory {
     return job;
   }
 
+  // Owner stop for a live app. The app may have been started by another factory object (build, then relaunch),
+  // so it is found by job in the module-wide live map; its exit handler records the stop.
+  async stopDeployment(jobId) {
+    const job = await this.store.read(jobId);
+    if (job.deployment?.status !== "live") throw new FactoryError("not_live", "That run's app is not running.");
+    const entry = [...liveByProject.values()].find((item) => item.jobId === jobId);
+    const child = entry?.child ?? this.deployments.get(jobId);
+    if (child && child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise((resolve) => child.once("exit", resolve));
+      stopApp(child);
+      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000).unref())]);
+    }
+    const latest = await this.store.read(jobId);
+    if (latest.deployment?.status === "live") {
+      // No process to wait on (or it ignored SIGTERM): record the owner's stop anyway.
+      Object.assign(latest.deployment, { status: "stopped", stoppedAt: new Date().toISOString() });
+      await this.store.writeState(latest);
+    }
+    await this.emit(jobId, { type: "deployment.stopped", state: latest.state, message: "App stopped by the owner." });
+    return latest;
+  }
+
   async telemetry(jobId, { probeApp = true } = {}) {
     const job = await this.store.read(jobId);
     const events = await this.store.events(jobId, 500);

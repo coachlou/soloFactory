@@ -1141,3 +1141,85 @@ test("Send runs one final review at a time and does not review an unchanged read
   assert.equal(reviews, 1, "the brief the ready review wrote is queued without another review");
   assert.deepEqual(posted, ["/api/jobs"]);
 });
+
+test("a queued new run moves up or down within its project's queue", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "solo-factory-queue-move-"));
+  const fixture = createFixtureProvider();
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const providerFactory = () => ({ ...fixture, run: async (args) => { if (args.context?.stage !== "interview") await gate; return fixture.run(args); } });
+  const app = await createSoloFactoryServer({ home, fixtureMode: true, providerFactory });
+  await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+  t.after(() => { release(); return app.close(); });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const config = await getJson(`${base}/api/config`);
+  const transcript = [{ role: "assistant", content: config.opening.message }, { role: "user", content: "Build a tiny private daily tracker with no login and observable save behavior." }];
+  const guide = await postJson(`${base}/api/interview/turn`, { provider: "fixture", messages: transcript });
+  const submit = async () => (await postJson(`${base}/api/jobs`, { provider: "fixture", transcript, coverage: guide.coverage, brief: guide.brief })).job;
+  const a1 = await submit();
+  const a2 = await submit();
+  const a3 = await submit();
+  await waitForJob(base, a1.id, ["specifying"]);
+  const position = async (id) => (await getJson(`${base}/api/jobs/${id}`)).job.queuePosition;
+  assert.deepEqual([await position(a2.id), await position(a3.id)], [1, 2]);
+  assert.deepEqual((await postJson(`${base}/api/jobs/${a3.id}/queue-move`, { direction: "up" })).queue, [a3.id, a2.id]);
+  assert.deepEqual([await position(a3.id), await position(a2.id)], [1, 2]);
+  assert.equal((await post(`${base}/api/jobs/${a3.id}/queue-move`, { direction: "up" })).status, 409, "already first");
+  assert.equal((await post(`${base}/api/jobs/${a1.id}/queue-move`, { direction: "down" })).status, 409, "a running run is not in the queue");
+  assert.equal((await post(`${base}/api/jobs/${a2.id}/queue-move`, { direction: "sideways" })).status, 400);
+  release();
+  await waitForJob(base, a1.id, ["completed"]);
+  assert.equal((await waitForJob(base, a3.id, ["completed"])).state, "completed", "the moved run starts next");
+});
+
+test("The Live app pane maps a shipped run to Stop or Relaunch, its stats and busiest routes", async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf("  appVals() {"), source.indexOf("\n  post(r, action"));
+  const make = new Function("state", "formatSpan", `return { ${code} };`);
+  const posts = [];
+  const live = { jobs: [{ id: "j1", state: "completed", deployment: { url: "http://127.0.0.1:5000", status: "live" } }] };
+  const o = Object.assign(make(live, (ms) => `${ms / 1000}s`), { post: (r, action) => posts.push([r.jobId, action]),
+    appTel: { jobId: "j1", app: { requests: { total: 12, errors: 1 }, latencyMs: { average: 41.6 }, uptimeSeconds: 90, routes: { "/": { count: 9 }, "/_factory/metrics": { count: 99 }, "/api": { count: 3 } } } } });
+  const v = o.appVals();
+  assert.deepEqual([v.up, v.down, v.statusText], [true, false, "Live"]);
+  assert.deepEqual(v.stats.map((x) => x.value), ["12", "1", "42 ms", "90s"]);
+  assert.deepEqual(v.routes.map((x) => [x.path, x.count]), [["/", 9], ["/api", 3]]);
+  v.stop();
+  live.jobs[0].deployment.status = "stopped";
+  const w = o.appVals();
+  assert.deepEqual([w.up, w.down, w.statusText, w.hasStats], [false, true, "Stopped", false]);
+  w.relaunch();
+  assert.deepEqual(posts, [["j1", "stop-app"], ["j1", "relaunch"]]);
+  assert.deepEqual(make({ jobs: [{ state: "running" }] }, String).appVals(), {});
+});
+
+test("Pane splitters clamp, persist and reset their widths", async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf("  paneSplit(key, side, min, maxFn) {"), source.indexOf("  paneVals() {"));
+  const store = {};
+  const localStorage = { setItem: (k, v) => { store[k] = v; }, removeItem: (k) => { delete store[k]; } };
+  const o = Object.assign(new Function("localStorage", `return { ${code} };`)(localStorage), { state: {}, setState(p) { this.state = { ...this.state, ...p }; } });
+  const pane = { getBoundingClientRect: () => ({ left: 0, right: 300, width: 300 }) };
+  const ev = (extra) => ({ target: { closest: () => ({ previousElementSibling: pane }), setPointerCapture() {} }, preventDefault() {}, ...extra });
+  const s = o.paneSplit("nav", "left", 180, () => 480);
+  s.down(ev({ pointerId: 1 }));
+  s.move(ev({ clientX: 900, buttons: 1 }));
+  assert.equal(o.state.panes.nav, 480);
+  s.move(ev({ clientX: 50, buttons: 1 }));
+  assert.equal(o.state.panes.nav, 180);
+  s.key(ev({ key: "ArrowRight" }));
+  assert.deepEqual([o.state.panes.nav, store["solofactory.pane.nav"]], [324, "324"]);
+  s.reset();
+  assert.deepEqual([o.state.panes.nav, store["solofactory.pane.nav"]], [undefined, undefined]);
+  assert.match(source, /"pointerdown", "pointermove", "dblclick"/);
+});
+
+test("Restart from a finished feature, queue moves and a shipped brief's revise are wired to the factory", async () => {
+  const source = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(source, /canRestart: restartable && f\.state === "Done" && order\.indexOf\(f\.id\) >= 1/);
+  assert.match(source, /this\.post\(r, "restart", \{ fromSlice: f\.id \}\)/);
+  assert.match(source, /this\.post\(r, "queue-move", \{ direction \}\)/);
+  assert.match(source, /if \(shipped\) v\.vw\.ctrls = \[this\.wire\(\{ label: "Revise the spec"/);
+  const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  for (const s of ['onClick="{{f.restart}}"', 'onClick="{{app.stop}}"', 'onClick="{{app.relaunch}}"', 'onPointerDown="{{pane.nav.down}}"', 'onPointerDown="{{pane.panel.down}}"']) assert.ok(html.includes(s), s);
+});

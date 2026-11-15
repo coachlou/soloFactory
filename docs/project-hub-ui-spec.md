@@ -27,15 +27,12 @@ column with Resubmit to the factory and Discard changes, exactly as design A sho
 These worked in the earlier hub and are not in design A, so this build drops them. Retrofit them
 into design A's layout one at a time.
 
-- Run detail: the metro run map; supervision controls; the stage rail; restart from a chosen step.
+- Run detail: the metro run map; supervision controls; the stage rail.
 - Recovery: the recovery packet is copied to the clipboard; only the plan help packet downloads.
-- Queue: reordering queued runs (no server endpoint yet). Remove from queue and Cancel remain.
 - Guide thread: the earlier-messages pager, attachments, design A's pick card sizing alternatives and
   suggestion chips (the demo chips are hidden), and Guide edits to a document outside revise mode.
-- Documents: editing a shipped brief in place; only revise mode edits.
-- Live app: traffic stats and Relaunch; the panel shows "Nothing is live yet" or the live link.
 - Projects: adopting an existing folder or custom repo at New project; editing settings.
-- Hub chrome: resizable panes, the feedback form, the report-a-run form, update and background-run
+- Hub chrome: the feedback form, the report-a-run form, update and background-run
   banners.
 - Manual screenshots of the new layout.
 
@@ -106,6 +103,27 @@ stopped at, not step 1. Build, Gates and Review run once for each planned featur
 them the run card names the feature (for example "Step 3 of 7 · Build · Feature 3 of 7: Countdown"), and
 the run panel lists every feature under the steps with Done, Now or To do and a count of features done.
 
+## Run, queue and live app controls (added back)
+
+- **Restart from here.** On a paused, parked or cancelled run, each finished feature after the first in the run
+  panel's feature list offers Restart from here. It posts `restart` with that feature as `fromSlice`, so the
+  factory keeps what passed before it and rebuilds from that feature on.
+- **Queue order.** Queued runs in the WORK rail move up or down within their project's queue. Each move posts
+  `queue-move` with `direction` up or down; the server refuses a move past either end with 409.
+- **Revise a shipped brief.** A shipped run's spec viewer offers Revise the spec, and asking the Guide there
+  reopens it too. Both open the brief as the next revision; Resubmit builds it on the live app as a new run, and
+  the shipped run stays in Done.
+- **Live app.** The panel shows Live or Stopped. A live app offers Open the app and Stop the app (`stop-app`,
+  which stops the app and marks its deployment stopped); a stopped one offers Relaunch (`relaunch`). While it is
+  live the panel shows requests, errors, average response time, uptime and the busiest routes from the run's
+  telemetry.
+- **Resizable panes.** The projects list and the right panel each have a splitter: drag it, use the left and right
+  arrow keys (24px a press) or double-click to reset. Widths stay per browser (`solofactory.pane.nav`,
+  `solofactory.pane.panel`); the splitters hide below 900px wide, where the panes stack.
+
+The two new server routes are `POST /api/jobs/:id/stop-app` and `POST /api/jobs/:id/queue-move`. Both drive what
+the factory already does (stop a deployment, reorder the queue); no stage or gate changed.
+
 ## Function checklist (live preview)
 
 Driven on an isolated seed server (:4380, temporary home, projects habit-tracker, recipe-box and notes-app).
@@ -145,3 +163,8 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 31 | A second Send during the final review starts no second review; a brief the ready review rewrote queues on the next press without another review | Pass (unit test on the send flow) |
 | 32 | The steps list shows Plan while the engine plans features, Build during the pre-build check, and a stopped run's last step | Pass (unit test on the mapping; live run on :4381 planning) |
 | 33 | During Build, Gates and Review the run card names the current feature, and the run panel lists every feature's state | Pass (unit test on the feature progress; live run on :4381 at feature 3 of 7) |
+| 34 | Restart from here shows only on finished features after the first of a stopped run and posts `restart` with that feature | Pass (unit test on the wiring) |
+| 35 | Queued runs move up and down within their project's queue; a move past either end is refused | Pass (server test on `queue-move`; unit test on the wiring) |
+| 36 | A shipped run's spec viewer offers Revise the spec; resubmitting keeps the shipped run in Done | Pass (server test on revise of a finished run) |
+| 37 | Live app shows Stop the app while live and Relaunch once stopped, with requests, errors, response time, uptime and busiest routes | Pass (unit test on the mapping; server tests on stop and relaunch) |
+| 38 | The projects list and right panel resize by drag, arrow keys and double-click reset, clamped and remembered | Pass (unit test on the splitter) |

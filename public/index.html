@@ -13,7 +13,7 @@
 <script type="text/x-template" id="tpl">
 <div data-theme="{{theme.mode}}" style="position: relative; display: flex; flex-wrap: wrap; height: 100vh; min-height: 600px; overflow: auto; background: var(--bg); color: var(--fg); font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 14px; line-height: 1.45">
 
-<nav aria-label="Projects" style="flex: 1 1 248px; max-width: 300px; min-width: 0; display: flex; flex-direction: column; gap: 22px; padding: 18px 14px; border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto">
+<nav aria-label="Projects" style="flex: {{pane.navFlex}}; max-width: {{pane.navMax}}; min-width: 0; display: flex; flex-direction: column; gap: 22px; padding: 18px 14px; border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto">
 <div style="display: flex; align-items: center; gap: 10px; padding: 0 4px">
 <span style="display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--inv); color: var(--inv-fg); font-size: 11px; font-weight: 700">SF</span>
 <span style="display: flex; flex-direction: column"><strong style="font-weight: 600">SoloFactory</strong><span style="font-size: 12px; color: var(--muted)">{{slots}}</span></span>
@@ -68,6 +68,7 @@
 <button onClick="{{nav.toggle}}" aria-haspopup="menu" aria-expanded="{{nav.expanded}}" style="display: flex; gap: 8px; align-items: center; justify-content: space-between; width: 100%; min-height: 40px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--fg); font-size: 13px; text-align: left"><span>Menu</span><span style="font-size: 12px; color: var(--muted)">{{nav.hint}}</span></button>
 </div>
 </nav>
+<div role="separator" aria-orientation="vertical" aria-label="Resize the projects list" title="Drag to resize, double-click to reset" tabindex="0" class="split" onPointerDown="{{pane.nav.down}}" onPointerMove="{{pane.nav.move}}" onDblClick="{{pane.nav.reset}}" onKeyDown="{{pane.nav.key}}" style="flex: none; width: 6px; margin: 0 -3px; cursor: col-resize; position: relative; z-index: 1; touch-action: none"></div>
 
 <main style="flex: 999 1 480px; min-width: 0; min-height: 0; display: flex; flex-direction: column">
 <header style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 14px 24px; border-bottom: 1px solid var(--line)">
@@ -213,7 +214,8 @@
 </main>
 
 <sc-if value="{{panelOpen}}" hint-placeholder-val="{{true}}">
-<aside aria-label="{{panelTitle}}" style="flex: 1 1 420px; max-width: 520px; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--panel)">
+<div role="separator" aria-orientation="vertical" aria-label="Resize the panel" title="Drag to resize, double-click to reset" tabindex="0" class="split" onPointerDown="{{pane.panel.down}}" onPointerMove="{{pane.panel.move}}" onDblClick="{{pane.panel.reset}}" onKeyDown="{{pane.panel.key}}" style="flex: none; width: 6px; margin: 0 -3px; cursor: col-resize; position: relative; z-index: 1; touch-action: none"></div>
+<aside aria-label="{{panelTitle}}" style="flex: {{pane.panelFlex}}; max-width: {{pane.panelMax}}; min-width: 0; min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--panel)">
 <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line)">
 <h2 style="margin: 0; font-size: 15px; font-weight: 600">{{panelTitle}}</h2>
 <button onClick="{{closePanel}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">Close</button>
@@ -268,19 +270,36 @@
 </sc-if>
 <sc-if value="{{app.live}}" hint-placeholder-val="{{true}}">
 <div style="display: flex; flex-direction: column; gap: 4px">
-<span style="display: flex; gap: 8px; align-items: center"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 99px; background: var(--inv)"></span><strong style="font-weight: 600">Live · {{app.release}}</strong></span>
+<span style="display: flex; gap: 8px; align-items: center"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 99px; background: {{app.dot}}"></span><strong style="font-weight: 600">{{app.statusText}} · {{app.release}}</strong></span>
 <span style="font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--text2)">{{app.url}}</span>
 </div>
 <div style="display: flex; flex-wrap: wrap; gap: 8px">
+<sc-if value="{{app.up}}" hint-placeholder-val="{{true}}">
 <a href="{{app.url}}" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; min-height: 44px; padding: 10px 14px; border-radius: 10px; background: var(--inv); color: var(--inv-fg); font-size: 13px; font-weight: 700; text-decoration: none">Open the app</a>
-<button onClick="{{app.relaunch}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid var(--line3); border-radius: 10px; background: transparent; color: var(--fg); font-size: 13px; font-weight: 600">Relaunch</button>
+<button onClick="{{app.stop}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid var(--line3); border-radius: 10px; background: transparent; color: var(--fg); font-size: 13px; font-weight: 600">Stop the app</button>
+</sc-if>
+<sc-if value="{{app.down}}" hint-placeholder-val="{{false}}">
+<button onClick="{{app.relaunch}}" style="min-height: 44px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--inv); background: var(--inv); color: var(--inv-fg); font-size: 13px; font-weight: 700">Relaunch</button>
+</sc-if>
 </div>
+<sc-if value="{{app.hasStats}}" hint-placeholder-val="{{true}}">
 <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
 <sc-for list="{{app.stats}}" as="t" hint-placeholder-count="4">
 <div style="display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card)"><span style="font-size: 12px; color: var(--muted)">{{t.label}}</span><strong style="font-size: 18px; font-weight: 600">{{t.value}}</strong></div>
 </sc-for>
 </div>
-<p style="margin: 0; font-size: 13px; color: var(--muted)">Live request counts, errors, response time and uptime from the app's telemetry, as on today's run page. Busiest routes list below them once traffic arrives. The previous release stays up until a new one passes its deploy checks.</p>
+</sc-if>
+<sc-if value="{{app.hasRoutes}}" hint-placeholder-val="{{false}}">
+<section aria-label="Busiest routes">
+<strong style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px">Busiest routes</strong>
+<ol style="list-style: none; margin: 0; padding: 0; font-size: 13px">
+<sc-for list="{{app.routes}}" as="rt">
+<li style="display: flex; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--raise2)"><sc-if value="{{rt.method}}"><span style="flex: none; width: 52px; font-family: ui-monospace, Menlo, monospace; color: var(--muted)">{{rt.method}}</span></sc-if><span style="flex: 1 1 auto; min-width: 0; font-family: ui-monospace, Menlo, monospace; overflow-wrap: anywhere">{{rt.path}}</span><span style="flex: none; color: var(--muted)">{{rt.count}}</span></li>
+</sc-for>
+</ol>
+</section>
+</sc-if>
+<p style="margin: 0; font-size: 13px; color: var(--muted)">Request counts, errors, response time and uptime come from the app's telemetry while it runs. Stop the app shuts it down; Relaunch starts the shipped release again and checks its health before it shows as live.</p>
 </sc-if>
 </sc-if>
 
@@ -377,6 +396,9 @@
 <span style="flex: none; width: 22px; color: var(--muted); font-weight: 400">{{f.n}}</span>
 <span style="flex: 1 1 auto; min-width: 0">{{f.title}}</span>
 <span style="flex: none; font-size: 12px; color: var(--muted); font-weight: 400">{{f.state}}</span>
+<sc-if value="{{f.canRestart}}" hint-placeholder-val="{{false}}">
+<button onClick="{{f.restart}}" aria-label="Restart from feature {{f.n}}: {{f.title}}" style="flex: none; min-height: 32px; padding: 4px 10px; border: 1px solid var(--line2); border-radius: 8px; background: transparent; color: var(--fg); font-size: 12px; font-weight: 400">Restart from here</button>
+</sc-if>
 </li>
 </sc-for>
 </ol>

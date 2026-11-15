@@ -850,6 +850,13 @@ http.createServer((q, r) => r.end(q.url === "/health" ? "ok" : JSON.stringify({ 
     assert.equal(relaunched.deployment.status, "live");
     assert.notEqual(relaunched.deployment.url, "http://127.0.0.1:1");
     await assert.rejects(factory.relaunch(job.id), /not running/);
+    // The owner's Stop reaches the app even from another factory object (the server builds one per request).
+    const other = new SoloFactory({ store, provider: createFixtureProvider() });
+    const stopped = await other.stopDeployment(job.id);
+    assert.equal(stopped.deployment.status, "stopped");
+    await assert.rejects(fetch(relaunched.deployment.url + "/health"));
+    await assert.rejects(other.stopDeployment(job.id), (error) => error.code === "not_live");
+    assert.equal((await factory.relaunch(job.id)).deployment.status, "live", "a stopped app can be relaunched");
   } finally {
     await factory.shutdown();
   }

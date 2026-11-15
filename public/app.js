@@ -91,7 +91,7 @@ class DCLogic {
   mount(el) {
     this.el = el;
     this.tpl = parseTpl(document.getElementById("tpl").textContent);
-    for (const type of ["click", "input", "change", "keydown", "focusout"]) {
+    for (const type of ["click", "input", "change", "keydown", "focusout", "pointerdown", "pointermove", "dblclick"]) {
       el.addEventListener(type, (ev) => {
         // Events the morph itself fires (focusout from a field it removes) carry handler indexes from the
         // previous paint, which now point at other functions. They are never user input, so skip them.
@@ -305,6 +305,41 @@ class Component extends DCLogic {
   };
 
   componentDidMount() { this.timer = setInterval(() => this.tick(), 3500); }
+  // Pane splitters: drag, arrow keys (24px) or double-click to reset. Widths persist per browser.
+  paneSplit(key, side, min, maxFn) {
+    const set = (w) => {
+      const panes = { ...(this.state.panes || {}) };
+      if (w == null) delete panes[key]; else panes[key] = Math.round(Math.max(min, Math.min(maxFn(), w)));
+      try { if (w == null) localStorage.removeItem(`solofactory.pane.${key}`); else localStorage.setItem(`solofactory.pane.${key}`, String(panes[key])); } catch {}
+      this.setState({ panes });
+    };
+    const pane = (ev) => { const h = ev.target.closest('[role=separator]'); return h && (side === 'left' ? h.previousElementSibling : h.nextElementSibling); };
+    const width = (ev) => { const p = pane(ev); if (!p) return null; const b = p.getBoundingClientRect(); return side === 'left' ? ev.clientX - b.left : b.right - ev.clientX; };
+    return {
+      down: (ev) => { ev.preventDefault(); ev.target.setPointerCapture?.(ev.pointerId); this.dragging = key; },
+      move: (ev) => { if (this.dragging !== key || !(ev.buttons & 1)) { if (this.dragging === key) this.dragging = null; return; } const w = width(ev); if (w != null) set(w); },
+      reset: () => set(null),
+      key: (ev) => {
+        if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+        ev.preventDefault();
+        const p = pane(ev); if (!p) return;
+        const grow = (ev.key === 'ArrowRight') === (side === 'left');
+        set(p.getBoundingClientRect().width + (grow ? 24 : -24));
+      }
+    };
+  }
+  paneVals() {
+    const P = this.state.panes || {};
+    const root = () => this.el?.firstElementChild;
+    const navW = () => root()?.querySelector('nav[aria-label=Projects]')?.offsetWidth || 248;
+    const nav = this.paneSplit('nav', 'left', 180, () => 480);
+    const panel = this.paneSplit('panel', 'right', 280, () => Math.max(280, (root()?.clientWidth || 1200) - navW() - 320));
+    return {
+      navFlex: P.nav ? `0 0 ${P.nav}px` : '1 1 248px', navMax: P.nav ? 'none' : '300px',
+      panelFlex: P.panel ? `0 0 ${P.panel}px` : '1 1 420px', panelMax: P.panel ? 'none' : '520px',
+      nav, panel
+    };
+  }
   componentWillUnmount() { clearInterval(this.timer); }
   componentDidUpdate(prevProps, prevState) {
     if (this.state.activeSec >= 0 && (!prevState || prevState.activeSec !== this.state.activeSec)) {
@@ -808,7 +843,7 @@ class Component extends DCLogic {
     } : null;
     const qRuns = s.runs.filter((q) => q.pid === s.pid && q.state === 'queued');
     const queue = qRuns.map((q, k) => ({
-      pos: k + 1, title: q.title, kindLabel: K[q.kind].label, chipBg: K[q.kind].chipBg, chipFg: K[q.kind].chipFg,
+      id: q.id, pos: k + 1, title: q.title, kindLabel: K[q.kind].label, chipBg: K[q.kind].chipBg, chipFg: K[q.kind].chipFg,
       canUp: k > 0, upLabel: 'Move ' + q.title + ' up',
       up: () => {
         const prev = qRuns[k - 1];
@@ -849,7 +884,7 @@ class Component extends DCLogic {
         this.setState({ runs: arr });
       };
       return {
-        g: g, order: order,
+        g: g, order: order, rid: rr ? rr.id : 0,
         title: m.ask, kind: K[m.kind].label, chipBg: K[m.kind].chipBg, chipFg: K[m.kind].chipFg, state: st,
         aria: rr ? 'Open the run: ' + m.ask : m.ask + ', in the chat',
         bg: picked ? 'var(--raise)' : 'transparent', weight: g === 'needs' ? '600' : '500',
@@ -890,8 +925,10 @@ class Component extends DCLogic {
     ];
 
     const app = current.url ? {
-      none: false, live: true, url: current.url, release: current.release,
+      none: false, live: true, up: true, down: false, statusText: 'Live', dot: 'var(--inv)', url: current.url, release: current.release,
+      stop: () => this.showInfo('Stop the app', 'Stops the live app. Relaunch starts it again on the same port.'),
       relaunch: () => this.showInfo('Relaunch', 'Restarts the live app on the same port, then checks its health again.'),
+      hasStats: true, routes: [], hasRoutes: false,
       stats: [{ label: 'Requests', value: '—' }, { label: 'Errors', value: '—' }, { label: 'Average response', value: '—' }, { label: 'Uptime', value: '—' }]
     } : { none: true, live: false, url: '', release: '', stats: [] };
 
@@ -992,7 +1029,7 @@ class Component extends DCLogic {
       panelTabs: [tab('run', 'Run'), tab('docs', 'Documents'), tab('app', 'Live app')],
       panelOpen: s.panel !== '', panelTitle: titles[s.panel] || '',
       closePanel: () => this.setState({ panel: '' }),
-      showDocs: s.panel === 'docs', showRun: s.panel === 'run', showApp: s.panel === 'app', app: app,
+      showDocs: s.panel === 'docs', showRun: s.panel === 'run', showApp: s.panel === 'app', app: app, pane: this.paneVals(),
       groups: groups, railLinks: railLinks,
       nav: { open: s.navOpen, expanded: s.navOpen ? 'true' : 'false', hint: 'Update available', toggle: () => this.setState({ navOpen: !this.state.navOpen, pmOpen: false }) },
       pm: (() => {
@@ -1072,6 +1109,7 @@ class Live extends Component {
     super();
     this.state = { ...this.state, runs: [], threads: { "": [] }, pid: "", nextId: 1, busy: false };
     try { this.state.themeMode = localStorage.getItem("solofactory.theme") || "auto"; } catch {}
+    try { const panes = {}; for (const k of ["nav", "panel"]) { const w = Number(localStorage.getItem(`solofactory.pane.${k}`)); if (w > 0) panes[k] = w; } this.state.panes = panes; } catch {}
   }
 
   async componentDidMount() {
@@ -1133,6 +1171,8 @@ class Live extends Component {
         const [detail, telemetry] = await Promise.all([api(`/api/jobs/${r.jobId}`).catch(() => null), api(`/api/jobs/${r.jobId}/telemetry`).catch(() => null)]);
         if (detail?.job) { this.det = { jobId: r.jobId, job: detail.job, events: detail.events ?? [], telemetry }; this.setState({}); }
       }
+      const shipped = this.state.panel === "app" ? state.jobs.find((job) => job.state === "completed" && job.deployment?.status === "live") : null;
+      if (shipped) { const tel = await api(`/api/jobs/${shipped.id}/telemetry`).catch(() => null); this.appTel = { jobId: shipped.id, app: tel?.app ?? null }; this.setState({}); }
     } finally { this.polling = false; }
   }
 
@@ -1180,7 +1220,10 @@ class Live extends Component {
     }));
 
     const fp = featureProgress(job);
-    const features = (fp?.list || []).map((f) => ({ ...f, color: f.state === "To do" ? "var(--muted)" : "var(--fg)", weight: f.state === "Now" ? "600" : "400" }));
+    // A parked run restarts from any finished feature after the first (the first one is a fresh run: Start over).
+    const restartable = PARKED.includes(job.state), order = job.sliceDone || [];
+    const features = (fp?.list || []).map((f) => ({ ...f, color: f.state === "To do" ? "var(--muted)" : "var(--fg)", weight: f.state === "Now" ? "600" : "400",
+      canRestart: restartable && f.state === "Done" && order.indexOf(f.id) >= 1, restart: () => this.post(r, "restart", { fromSlice: f.id }) }));
     return { hasFeatures: features.length > 0, features, featureHead: fp ? `Features · ${fp.done} of ${fp.total} done` : "", hasQa: job.state !== "queued", qa, hasStream: job.state !== "queued", stream, streamEmpty: !stream.length, chips,
       hasRecov: parked || Boolean(phase && job.state !== "completed"), recov: parked || phase ? this.recovVals(r, job, spend, next, phase, usage, parked) : null };
   }
@@ -1333,6 +1376,24 @@ class Live extends Component {
     const draft = pid === (state.project || "") && !state.revises ? briefSections(state.guide?.brief) : [];
     if (draft.length) docs.unshift({ name: DRAFT_SPEC, tag: "Draft", note: state.guide.status === "ready" ? "Ready to send. Read or edit it first." : "Fills in as you talk with the Guide. Not sent yet.", sections: draft });
     return docs;
+  }
+
+  // The Live app panel: the project's shipped run, its deployment state and its telemetry.
+  appVals() {
+    const job = state.jobs.find((j) => j.state === "completed" && j.deployment?.url);
+    if (!job) return {};
+    const up = job.deployment.status === "live", r = { jobId: job.id };
+    const t = up && this.appTel?.jobId === job.id ? this.appTel.app : null;
+    // Routes come as { path: { count, errors, averageLatencyMs } }; the factory's own metrics polling is left out.
+    const routes = !t ? [] : (Array.isArray(t.routes) ? t.routes : Object.entries(t.routes || {}).map(([path, x]) => ({ method: "", path, count: typeof x === "number" ? x : x?.count ?? 0 })))
+      .filter((x) => !x.path.startsWith("/_factory/")).sort((a, b) => b.count - a.count).slice(0, 8);
+    return {
+      up, down: !up, statusText: up ? "Live" : "Stopped", dot: up ? "var(--inv)" : "var(--muted)",
+      stop: () => this.post(r, "stop-app"), relaunch: () => this.post(r, "relaunch"),
+      hasStats: !!t, stats: t ? [{ label: "Requests", value: String(t.requests?.total ?? 0) }, { label: "Errors", value: String(t.requests?.errors ?? 0) },
+        { label: "Average response", value: t.latencyMs?.average != null ? `${t.latencyMs.average < 10 ? t.latencyMs.average.toFixed(1) : Math.round(t.latencyMs.average)} ms` : "—" }, { label: "Uptime", value: t.uptimeSeconds != null ? formatSpan(t.uptimeSeconds * 1000) : "—" }] : [],
+      hasRoutes: routes.length > 0, routes,
+    };
   }
 
   post(r, action, body = {}) {
@@ -1493,8 +1554,10 @@ class Live extends Component {
       m.hasDraft = hasDraft && m.open;
       m.review = () => this.setState({ panel: "docs", viewer: DRAFT_SPEC, viewerEdit: false });
     }
-    for (const q of v.queue) { q.canUp = false; q.up = () => later("Reordering the queue"); }
-    for (const g of v.groups) for (const it of g.items) { it.canUp = false; it.noUp = true; it.noDown = true; it.upOpacity = "0.35"; it.downOpacity = "0.35"; it.up = it.down = () => later("Reordering the queue"); }
+    // Queue order lives on the server: each move swaps the run with its neighbour in the project's queue.
+    const move = (rid, direction) => { const r = this.state.runs.find((x) => x.id === rid); if (r?.jobId) this.post(r, "queue-move", { direction }); };
+    for (const q of v.queue) q.up = () => move(q.id, "up");
+    for (const g of v.groups) for (const it of g.items) if (it.queued) { it.up = () => { if (!it.noUp) move(it.rid, "up"); }; it.down = () => { if (!it.noDown) move(it.rid, "down"); }; }
     if (v.run.stops) for (const stop of v.run.stops) stop.canRestart = false;
     const board = state.board;
     if (board) v.slots = (board.activeRuns?.length ?? 0) + " of " + board.maxActiveRuns + " build slots in use";
@@ -1514,13 +1577,16 @@ class Live extends Component {
       this.setState({});
     };
     v.onAttach = () => { const input = document.createElement("input"); input.type = "file"; later("Attaching files"); };
-    if (v.app.live) { v.app.relaunch = () => later("Relaunch"); }
+    if (v.app.live) Object.assign(v.app, this.appVals());
     const draftOpen = v.vw.open && v.vw.name === DRAFT_SPEC;
     const vRun = v.vw.open ? this.state.runs.filter((x) => x.pid === this.state.pid && this.specName(x) === v.vw.name).pop() : null;
-    const parked = !!vRun && ["paused", "stuck", "cancelled"].includes(vRun.state);
+    const shipped = vRun?.state === "shipped";
+    const parked = !!vRun && ["paused", "stuck", "cancelled", "shipped"].includes(vRun.state);
     if (v.vw.open && !v.vw.revising && !draftOpen) {
       v.vw.modes = [];
-      v.vw.footer = parked ? "Read only. Press Revise the spec, or tell the Guide what to change and it reopens the spec as a draft." : "Read only while the run is with the factory. Pause it to revise the spec.";
+      // A shipped brief edits as the next revision: resubmitting builds it on the live app as it is now.
+      if (shipped) v.vw.ctrls = [this.wire({ label: "Revise the spec", bg: "transparent", fg: "var(--fg)", border: "var(--line3)" }, vRun)];
+      v.vw.footer = shipped ? "Read only. Press Revise the spec, or tell the Guide what to change: it reopens the spec as the next revision, and resubmitting builds it on the live app." : parked ? "Read only. Press Revise the spec, or tell the Guide what to change and it reopens the spec as a draft." : "Read only while the run is with the factory. Pause it to revise the spec.";
       for (const sec of v.vw.sections) { sec.view = !sec.isList; sec.viewList = sec.isList; sec.click = false; sec.edit = false; }
     }
     // Design A: asking the Guide about a stopped run's spec reopens it as a revision draft first.
@@ -1544,7 +1610,7 @@ class Live extends Component {
     if (shownRun) Object.assign(v.run, this.detailVals(shownRun));
     const job = shownRun && this.det?.jobId === shownRun.jobId ? this.det.job : shownRun?.job;
     v.run.stuckText = [job?.error?.message, job?.nextAction?.reason].filter(Boolean).join(" ") || "The factory stopped this run. Nothing was deployed and the last release is still live.";
-    if (typeof v.run.note === "string" && v.run.note.startsWith("A parked run")) v.run.note = "A parked run keeps everything that already passed.";
+    if (typeof v.run.note === "string" && v.run.note.startsWith("A parked run")) v.run.note = "A parked run keeps everything that already passed. Restart from here on a finished feature rebuilds from that feature on.";
     return v;
   }
 }

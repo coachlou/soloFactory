@@ -728,6 +728,33 @@ export async function createSoloFactoryServer(options = {}) {
           throw error;
         }
       }
+      const stopAppMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/stop-app$/);
+      if (request.method === "POST" && stopAppMatch) {
+        const jobStore = storeOfJob(stopAppMatch[1]);
+        const job = await jobStore.read(stopAppMatch[1]);
+        const factory = factories.get(job.id) ?? new SoloFactory({ store: jobStore, provider: providerFactory(job.provider), maxRepairs, autoStartRepairs });
+        try {
+          return json(response, 200, { job: await factory.stopDeployment(job.id) });
+        } catch (error) {
+          if (error.code === "not_live") return json(response, 409, { error: error.message });
+          throw error;
+        }
+      }
+      // Move a queued new run one place up or down among its own project's queued new runs. Resumes and
+      // repairs keep their place at the front: they unblock the project, so they never wait behind a new brief.
+      const moveMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/queue-move$/);
+      if (request.method === "POST" && moveMatch) {
+        const body = await readJson(request);
+        if (!["up", "down"].includes(body.direction)) return json(response, 400, { error: "direction must be up or down." });
+        const at = queue.findIndex((entry) => entry.jobId === moveMatch[1]);
+        if (at < 0 || queue[at].mode !== "start") return json(response, 409, { error: "Only a queued new run can be moved." });
+        const peers = queue.map((entry, index) => ({ entry, index })).filter(({ entry }) => entry.projectId === queue[at].projectId && entry.mode === "start");
+        const mine = peers.findIndex(({ index }) => index === at);
+        const other = peers[body.direction === "up" ? mine - 1 : mine + 1];
+        if (!other) return json(response, 409, { error: `That run is already ${body.direction === "up" ? "first" : "last"} in its project's queue.` });
+        [queue[at], queue[other.index]] = [queue[other.index], queue[at]];
+        return json(response, 200, { ok: true, queue: queue.filter((entry) => entry.projectId === queue[at].projectId).map((entry) => entry.jobId) });
+      }
       const restartMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/restart$/);
       if (request.method === "POST" && restartMatch) {
         const projectId = jobProject.get(restartMatch[1]) ?? active.id;
