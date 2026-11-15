@@ -58,3 +58,7 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 9 | Discard changes deletes the draft and returns the run to stopped | Pass |
 | 10 | Let the Guide plan a repair resumes the run | Pass (fixture provider shipped it; next queued run started) |
 | 11 | Theme menu: Light applies and persists (`solofactory.theme`) | Pass |
+| 12 | Editing a brief section and pressing Cmd+Enter saves it, with nothing leaking into the composer | Pass after skipping events the redraw itself fires |
+| 13 | Resubmit to the factory queues the revised brief (a second press queues an unconfirmed review as shown) | Pass |
+| 14 | Remove from queue cancels a queued run | Pass |
+| 15 | Cancel run shows only on active runs; parked runs offer repair, revise, start over instead | Pass (matches the earlier hub) |

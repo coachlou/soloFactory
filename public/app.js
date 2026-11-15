@@ -91,6 +91,9 @@ class DCLogic {
     this.tpl = parseTpl(document.getElementById("tpl").textContent);
     for (const type of ["click", "input", "change", "keydown", "focusout"]) {
       el.addEventListener(type, (ev) => {
+        // Events the morph itself fires (focusout from a field it removes) carry handler indexes from the
+        // previous paint, which now point at other functions. They are never user input, so skip them.
+        if (this.painting || !el.contains(ev.target)) return;
         const fns = [];
         for (let node = ev.target; node && node !== el.parentNode; node = node.parentNode) {
           const i = node.getAttribute?.(`data-on-${type}`);
@@ -1050,7 +1053,8 @@ class Live extends Component {
     const talk = state.messages.length ? state.messages : [{ role: "assistant", content: state.guide?.message ?? "" }];
     for (const m of talk) here.push({ id: id++, type: m.role === "user" ? "user" : "guide", text: m.content });
     if (this.state.busy) here.push({ id: id++, type: "guide", text: "Thinking…" });
-    else if (state.guide?.status === "ready") here.push({ id: id++, type: "pick", kind: "brief", sent: false, ask: state.guide.brief?.workingName || "The brief" });
+    // A revision draft resubmits from its run, so it is not also a new plan waiting in the chat.
+    else if (state.guide?.status === "ready" && !state.revises) here.push({ id: id++, type: "pick", kind: "brief", sent: false, ask: state.guide.brief?.workingName || "The brief" });
     const pid = this.state.pid && threads[this.state.pid] ? this.state.pid : state.project || "";
     this.setState({ runs, threads, nextId: id, pid });
   }
@@ -1147,7 +1151,8 @@ class Live extends Component {
     };
     return { ...c, act: acts[c.label] || (() => later(c.label)) };
   }
-  runCtrls(r) { return super.runCtrls(r).map((c) => this.wire(c, r)); }
+  // The server cancels only active runs; a parked one (stuck or paused) is dismissed instead, as in the old hub.
+  runCtrls(r) { return super.runCtrls(r).filter((c) => !(c.label === "Cancel run" && (r.state === "stuck" || r.state === "paused"))).map((c) => this.wire(c, r)); }
   moreCtrls(r) { return super.moreCtrls(r).map((c) => this.wire(c, r)); }
 
   async turn(content, review = false) {
@@ -1177,11 +1182,21 @@ class Live extends Component {
   // Same order as before: a final review turn, stop if it changed the brief, then queue.
   async queue() {
     const before = state.guide?.brief;
-    if (!state.guide?.reviewed) await this.turn("", true);
-    if (state.guide?.status !== "ready" || !state.guide?.reviewed || briefChanged(before, state.guide.brief)) {
-      this.showInfo("Check the brief", "The final review changed the brief or asked a question. Read the Guide's reply, then send again.");
-      return;
+    // A second press on a brief the review left unchanged but unmarked queues it as shown (the old hub's Queue anyway).
+    const anyway = state.queueAnyway === JSON.stringify(before);
+    if (!state.guide?.reviewed && !anyway) {
+      await this.turn("", true);
+      if (state.guide?.status !== "ready" || briefChanged(before, state.guide.brief)) {
+        this.showInfo("Check the brief", "The final review changed the brief or asked a question. Read the Guide's reply, then send again.");
+        return;
+      }
+      if (!state.guide.reviewed) {
+        state.queueAnyway = JSON.stringify(state.guide.brief);
+        this.showInfo("Not fully reviewed", "The Guide's review did not confirm this brief as it stands. Press the button again to queue it as shown, or change it.");
+        return;
+      }
     }
+    state.queueAnyway = null;
     const body = { provider: state.provider, transcript: state.messages, coverage: state.guide.coverage, brief: state.guide.brief, ...(state.revises && { revises: state.revises, replaces: state.replaces }) };
     try { await api("/api/jobs", { method: "POST", body }); }
     catch (error) {
