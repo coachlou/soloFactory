@@ -1771,9 +1771,10 @@ export class SoloFactory {
     });
   }
 
-  async deployLocal(job, manifest, signal) {
+  // port: a port to try first (a restart keeps the app's old address when it is free).
+  async deployLocal(job, manifest, signal, { port: preferred } = {}) {
     const command = manifest.commands.start;
-    const port = await availablePort();
+    const port = preferred && (await portFree(preferred)) ? preferred : await availablePort();
     const url = `http://127.0.0.1:${port}`;
     const appDir = this.store.appDir(job.id);
     // Checked here, after the awaits above: from spawn to this.deployments.set is synchronous, so a stop
@@ -1804,6 +1805,7 @@ export class SoloFactory {
           latest.deployment.status = "stopped";
           latest.deployment.stoppedAt = new Date().toISOString();
           latest.deployment.exitCode = code;
+          latest.deployment.stoppedBy ??= "exited"; // owner and server stops write theirs before the kill
           await this.store.writeState(latest);
           await this.emit(job.id, { type: "deployment.stopped", state: latest.state, message: `App process stopped with exit ${code}.` });
         }
@@ -1846,6 +1848,7 @@ export class SoloFactory {
           old.deployment.status = "replaced";
           old.deployment.stoppedAt = new Date().toISOString();
           old.deployment.replacedBy = job.id;
+          old.deployment.stoppedBy = "replaced";
           await this.store.writeState(old);
           await this.emit(old.id, { type: "deployment.replaced", state: old.state, message: `Replaced by run ${job.id}.` });
         }
@@ -1869,12 +1872,15 @@ export class SoloFactory {
     if (job.deployment?.mode !== "local" || job.deployment.status !== "live" || this.deployments.has(job.id)) return;
     job.deployment.status = "stopped";
     job.deployment.stoppedAt = new Date().toISOString();
+    job.deployment.stoppedBy = "exited";
     await this.store.writeState(job);
     await this.emit(job.id, { type: "deployment.stopped", state: job.state, message: "App process stopped right after launch." });
   }
 
   // Starts a completed run's built app again on a fresh port; only the project's newest run may, since one app runs per project.
-  async relaunch(jobId) {
+  // restart: the server starting the app it stopped at shutdown, on its old port when free. A failed
+  // check leaves the run stopped and emits deployment.restart_failed; nothing retries or repairs.
+  async relaunch(jobId, { port, restart = false } = {}) {
     const job = await this.store.read(jobId);
     if (job.state !== "completed" || job.deployment?.status === "live") throw new FactoryError("not_relaunchable", "Only a completed run whose app is not running can be relaunched.");
     // A newer run blocks only if its work may still be in the folder: set aside with a rollback
@@ -1882,10 +1888,18 @@ export class SoloFactory {
     if (newerRunBlocks(await this.store.list(), job.id)) throw new FactoryError("not_relaunchable", "A newer run exists in this project; relaunch that one.");
     const manifest = await this.readManifest(this.store.appDir(jobId));
     await mkdir(path.join(this.store.appDir(jobId), ".factory", "logs"), { recursive: true }); // gitignored, so may be absent
-    job.deployment = await this.deployLocal(job, manifest, new AbortController().signal);
+    try {
+      job.deployment = await this.deployLocal(job, manifest, new AbortController().signal, { port });
+    } catch (error) {
+      if (restart) await this.emit(job.id, { type: "deployment.restart_failed", state: job.state, message: `App did not start again: ${error.message}` });
+      throw error;
+    }
     await this.store.writeState(job);
     await this.settleDeployment(job);
-    await this.emit(job.id, { type: "deployment.relaunched", state: job.state, message: `App relaunched: ${job.deployment.url}` });
+    const moved = restart && port && job.deployment.port !== port ? ` (port ${port} was taken, so it now uses port ${job.deployment.port})` : "";
+    await this.emit(job.id, restart
+      ? { type: "deployment.restarted", state: job.state, message: `App started again${moved}: ${job.deployment.url}` }
+      : { type: "deployment.relaunched", state: job.state, message: `App relaunched: ${job.deployment.url}` });
     return job;
   }
 
@@ -1894,6 +1908,8 @@ export class SoloFactory {
   async stopDeployment(jobId) {
     const job = await this.store.read(jobId);
     if (job.deployment?.status !== "live") throw new FactoryError("not_live", "That run's app is not running.");
+    job.deployment.stoppedBy = "owner"; // before the kill, so the exit handler keeps it and a restart leaves the app stopped
+    await this.store.writeState(job);
     const entry = [...liveByProject.values()].find((item) => item.jobId === jobId);
     const child = entry?.child ?? this.deployments.get(jobId);
     if (child && child.exitCode === null && child.signalCode === null) {
@@ -1904,7 +1920,7 @@ export class SoloFactory {
     const latest = await this.store.read(jobId);
     if (latest.deployment?.status === "live") {
       // No process to wait on (or it ignored SIGTERM): record the owner's stop anyway.
-      Object.assign(latest.deployment, { status: "stopped", stoppedAt: new Date().toISOString() });
+      Object.assign(latest.deployment, { status: "stopped", stoppedAt: new Date().toISOString(), stoppedBy: "owner" });
       await this.store.writeState(latest);
     }
     await this.emit(jobId, { type: "deployment.stopped", state: latest.state, message: "App stopped by the owner." });
@@ -1993,10 +2009,23 @@ export class SoloFactory {
     await appendFile(path.join(this.store.project, ".solofactory", "runs.jsonl"), `${JSON.stringify(record)}\n`);
   }
 
+  // Each app still live is marked stoppedBy "server" before the kill, so the next start restarts it.
   async shutdown() {
     this.closed = true;
-    for (const child of this.deployments.values()) stopApp(child);
+    const children = [...this.deployments];
     this.deployments.clear();
+    for (const [jobId, child] of children) {
+      try {
+        const job = await this.store.read(jobId);
+        if (job.deployment?.status === "live") {
+          job.deployment.stoppedBy = "server";
+          await this.store.writeState(job);
+        }
+      } catch {
+        // A run record that cannot be read must not keep its app running.
+      }
+      stopApp(child);
+    }
   }
 }
 
@@ -2265,6 +2294,17 @@ export function buildRecoveryPacket(job) {
       : "Please inspect the preserved workspace and evidence, help resolve any external blocker, and continue from the current state. Do not start over or redo completed work unless the evidence requires it.",
   );
   return `${lines.join("\n")}\n`;
+}
+
+// True when nothing listens on the port, on loopback or on every interface (the app binds either way).
+async function portFree(port) {
+  const tryListen = (host) => new Promise((resolve) => {
+    const server = createNetServer();
+    server.unref();
+    server.once("error", () => resolve(false));
+    server.listen(port, host, () => server.close(() => resolve(true)));
+  });
+  return (await tryListen("127.0.0.1")) && (await tryListen());
 }
 
 async function availablePort() {

@@ -169,6 +169,7 @@
     <tr><td><code>SOLOFACTORY_MAX_RUN_WORKERS</code></td><td>Workers one run may start before it parks for your go-ahead (Resume grants another allotment). Default 150; 0 turns the ceiling off.</td></tr>
     <tr><td><code>SOLOFACTORY_MAX_RUN_COST_USD</code></td><td>Dollars of Claude-reported cost one run may spend before it parks for your go-ahead (Resume grants another allotment). Default 30; 0 turns the ceiling off. Codex reports no cost, so a Codex run is held by the token and worker ceilings.</td></tr>
     <tr><td><code>SOLOFACTORY_MAX_RUN_TOKENS</code></td><td>Tokens (input, cached included, plus output) one run may use before it parks for your go-ahead (Resume grants another allotment). Default 40,000,000; 0 turns the ceiling off. Both Claude and Codex report tokens, so this ceiling holds on Codex too.</td></tr>
+    <tr><td><code>SOLOFACTORY_RESTART_APPS</code></td><td>Set to 0 to stop SoloFactory starting your apps again when it starts. Default on: an app that was running when SoloFactory stopped starts again, on its old port when that port is free.</td></tr>
     <tr><td><code>SOLOFACTORY_UPDATE_CHECK</code></td><td>Set to 0 to turn off the check for a newer SoloFactory release. Default on.</td></tr>
     <tr><td><code>SOLOFACTORY_CLAUDE_MODEL</code></td><td>Claude model for builders and repairs. Default <code>sonnet</code>.</td></tr>
     <tr><td><code>SOLOFACTORY_CLAUDE_EFFORT</code></td><td>Claude effort for builders and repairs. Default <code>medium</code>.</td></tr>

@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { JobStore } from "./store.mjs";
 import { withReviewDiagnostics } from "./review.mjs";
 import { amendmentPacket, assertBatch, validateRecoveryApproval } from "./feature-recovery.mjs";
-import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, admitsPlanning, assertPlanInputsRevised, assertPlanReviewable, buildRecovery, buildRecoveryPacket, continuationAction, previousRelease, SoloFactory, withContinuation } from "./factory.mjs";
+import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, admitsPlanning, assertPlanInputsRevised, assertPlanReviewable, buildRecovery, buildRecoveryPacket, continuationAction, newerRunBlocks, previousRelease, SoloFactory, withContinuation } from "./factory.mjs";
 import { watchConfig } from "./watchdog.mjs";
 import {
   COVERAGE_KEYS,
@@ -167,6 +167,22 @@ export async function createSoloFactoryServer(options = {}) {
     return drain();
   }
   for (const { projectId, job } of queuedJobs.sort((a, b) => a.job.createdAt.localeCompare(b.job.createdAt))) enqueue(projectId, job.id);
+
+  // Apps the server stopped (shutdown, or found dead at startup) start again, in the background, on
+  // their old port when free. Only each project's newest completed run may; the owner's stops stay stopped.
+  const restarts = [];
+  if (process.env.SOLOFACTORY_RESTART_APPS !== "0") {
+    for (const project of await discoverProjects(root)) {
+      const projectStore = storeFor(project.id);
+      const jobs = await projectStore.list();
+      const job = jobs.find((run) => run.state === "completed");
+      if (job?.deployment?.status !== "stopped" || job.deployment.stoppedBy !== "server" || newerRunBlocks(jobs, job.id)) continue;
+      // relaunch never calls the model, so the run's provider is not needed (a demo run restarts outside demo mode too).
+      const factory = new SoloFactory({ store: projectStore, provider: { id: job.provider ?? "none" }, maxRepairs, autoStartRepairs });
+      factories.set(job.id, factory); // reachable for stop-app and shutdown
+      restarts.push(factory.relaunch(job.id, { port: job.deployment.port, restart: true }).catch(() => {})); // restart_failed is on the run
+    }
+  }
 
   const storeOfJob = (id) => storeFor(jobProject.get(id) ?? active.id);
   // Setting aside or starting over a parked follow-on puts the shipped app back. Runs once per job:
@@ -836,6 +852,7 @@ export async function createSoloFactoryServer(options = {}) {
 
   return {
     server,
+    appsRestarted: Promise.all(restarts), // settles when every startup restart has gone live or failed
     get store() {
       return store;
     },
@@ -850,6 +867,7 @@ export async function createSoloFactoryServer(options = {}) {
       await Promise.all(live.map((run) => run.promise));
       await draining;
       await Promise.all([...factories.values()].map((factory) => factory.shutdown()));
+      await Promise.all(restarts); // a restart mid-check sees its app killed above and settles
       // server.close() waits for every open request to finish, so one stalled request (a
       // browser tab mid-fetch) kept the process alive after SIGTERM. Give in-flight requests a
       // short grace period, then drop whatever connections remain.

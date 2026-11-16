@@ -256,6 +256,7 @@ export class JobStore {
       if (job.deployment?.status === "live" && !(await answers(job.deployment.url))) {
         job.deployment.status = "stopped";
         job.deployment.stoppedAt = new Date().toISOString();
+        job.deployment.stoppedBy = "server"; // it died with the server, so startup starts it again
         await this.writeState(job);
         await this.appendEvent(job.id, { type: "deployment.stopped", state: job.state, message: "App was not running after the restart." });
       }
