@@ -3,7 +3,7 @@
 // restart; the agent only runs the update command. Nothing from the request reaches the prompt.
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { runProcess } from "./process.mjs";
 
 export function headlessUpdatePrompt(folder) {
@@ -33,7 +33,15 @@ export function createUpdateRunner({ root, home, appRoot, current, busy, newer, 
   const logPath = path.join(home, "update.log");
   const available = existsSync(path.join(root, ".ailib", "manifest.yaml"));
   let running = false;
-  const save = (state) => mkdir(home, { recursive: true }).then(() => writeFile(file, `${JSON.stringify(state, null, 2)}\n`));
+  // Written to a temp file and renamed into place, so status() never reads a half-written update.json
+  // (a plain writeFile truncates first: a read in that window got "Unexpected end of JSON input").
+  let saves = 0;
+  const save = async (state) => {
+    await mkdir(home, { recursive: true });
+    const tmp = `${file}.${process.pid}.${saves += 1}.tmp`;
+    await writeFile(tmp, `${JSON.stringify(state, null, 2)}\n`);
+    await rename(tmp, file);
+  };
 
   async function status() {
     const last = JSON.parse(await readFile(file, "utf8").catch(() => "null"));

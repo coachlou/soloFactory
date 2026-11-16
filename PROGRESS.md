@@ -6,6 +6,7 @@ Built from `docs/four-tier-gates-spec.md`, which takes four picks from the four-
 - Stage budgets: smoke rows record `stageMin` (planning, implement, review, repair, gates). `smoke.mjs` flags stages over `STAGE_BUDGETS` (override with `SMOKE_BUDGETS`), and the table gains Plan, Review, Repair, Gates and Over budget columns.
 - Early crash: an app that exits on its own within 2 min of starting records `deployment.earlyExit`; the Live app panel shows an amber line naming Relaunch and the rollback target. Nothing rolls back automatically.
 - Tests: `test/ci-green.test.mjs` (verdict, and both hooks run in a throwaway repo), `test/early-crash.test.mjs`, and new `test/measure.test.mjs` budget cases.
+- Agents: `.aai/instructions.md` (now tracked) holds the common rules: run `npm run hooks`, never use `--no-verify`, release from green CI. `CLAUDE.md` and `AGENTS.md` hold only Claude- and Codex-specific notes and route there.
 - Docs: DEVELOPING gate-tier table, hooks and release-from-green flow, smoke budgets; SPEC §4 early exit; manual Live app section.
 
 ## Unreleased: live apps restart, data backup, rollback
