@@ -145,7 +145,8 @@ follow-on. When the previous app is not running and `relaunchable` is true, the 
 **Dismiss, then Relaunch**. Switching projects never cancels a run.
 
 Apps the server stopped start again when SoloFactory starts (`docs/live-app-restart-rollback-spec.md`).
-Shutdown marks a live app `deployment.stoppedBy: "server"` (an app found dead at startup counts too);
+Shutdown marks a live app `deployment.stoppedBy: "server"`; so does finding an app recorded live that
+nothing answers for (SoloFactory crashed, was killed or the Mac lost power), at startup or in the status probe;
 **Stop the app** marks it `"owner"`. On start, each project's newest completed, not rolled-back run whose
 app the server stopped is relaunched in the background, on its old port when free, with no model call:
 `deployment.restarted` (naming both ports when it moved) or `deployment.restart_failed`, which repairs

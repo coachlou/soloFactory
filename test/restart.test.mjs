@@ -119,6 +119,21 @@ test("an app running when SoloFactory stops is live again after a restart, on th
   assert.ok((await types(store, job.id)).includes("deployment.restarted"));
 });
 
+test("an app left live by a crash (no clean stop, no stoppedBy) is relaunched on the next start", async (t) => {
+  const { store, job, port, start } = await liveProject(t);
+  // SoloFactory crashed, was killed or lost power: the record still says live, nothing marked the stop, and nothing answers.
+  const before = await store.read(job.id);
+  assert.equal(before.deployment.status, "live");
+  assert.equal(before.deployment.stoppedBy, undefined);
+  await assert.rejects(fetch(`http://127.0.0.1:${port}/health`));
+  await start();
+  const state = await store.read(job.id);
+  assert.equal(state.deployment.status, "live");
+  assert.equal(state.deployment.port, port);
+  assert.equal(await (await fetch(`${state.deployment.url}/health`)).text(), "ok");
+  assert.ok((await types(store, job.id)).includes("deployment.restarted"));
+});
+
 test("an app the owner stopped stays stopped after a restart", async (t) => {
   const { store, job, start } = await liveProject(t);
   const first = await start();

@@ -2002,6 +2002,8 @@ export class SoloFactory {
           // Nothing answered: the app died after the record said live (e.g. the server restarted), so stop claiming it.
           job.deployment.status = "stopped";
           job.deployment.stoppedAt = new Date().toISOString();
+          // This server's own app records "exited" on exit, so an unset reason means it died with an earlier server: restart it.
+          job.deployment.stoppedBy ??= "server";
           await this.store.writeState(job);
           throw error;
         }

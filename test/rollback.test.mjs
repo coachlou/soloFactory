@@ -196,6 +196,22 @@ test("rollback puts the previous release's code back and live, keeps data/, and 
   assert.notEqual((await store.read(second.id)).deployment?.status, "live", "never the rolled-back one");
 });
 
+test("rollback is refused while a run in the project is running or queued", async (t) => {
+  const { root, store, factories, release } = await shippedProject(t);
+  const { result: second } = await release();
+  assert.equal(second.state, "completed", second.error?.message);
+  await Promise.all(factories.map((factory) => factory.shutdown()));
+  await store.create({ brief, transcript, provider: "fixture" }); // queued: startup enqueues and starts it
+  const app = await createSoloFactoryServer({ home: root, root, fixtureMode: true });
+  t.after(() => app.close().catch(() => {}));
+  const port = await new Promise((resolve) => app.server.listen(0, "127.0.0.1", () => resolve(app.server.address().port)));
+  const response = await fetch(`http://127.0.0.1:${port}/api/jobs/${second.id}/rollback`, { method: "POST" });
+  assert.equal(response.status, 409);
+  assert.match((await response.json()).error, /running or queued run/);
+  assert.equal((await store.read(second.id)).rolledBack, undefined, "nothing was rolled back");
+  assert.equal(await store.git("tag", "--list", `solofactory/rolled-back/${second.id}`), "");
+});
+
 test("rollback of a same-shape update says the older version can read the data", async (t) => {
   const { root, dir, factories, release } = await shippedProject(t);
   await writeData(dir, "entries.json", { items: [{ id: 1, score: 5 }] });

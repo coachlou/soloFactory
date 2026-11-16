@@ -23,7 +23,9 @@ when that port is free; otherwise use a fresh port and say so.
 
 ### Behavior
 1. Record why an app stopped: `deployment.stoppedBy` is `owner` (Stop button), `server`
-   (shutdown or a dead app found at startup), `replaced`, or `exited` (the app crashed by itself).
+   (shutdown, or an app recorded live that nothing answers for: SoloFactory crashed, was killed or the
+   Mac lost power; found at startup or by the status probe), `replaced`, or `exited` (the app crashed
+   by itself while SoloFactory ran).
 2. Shutdown writes `stoppedBy: "server"` before it kills each app, so the exit handler keeps it.
 3. At startup, after `recoverInterrupted`, relaunch each project's newest completed run whose
    app has `stoppedBy: "server"` and that `newerRunBlocks` does not block.
