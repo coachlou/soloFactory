@@ -1,3 +1,12 @@
+## Unreleased: live apps restart, data backup, rollback
+
+Built from `docs/live-app-restart-rollback-spec.md`. Not released; touching `src/prompts.mjs` and `src/factory.mjs` trips the release smoke gate, which is expected and left for the release.
+- Restart on start: apps the server stopped (or that died with it: a crash, a forced quit, a power cut) start again when SoloFactory starts, on their old port when free; an app the owner stopped stays stopped. `SOLOFACTORY_RESTART_APPS=0` turns it off.
+- Data backup: an update to an app with data, whose features change how it stores data, asks the owner to back up `data/` (Needs you row and run-card checkbox). Only the deploy waits; confirming deploys with no model call.
+- Rollback: the newest shipped update offers *Roll back to the previous release*: hand edits committed and tagged `solofactory/rolled-back/<id>`, tree reset to the run's base, previous release relaunched, `data/` untouched; the owner is told to restore the backup when the data's shape changed.
+- Tests: `test/rollback.test.mjs` (8, including rollback refused while a run is running or queued) and the restart tests (including an app left live by a crash).
+- Docs: README follow-on paragraph; SPEC §4 Owner controls and §9 HTTP surface; manual Live app and Work list sections.
+
 ## 0.11.0: the project hub (2026-11-16)
 
 Stable release of the 0.11 line: both alpha builds below plus a rebuilt hub page, design A (`docs/project-hub-ui-spec.md` is the source of truth; mockups in `notes/project-hub-ui-mockups/`). The engine is unchanged by the UI work: every control from 0.10 is still reachable, moved to the new layout. Revert point for the layout: tag `hub-ui-pre-impl`.

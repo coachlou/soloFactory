@@ -431,6 +431,7 @@ const FEATURE_PLAN_SCHEMA = `{ "version": 2, "jobId": <copied from the request>,
     "dependsOn": ["<EARLIER slice ids only>"],
     "closes": ["<original MH-n/SC-n ids this feature finally proves; [] only for a named prerequisite>"],
     "writes": ["<app-relative path, directory or glob this feature creates or edits, its tests included>"],
+    "touchesData"?: true,
     "acceptance": [{ "id": "UPPER-CASE-ID", "behavior": "<concrete expected behavior>", "refs": ["<original ids it supports or proves>"],
       "sources": [{ "path": "<one of plan-request.json sources>", "locator": "<section, heading, line or element>" }],
       "proof": { "command": ["npm" | "node" | "npx", "<args>"...], "expect": "<expected result>", "pending"?: "integration" },
@@ -524,6 +525,8 @@ Rules the controller enforces:
 - A feature with an empty closes is a named prerequisite: it needs its own observable acceptance
   and proof, and a later closing feature must depend on it.
 - Every feature declares writes: the paths, directories or globs it creates or edits, tests included.
+- Mark a feature "touchesData": true when it adds, removes or renames stored fields, tables or files, or changes
+  how stored data is read. Leave it out otherwise. The owner is asked to back up data/ before such an update deploys.
 - An earlier feature's test must not pin behavior a later feature changes (run df6500ce: F1's test required 404 on a
   route F2 turned into a 303, and F2 could not edit it). Write each test to assert only its own feature's contract; when
   a later feature must change an earlier test's expectation, list that test file in the later feature's writes.

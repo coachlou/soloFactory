@@ -437,6 +437,7 @@ async function draftRepairPlan(factory, job, signal, request, prior, amendment =
     phase.planDigest = digest(plan);
     phase.planBlockers = [];
     phase.status = 'ready';
+    await factory.noteDataFeatures(job, plan.slices ?? []);
     await writeFile(path.join(jobDir, `recovery-${phaseId}-approved-candidate.json`), JSON.stringify(plan, null, 2));
     if (!factory.autoStartRepairs) {
       job = await factory.stage(job, 'paused', 'Repair plan ready for approval');

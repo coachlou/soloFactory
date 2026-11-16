@@ -144,6 +144,36 @@ passes its deploy checks. A follow-on that fails deploy leaves the previous rele
 follow-on. When the previous app is not running and `relaunchable` is true, the card offers
 **Dismiss, then Relaunch**. Switching projects never cancels a run.
 
+Apps the server stopped start again when SoloFactory starts (`docs/live-app-restart-rollback-spec.md`).
+Shutdown marks a live app `deployment.stoppedBy: "server"`; so does finding an app recorded live that
+nothing answers for (SoloFactory crashed, was killed or the Mac lost power), at startup or in the status probe;
+**Stop the app** marks it `"owner"`. On start, each project's newest completed, not rolled-back run whose
+app the server stopped is relaunched in the background, on its old port when free, with no model call:
+`deployment.restarted` (naming both ports when it moved) or `deployment.restart_failed`, which repairs
+nothing and is not retried until the next start. A newer undismissed run blocks it. `SOLOFACTORY_RESTART_APPS=0`
+turns it off.
+
+Data backup before an update deploys. A follow-on whose `data/` was non-empty when it started (`hadData`)
+records `dataFeatures`: plan features marked `touchesData: true`, or whose `writes` cover an existing file
+that is a store module (`store|db|database|storage.*`) or names the data folder. The approved plan and each
+repair plan can add to them (`data.backup_requested`). The owner confirms with
+`POST /api/jobs/:id/backup-confirmed` (saved as `data-backup-confirmed.json` beside the run, never racing
+the running factory). Only the deploy waits: an unconfirmed deploy parks as `backup_unconfirmed` with no
+repair spent, and the confirmation resumes it straight into the deploy, with no review, repair or model
+call. A first release, an empty `data/`, or a plan with no data feature never asks. As the release goes live,
+the run records `dataShape`: file patterns, JSON key paths and types and SQLite schemas under `data/`, with
+ids, dates and values ignored.
+
+Rollback of a shipped release. `POST /api/jobs/:id/rollback` applies only to a project's newest completed,
+not rolled-back follow-on with a `baseCommit` and an earlier completed release, while nothing in the project
+is running or queued. It commits any hand edits, tags the tree `solofactory/rolled-back/<id>`, stops the app,
+hard-resets to `baseCommit` (`data/` is gitignored and untouched), marks the run `rolledBack` with a
+`rollback` record, emits `job.rolled_back`, and relaunches the previous release. It compares the data's
+shape now with `dataShape`: when it changed (or none was recorded and `data/` is non-empty) the message tells
+the owner to stop the app, restore the backup and relaunch; otherwise it says the older version can read the
+data. A rolled-back run is never relaunched or restarted, does not block newer runs, and is skipped as a
+fallback, so the next follow-on builds on the previous release.
+
 The worker may edit only the generated app workspace. It cannot change job state directly.
 Commands are spawned as argument arrays, never interpolated into a shell. The environment
 passed to workers removes common API-key variables so subscription authentication remains
@@ -397,7 +427,14 @@ versions and the paste-in prompt that points the owner's agent at the install ru
   metrics response. A live deployment that no longer answers is marked `stopped` here.
 - `POST /api/jobs/:id/relaunch` — start a completed run's built app again on a fresh port and
   record the new deployment; `409` unless the run is completed with a non-live app and is the
-  newest run in its project.
+  newest run in its project, and not rolled back.
+- `POST /api/jobs/:id/backup-confirmed` — record that the owner backed up `data/` for the run's data
+  features; a run parked as `backup_unconfirmed` resumes into its deploy. `202 {dataBackup, resumed}`;
+  `409` when the run needs no backup. `GET /api/jobs` and `GET /api/jobs/:id` return `dataBackup`
+  (`{needed, features, confirmedAt}`) and `rollbackTo` (`{jobId, name, date}` or null).
+- `POST /api/jobs/:id/rollback` — roll the project's newest shipped update back to the previous
+  release (see Owner controls). `200 {job, previous}`; `409` while the project has a running or queued
+  run, or when the run is not the newest shipped follow-on with an earlier release.
 - `POST /api/feedback/preview` — validate a problem or improvement report and return redacted
   markdown, with an allowlisted run summary when asked for a failed, interrupted, or cancelled run.
 - `POST /api/errors` — `{ source: "browser" | "chat", message, action?, code?, jobId?, project? }`:

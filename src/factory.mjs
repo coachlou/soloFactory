@@ -14,6 +14,7 @@ import { contractDigest, originalChecks, preparePlanReview, prepareReview, runIn
 import { addUsage } from "./providers.mjs";
 import { CREDENTIAL_PATTERNS } from "./credentials.mjs";
 import { measureRun } from "./measure.mjs";
+import { dataFeatures, dataShape, readConfirmation, unconfirmed } from "./data-backup.mjs";
 import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, repeatedSymptom, watchConfig, workerAlive } from "./watchdog.mjs";
 import { amendRepairPlan, archiveReview, assertBatch, consolidationBase, keepCorrecting, assertPlanningCurrent, digest, exhaustedPreparations, planFeatureRecovery, planKey, resumeAmendedReview, reviewedPlanKeys, runFeatureRecovery, sourceBaseline, validateRecoveryApproval, validateRecoveryPlan } from "./feature-recovery.mjs";
 
@@ -84,16 +85,16 @@ export class FactoryError extends Error {
 const liveByProject = new Map();
 
 // A newer run blocks a relaunch only if its work may still be in the folder: dismissed with a rollback
-// point means the server rewound it. runs: JobStore.list(), newest first.
+// point, or a release rolled back by the owner, means the server rewound it. runs: JobStore.list(), newest first.
 export function newerRunBlocks(runs, jobId) {
-  return runs.slice(0, runs.findIndex((run) => run.id === jobId)).some((run) => !(run.dismissed && run.baseCommit));
+  return runs.slice(0, runs.findIndex((run) => run.id === jobId)).some((run) => !(run.rolledBack || (run.dismissed && run.baseCommit)));
 }
 
 // The release a parked follow-on falls back to, for its card. runs: JobStore.list(), newest first.
 export function previousRelease(job, runs) {
   if (!job.followOn || !PARKED_STATES.has(job.state) || job.dismissed) return null;
   const at = runs.findIndex((run) => run.id === job.id);
-  const prior = at < 0 ? null : runs.slice(at + 1).find((run) => run.state === "completed" && run.deployment?.url);
+  const prior = at < 0 ? null : runs.slice(at + 1).find((run) => run.state === "completed" && !run.rolledBack && run.deployment?.url);
   if (!prior) return null;
   const live = prior.deployment.status === "live";
   // Dismiss rewinds to job.baseCommit and marks the job dismissed; relaunch is then allowed unless another newer run blocks it.
@@ -327,6 +328,8 @@ export class SoloFactory {
         await this.commit(job, "factory: before follow-on");
         if (!(await this.store.git("status", "--porcelain").catch(() => "unknown"))) job.baseCommit = await this.store.git("rev-parse", "HEAD");
       }
+      // Decided once at the start: an empty or missing data/ has nothing to back up, so the deploy never asks.
+      if (job.followOn) job.hadData ??= (await dataSnapshot(appDir)).size > 0;
       await mkdir(path.join(factoryDir, "logs"), { recursive: true });
       await writeFile(
         path.join(factoryDir, "requirements.json"),
@@ -367,6 +370,14 @@ export class SoloFactory {
     const next = continuationAction(job, { maxRepairs: this.maxRepairs });
     if (next.action !== "resume") {
       throw new FactoryError(["prepare-plan", "revise-inputs", "amend-plan"].includes(next.action) ? "repair_plan_required" : "recovery_approval_required", `${next.reason} Next: ${next.label} (POST ${next.endpoint}).`, { nextAction: next });
+    }
+    // The owner confirmed the backup the deploy waited for: deploy again, with no review, repair or model call.
+    if (job.error?.code === "backup_unconfirmed") {
+      try {
+        job.error = null; job.failedState = null; job.recovery = null;
+        await this.store.writeState(job);
+        return await this.deployAndComplete(job, signal);
+      } catch (error) { return this.fail(jobId, signal, error); }
     }
     if (job.recoveryPhase?.status === "running") return runFeatureRecovery(this, jobId, signal, null, { features });
     if (job.recoveryPhase?.status === "built") {
@@ -757,6 +768,7 @@ export class SoloFactory {
     job.approvedPlan = { plan, digest: planDigest, contractDigest: request.contractDigest, sourcesDigest: request.sourcesDigest, sources: request.sources, token: request.token, approvedAt: new Date().toISOString() };
     job.slicePlanIds = plan.slices.map((slice) => slice.id);
     job.sliceIndex = 0;
+    await this.noteDataFeatures(job, plan.slices);
     await writeFile(path.join(this.store.jobDir(job.id), "approved-plan.json"), `${JSON.stringify(job.approvedPlan, null, 2)}\n`);
     await this.store.writeState(job);
     // Committed so restart-from-slice resets and resumes always see the approved plan. Not best effort:
@@ -764,6 +776,28 @@ export class SoloFactory {
     if (await this.store.commit("factory: feature plan approved")) await this.emit(job.id, { type: "git.committed", state: job.state, message: "factory: feature plan approved" });
     await this.emit(job.id, { type: "plan.approved", state: job.state, message: `Feature plan approved: ${plan.slices.length} feature${plan.slices.length === 1 ? "" : "s"}` });
     return job;
+  }
+
+  // A plan that touches stored data asks the owner for a backup now; only the deploy waits for the answer.
+  // Called for the approved plan and for each repair plan, so a new data feature asks again.
+  async noteDataFeatures(job, slices) {
+    const before = job.dataFeatures?.length ?? 0;
+    job.dataFeatures = await dataFeatures(this.store, job, slices);
+    if (job.dataFeatures.length === before) return;
+    await this.store.writeState(job);
+    await this.emit(job.id, { type: "data.backup_requested", state: job.state, message: `This update changes how your app stores its data (${job.dataFeatures.map((item) => item.title).join(", ")}). Back up data/ now, so you can restore it if you roll back.` });
+  }
+
+  // The deploy of an update that touches data waits for the owner's backup; it parks with no repair spent.
+  async holdForBackup(job) {
+    if (!job.followOn) return;
+    const confirmation = await readConfirmation(this.store.jobDir(job.id));
+    const pending = unconfirmed(job, confirmation);
+    if (pending.length) throw new FactoryError("backup_unconfirmed", `Waiting for your data backup: ${pending.map((item) => item.title).join(", ")} change${pending.length === 1 ? "s" : ""} how your app stores its data. Back up data/, then confirm it.`, { features: pending.map((item) => item.id) });
+    if (confirmation && job.dataFeatures?.length) { job.dataBackupConfirmed = confirmation; job.dataBackupConfirmedAt = confirmation.at; }
+    // The data's shape (never its content) as this release goes live, so a rollback can tell whether the older code still reads it.
+    job.dataShape ??= await dataShape(this.store.appDir(job.id));
+    await this.store.writeState(job);
   }
 
   // Fail closed when the workspace plan or frozen contract no longer matches what was approved.
@@ -1098,6 +1132,7 @@ export class SoloFactory {
     for (;;) {
       await this.requireReview(job);
       job = await this.stage(job, "deploying", "Launching and checking the application");
+      await this.holdForBackup(job);
       const manifest = await this.readManifest(appDir);
       try {
         deployment = this.deployer
@@ -1157,6 +1192,10 @@ export class SoloFactory {
       details: { build: BUILD_ID, ...error.details },
     };
     job.recovery = buildRecovery(job, this.store.appDir(jobId), undefined, { maxRepairs: this.maxRepairs });
+    if (job.error.code === "backup_unconfirmed") {
+      job.stage = "Waiting for your data backup";
+      job.recovery = { ...job.recovery, title: "Waiting for your data backup", summary: "Everything is built and checked. Back up data/, then confirm it; the deploy continues with no repair and no model call.", actions: ["Confirm data backup: tick the box once data/ is backed up."] };
+    }
     job.watch = { ...job.watch, observed: { ...this.supervision(jobId), status: "Action needed", monitoring: false } };
     job.watch.incident = incidentRecord(job);
     await this.store.writeState(job);
@@ -1771,9 +1810,10 @@ export class SoloFactory {
     });
   }
 
-  async deployLocal(job, manifest, signal) {
+  // port: a port to try first (a restart keeps the app's old address when it is free).
+  async deployLocal(job, manifest, signal, { port: preferred } = {}) {
     const command = manifest.commands.start;
-    const port = await availablePort();
+    const port = preferred && (await portFree(preferred)) ? preferred : await availablePort();
     const url = `http://127.0.0.1:${port}`;
     const appDir = this.store.appDir(job.id);
     // Checked here, after the awaits above: from spawn to this.deployments.set is synchronous, so a stop
@@ -1804,6 +1844,7 @@ export class SoloFactory {
           latest.deployment.status = "stopped";
           latest.deployment.stoppedAt = new Date().toISOString();
           latest.deployment.exitCode = code;
+          latest.deployment.stoppedBy ??= "exited"; // owner and server stops write theirs before the kill
           await this.store.writeState(latest);
           await this.emit(job.id, { type: "deployment.stopped", state: latest.state, message: `App process stopped with exit ${code}.` });
         }
@@ -1846,6 +1887,7 @@ export class SoloFactory {
           old.deployment.status = "replaced";
           old.deployment.stoppedAt = new Date().toISOString();
           old.deployment.replacedBy = job.id;
+          old.deployment.stoppedBy = "replaced";
           await this.store.writeState(old);
           await this.emit(old.id, { type: "deployment.replaced", state: old.state, message: `Replaced by run ${job.id}.` });
         }
@@ -1869,23 +1911,35 @@ export class SoloFactory {
     if (job.deployment?.mode !== "local" || job.deployment.status !== "live" || this.deployments.has(job.id)) return;
     job.deployment.status = "stopped";
     job.deployment.stoppedAt = new Date().toISOString();
+    job.deployment.stoppedBy = "exited";
     await this.store.writeState(job);
     await this.emit(job.id, { type: "deployment.stopped", state: job.state, message: "App process stopped right after launch." });
   }
 
   // Starts a completed run's built app again on a fresh port; only the project's newest run may, since one app runs per project.
-  async relaunch(jobId) {
+  // restart: the server starting the app it stopped at shutdown, on its old port when free. A failed
+  // check leaves the run stopped and emits deployment.restart_failed; nothing retries or repairs.
+  async relaunch(jobId, { port, restart = false } = {}) {
     const job = await this.store.read(jobId);
     if (job.state !== "completed" || job.deployment?.status === "live") throw new FactoryError("not_relaunchable", "Only a completed run whose app is not running can be relaunched.");
+    if (job.rolledBack) throw new FactoryError("not_relaunchable", "This release was rolled back; its code is no longer in the project folder.");
     // A newer run blocks only if its work may still be in the folder: set aside with a rollback
     // point means the server rewound it, so the folder holds this job's release again.
     if (newerRunBlocks(await this.store.list(), job.id)) throw new FactoryError("not_relaunchable", "A newer run exists in this project; relaunch that one.");
     const manifest = await this.readManifest(this.store.appDir(jobId));
     await mkdir(path.join(this.store.appDir(jobId), ".factory", "logs"), { recursive: true }); // gitignored, so may be absent
-    job.deployment = await this.deployLocal(job, manifest, new AbortController().signal);
+    try {
+      job.deployment = await this.deployLocal(job, manifest, new AbortController().signal, { port });
+    } catch (error) {
+      if (restart) await this.emit(job.id, { type: "deployment.restart_failed", state: job.state, message: `App did not start again: ${error.message}` });
+      throw error;
+    }
     await this.store.writeState(job);
     await this.settleDeployment(job);
-    await this.emit(job.id, { type: "deployment.relaunched", state: job.state, message: `App relaunched: ${job.deployment.url}` });
+    const moved = restart && port && job.deployment.port !== port ? ` (port ${port} was taken, so it now uses port ${job.deployment.port})` : "";
+    await this.emit(job.id, restart
+      ? { type: "deployment.restarted", state: job.state, message: `App started again${moved}: ${job.deployment.url}` }
+      : { type: "deployment.relaunched", state: job.state, message: `App relaunched: ${job.deployment.url}` });
     return job;
   }
 
@@ -1894,6 +1948,8 @@ export class SoloFactory {
   async stopDeployment(jobId) {
     const job = await this.store.read(jobId);
     if (job.deployment?.status !== "live") throw new FactoryError("not_live", "That run's app is not running.");
+    job.deployment.stoppedBy = "owner"; // before the kill, so the exit handler keeps it and a restart leaves the app stopped
+    await this.store.writeState(job);
     const entry = [...liveByProject.values()].find((item) => item.jobId === jobId);
     const child = entry?.child ?? this.deployments.get(jobId);
     if (child && child.exitCode === null && child.signalCode === null) {
@@ -1904,7 +1960,7 @@ export class SoloFactory {
     const latest = await this.store.read(jobId);
     if (latest.deployment?.status === "live") {
       // No process to wait on (or it ignored SIGTERM): record the owner's stop anyway.
-      Object.assign(latest.deployment, { status: "stopped", stoppedAt: new Date().toISOString() });
+      Object.assign(latest.deployment, { status: "stopped", stoppedAt: new Date().toISOString(), stoppedBy: "owner" });
       await this.store.writeState(latest);
     }
     await this.emit(jobId, { type: "deployment.stopped", state: latest.state, message: "App stopped by the owner." });
@@ -1946,6 +2002,8 @@ export class SoloFactory {
           // Nothing answered: the app died after the record said live (e.g. the server restarted), so stop claiming it.
           job.deployment.status = "stopped";
           job.deployment.stoppedAt = new Date().toISOString();
+          // This server's own app records "exited" on exit, so an unset reason means it died with an earlier server: restart it.
+          job.deployment.stoppedBy ??= "server";
           await this.store.writeState(job);
           throw error;
         }
@@ -1993,10 +2051,23 @@ export class SoloFactory {
     await appendFile(path.join(this.store.project, ".solofactory", "runs.jsonl"), `${JSON.stringify(record)}\n`);
   }
 
+  // Each app still live is marked stoppedBy "server" before the kill, so the next start restarts it.
   async shutdown() {
     this.closed = true;
-    for (const child of this.deployments.values()) stopApp(child);
+    const children = [...this.deployments];
     this.deployments.clear();
+    for (const [jobId, child] of children) {
+      try {
+        const job = await this.store.read(jobId);
+        if (job.deployment?.status === "live") {
+          job.deployment.stoppedBy = "server";
+          await this.store.writeState(job);
+        }
+      } catch {
+        // A run record that cannot be read must not keep its app running.
+      }
+      stopApp(child);
+    }
   }
 }
 
@@ -2109,6 +2180,7 @@ export function continuationAction(job, { maxRepairs = 2, busy = false } = {}) {
   if (job.dismissed || !PARKED_STATES.has(job.state)) return next("none", null, null, "Only an unresolved parked run can continue.");
   if (busy) return next("none", null, null, "A worker is already running or queued for this run; wait for it to park.");
   if (job.state === "cancelled") return next("none", null, null, "The owner cancelled this run; start over to build it again.");
+  if (job.error?.code === "backup_unconfirmed" && unconfirmed(job, job.dataBackupConfirmed).length) return next("confirm-backup", "Confirm data backup", "backup-confirmed", "This update changes how your app stores its data. Back up data/, then confirm it; the deploy continues with no repair and no model call.");
   // Restart reconciliation: never a second writer while the old worker may still write.
   if (job.error?.code === "worker_unconfirmed" && workerAlive(job.error.details?.pid)) return next("stop-worker", `Stop worker ${job.error.details.pid}`, null, `A ${job.error.details.kind ?? "worker"} from before the restart (pid ${job.error.details.pid}, ${job.error.details.label}) is still running and may write to the workspace. Stop that process and its children (kill -- -${job.error.details.pid}); Resume becomes available once it has exited.`);
   if (OVERSIZED_PROMPT.has(job.error?.code) && job.error.details?.build === BUILD_ID) return next("factory-fix", null, null, "SoloFactory built a prompt over its size limit. This factory build would build the same prompt again, so retrying cannot help. Install a SoloFactory fix; the retry returns once a different build is running.");
@@ -2265,6 +2337,17 @@ export function buildRecoveryPacket(job) {
       : "Please inspect the preserved workspace and evidence, help resolve any external blocker, and continue from the current state. Do not start over or redo completed work unless the evidence requires it.",
   );
   return `${lines.join("\n")}\n`;
+}
+
+// True when nothing listens on the port, on loopback or on every interface (the app binds either way).
+async function portFree(port) {
+  const tryListen = (host) => new Promise((resolve) => {
+    const server = createNetServer();
+    server.unref();
+    server.once("error", () => resolve(false));
+    server.listen(port, host, () => server.close(() => resolve(true)));
+  });
+  return (await tryListen("127.0.0.1")) && (await tryListen());
 }
 
 async function availablePort() {

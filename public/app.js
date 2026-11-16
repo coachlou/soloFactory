@@ -874,6 +874,7 @@ class Component extends DCLogic {
       else if (!m.sent) { g = 'needs'; st = 'Plan waiting for you in the chat'; }
       else if (m.kind === 'prd') { g = 'needs'; st = 'Interview in progress'; }
       else if (rr && ['paused', 'stuck', 'revising'].indexOf(rr.state) >= 0) { g = 'needs'; st = stateWord[rr.state]; }
+      else if (rr && rr.state === 'building' && rr.job?.dataBackup?.needed && !rr.job.dataBackup.confirmedAt) { g = 'needs'; st = 'Needs you · back up data/'; }
       else if (rr && (rr.state === 'building' || rr.state === 'pausing')) { g = 'running'; st = this.runLine(rr, s.runs); order = -1; }
       else if (rr && rr.state === 'queued') { g = 'queued'; order = qList.indexOf(rr.id); const act = this.activeIn(s.runs, s.pid); st = ordinal(order + 1) + ' in line' + (!act ? ' · waiting for a build slot' : act.state === 'building' || act.state === 'pausing' ? '' : ' · held until you resolve the run above'); }
       else if (rr) { st = stateWord[rr.state]; }
@@ -1355,7 +1356,9 @@ class Live extends Component {
     const steps = this.kinds()[r.kind].steps.length, done = r.state === "shipped" ? steps : Math.min(r.idx, steps);
     const elapsed = runningMs(Date.parse(job.startedAt || job.createdAt), job.completedAt ? Date.parse(job.completedAt) : Date.now(), job.idleGaps);
     const far = ["ok", `${done} of ${steps} steps done${phase?.plan ? `; repair plan: ${phase.done.length} of ${phase.plan.slices.length} features verified` : ""}. ${formatSpan(elapsed)} running.`];
+    const backupDue = job.dataBackup?.needed && !job.dataBackup.confirmedAt;
     const needs = parked && actionable ? ["bad", `Yes: ${next.label}${next.reason ? `. ${next.reason}` : ""}`]
+      : backupDue ? ["warn", "Yes: back up data/, then confirm it."]
       : phase?.status === "ready" ? ["warn", "Yes: review and approve the repair plan."]
         : parked ? ["bad", "Yes: the run stopped."] : ["ok", "No."];
     const advice = parked && (next?.action === "resume" || job.state === "paused") ? spend?.resume : null;
@@ -1377,7 +1380,15 @@ class Live extends Component {
     const restartable = PARKED.includes(job.state), order = job.sliceDone || [];
     const features = (fp?.list || []).map((f) => ({ ...f, color: f.state === "To do" ? "var(--muted)" : "var(--fg)", weight: f.state === "Now" ? "600" : "400",
       canRestart: restartable && f.state === "Done" && order.indexOf(f.id) >= 1, restart: () => this.post(r, "restart", { fromSlice: f.id }) }));
-    return { hasFeatures: features.length > 0, features, featureHead: fp ? `Features · ${fp.done} of ${fp.total} done` : "", hasQa: job.state !== "queued", qa, hasStream: job.state !== "queued", stream, streamEmpty: !stream.length, chips,
+    const ticked = Boolean(s.backupTicked?.[r.jobId]);
+    const backup = backupDue ? {
+      text: "This update changes how your app stores its data. Back up data/ now, so you can restore it if you roll back.",
+      features: `Features that touch data: ${job.dataBackup.features.map((f) => f.title || f.id).join(", ")}.`,
+      ticked, onTick: (e) => this.setState({ backupTicked: { ...s.backupTicked, [r.jobId]: e.target.checked } }),
+      off: !ticked, opacity: ticked ? "1" : "0.5",
+      confirm: () => ticked ? this.post(r, "backup-confirmed") : this.showInfo("Back up data/ first", "Tick the box once data/ is backed up."),
+    } : null;
+    return { hasBackup: Boolean(backup), backup, hasFeatures: features.length > 0, features, featureHead: fp ? `Features · ${fp.done} of ${fp.total} done` : "", hasQa: job.state !== "queued", qa, hasStream: job.state !== "queued", stream, streamEmpty: !stream.length, chips,
       hasRecov: parked || Boolean(phase && job.state !== "completed"), recov: parked || phase ? this.recovVals(r, job, spend, next, phase, usage, parked) : null };
   }
 
@@ -1503,7 +1514,7 @@ class Live extends Component {
 
   projectList() {
     const list = (state.projects || []).map((p) => {
-      const shipped = p.id === state.project ? state.jobs.find((job) => job.state === "completed" && job.deployment?.url) : null;
+      const shipped = p.id === state.project ? state.jobs.find((job) => job.state === "completed" && !job.rolledBack && job.deployment?.url) : null;
       const url = shipped?.deployment?.url || "";
       return { id: p.id, name: p.name, hasDocs: p.runCount > 0, url, release: url ? "release " + p.runCount : "", live: url ? "Live at " + url : p.runCount ? "Built here" : "Not built yet" };
     });
@@ -1536,9 +1547,13 @@ class Live extends Component {
 
   // The Live app panel: the project's shipped run, its deployment state and its telemetry.
   appVals() {
-    const job = state.jobs.find((j) => j.state === "completed" && j.deployment?.url);
+    const job = state.jobs.find((j) => j.state === "completed" && !j.rolledBack && j.deployment?.url);
     if (!job) return {};
     const up = job.deployment.status === "live", r = { jobId: job.id };
+    // The newest shipped update offers a rollback; after one, its card says what to do about data/.
+    const offer = state.jobs.find((j) => j.rollbackTo), ask = offer && this.state.rollbackAsk === offer.id;
+    const rolled = state.jobs.find((j) => j.rolledBack && j.rollback);
+    const rb = rolled?.rollback;
     const t = up && this.appTel?.jobId === job.id ? this.appTel.app : null;
     // Routes come as { path: { count, errors, averageLatencyMs } }; the factory's own metrics polling is left out.
     const routes = !t ? [] : (Array.isArray(t.routes) ? t.routes : Object.entries(t.routes || {}).map(([path, x]) => ({ method: "", path, count: typeof x === "number" ? x : x?.count ?? 0 })))
@@ -1546,6 +1561,13 @@ class Live extends Component {
     return {
       up, down: !up, statusText: up ? "Live" : "Stopped", dot: up ? "var(--inv)" : "var(--muted)",
       stop: () => this.post(r, "stop-app"), relaunch: () => this.post(r, "relaunch"),
+      canRollback: Boolean(offer) && !ask, askRollback: () => this.setState({ rollbackAsk: offer.id }),
+      rollbackAsk: Boolean(ask), rollbackText: offer ? `This puts the app's code back to ${offer.rollbackTo.name} (${new Date(offer.rollbackTo.date).toLocaleDateString()}).` : "",
+      rollback: () => { this.setState({ rollbackAsk: null }); return this.post({ jobId: offer.id }, "rollback"); },
+      cancelRollback: () => this.setState({ rollbackAsk: null }),
+      hasRolled: Boolean(rb) && rb.previousJobId === job.id, rolledText: rb?.message || "",
+      rolledChanges: rb?.changes?.length ? `What changed in data/: ${rb.changes.join("; ")}.` : "",
+      rolledError: rb?.relaunchError ? `The previous release did not start: ${rb.relaunchError} Press Relaunch to try again.` : "",
       hasStats: !!t, stats: t ? [{ label: "Requests", value: String(t.requests?.total ?? 0) }, { label: "Errors", value: String(t.requests?.errors ?? 0) },
         { label: "Average response", value: t.latencyMs?.average != null ? `${t.latencyMs.average < 10 ? t.latencyMs.average.toFixed(1) : Math.round(t.latencyMs.average)} ms` : "—" }, { label: "Uptime", value: t.uptimeSeconds != null ? formatSpan(t.uptimeSeconds * 1000) : "—" }] : [],
       hasRoutes: routes.length > 0, routes,
