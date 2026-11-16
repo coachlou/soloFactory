@@ -1,0 +1,18 @@
+#!/bin/sh
+# docs/four-tier-gates-spec.md G1 and G3. On a push that updates main:
+#  - a release push (package.json's version differs from the remote main's) needs Linux CI green on that commit;
+#  - then the full suite runs, as the old local hook did.
+# git passes "<local ref> <local sha> <remote ref> <remote sha>" per line on stdin. Override: git push --no-verify.
+remote="$1"
+while read -r _ local_sha remote_ref remote_sha; do
+  [ "$remote_ref" = "refs/heads/main" ] || continue
+  case "$local_sha" in 0000000*) continue;; esac  # deleting main: nothing to test
+  new=$(git show "$local_sha:package.json" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).version)}catch{}})')
+  old=$(git show "$remote_sha:package.json" 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).version)}catch{}})')
+  if [ -n "$new" ] && [ -n "$old" ] && [ "$new" != "$old" ]; then
+    echo "pre-push: release push ($old -> $new) to $remote main: checking Linux CI on ${local_sha%"${local_sha#???????}"}" >&2
+    node scripts/ci-green.mjs "$local_sha" || exit 1
+  fi
+  exec npm test
+done
+exit 0

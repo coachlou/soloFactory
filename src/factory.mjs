@@ -23,6 +23,17 @@ const harnessRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), ".."
 const CASE_REPORTER = fileURLToPath(new URL("./case-reporter.mjs", import.meta.url));
 // Gate failures a repair turn cannot fix: they say nothing about the app's code.
 const NO_REPAIR_GATE = new Set(["gate_timeout", "gate_infrastructure"]);
+// An app that exits on its own this soon after going live most likely broke with this release
+// (docs/four-tier-gates-spec.md G4): the Live app panel says so beside Relaunch and the rollback offer.
+export const EARLY_CRASH_MS = 2 * 60_000;
+
+// { afterSeconds, exitCode } when a stored deployment stopped on its own within EARLY_CRASH_MS of starting, else null.
+export function earlyExit(deployment, stoppedAt = Date.now()) {
+  if (deployment?.stoppedBy !== "exited" || !deployment.startedAt) return null;
+  const ms = new Date(stoppedAt).getTime() - new Date(deployment.startedAt).getTime();
+  return ms >= 0 && ms <= EARLY_CRASH_MS ? { afterSeconds: Math.round(ms / 1000), exitCode: deployment.exitCode ?? null } : null;
+}
+const earlyNote = (early) => early ? ` It stopped on its own ${early.afterSeconds} s after it started, so this release may be broken: Relaunch it, or roll back to the previous release if one is offered.` : "";
 
 // A path inside NODE_OPTIONS: quoted for spaces, and with backslashes and quotes escaped, because
 // Node's parser drops an unescaped backslash inside quotes (C:\Users\x would become C:Usersx).
@@ -1845,8 +1856,10 @@ export class SoloFactory {
           latest.deployment.stoppedAt = new Date().toISOString();
           latest.deployment.exitCode = code;
           latest.deployment.stoppedBy ??= "exited"; // owner and server stops write theirs before the kill
+          const early = earlyExit(latest.deployment, latest.deployment.stoppedAt);
+          if (early) latest.deployment.earlyExit = early;
           await this.store.writeState(latest);
-          await this.emit(job.id, { type: "deployment.stopped", state: latest.state, message: `App process stopped with exit ${code}.` });
+          await this.emit(job.id, { type: "deployment.stopped", state: latest.state, message: `App process stopped with exit ${code}.${earlyNote(early)}`, ...(early ? { earlyExit: early } : {}) });
         }
       } catch {
         // The durable run evidence remains readable even if shutdown races process exit.
@@ -1912,8 +1925,10 @@ export class SoloFactory {
     job.deployment.status = "stopped";
     job.deployment.stoppedAt = new Date().toISOString();
     job.deployment.stoppedBy = "exited";
+    const early = earlyExit(job.deployment, job.deployment.stoppedAt);
+    if (early) job.deployment.earlyExit = early;
     await this.store.writeState(job);
-    await this.emit(job.id, { type: "deployment.stopped", state: job.state, message: "App process stopped right after launch." });
+    await this.emit(job.id, { type: "deployment.stopped", state: job.state, message: `App process stopped right after launch.${earlyNote(early)}`, ...(early ? { earlyExit: early } : {}) });
   }
 
   // Starts a completed run's built app again on a fresh port; only the project's newest run may, since one app runs per project.

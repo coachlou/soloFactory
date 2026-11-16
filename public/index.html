@@ -298,6 +298,9 @@
 <button onClick="{{app.askRollback}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid var(--line3); border-radius: 10px; background: transparent; color: var(--fg); font-size: 13px; font-weight: 600">Roll back to the previous release</button>
 </sc-if>
 </div>
+<sc-if value="{{app.crashNote}}" hint-placeholder-val="{{false}}">
+<p role="status" style="margin: 0; padding: 10px 14px; border: 1px solid var(--amber-line); border-radius: 12px; font-size: 13px; color: var(--amber)">{{app.crashNote}}</p>
+</sc-if>
 <sc-if value="{{app.rollbackAsk}}" hint-placeholder-val="{{false}}">
 <div role="group" aria-label="Confirm rollback" style="display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--raise)">
 <p style="margin: 0; font-size: 13px; color: var(--text1)">{{app.rollbackText}}</p>

@@ -2,6 +2,32 @@
 
 Repo-only: none of this ships in the distro (`distro/APP_FILES`).
 
+## Gate tiers
+
+Each check belongs to one tier (`docs/four-tier-gates-spec.md`):
+
+| Tier | Check | When it runs |
+|---|---|---|
+| 1 Rules | `node --check` on staged `.mjs` files (`scripts/hooks/pre-commit`) | every commit |
+| 2 This change works | `npm test` (distro check first) | locally, and in `pre-push` on any push to main |
+| 3 Main works | GitHub Actions `test` on Linux | every push and pull request |
+| 4 Ready to release | smoke gate and smoke set; Linux CI green on the release commit (`scripts/ci-green.mjs`) | at the version bump, and in `pre-push` on a release push to main |
+
+Turn the hooks on once per clone or worktree:
+
+```bash
+npm run hooks   # git config core.hooksPath scripts/hooks
+```
+
+Once it is set, git ignores an old `.git/hooks/pre-push`; the versioned one does the same and more.
+`git push --no-verify` skips the hooks when you mean to.
+
+**Release only from a commit that passed Linux CI.** Members run Linux (WSL), and the local suite runs on macOS.
+Push the release commit to a branch first (`git push origin HEAD:release-<version>`), wait for CI to pass, then
+push the same commit to main. The `pre-push` hook refuses a push to main that changes `package.json`'s version
+until `node scripts/ci-green.mjs <sha>` finds a successful `test` run on that exact commit (it uses `gh`, signed in).
+Tag and sync to ambient-library only from that commit.
+
 ## Verify the factory
 
 ```bash
@@ -28,7 +54,11 @@ node scripts/smoke.mjs
 ```
 
 It builds each brief in `smoke/briefs/` in a fresh home and appends one row per run to
-`smoke/results.jsonl`; `node scripts/smoke.mjs table` prints the ledger. A free dry run of
+`smoke/results.jsonl`; `node scripts/smoke.mjs table` prints the ledger. Each row also records minutes
+per stage (`stageMin`: planning, implement, review, repair, gates). A stage over its budget is printed after
+the run and shown in the table's *Over budget* column. Budgets: planning 8 min, implement 3 min and review 1.5 min
+per feature, repair 5 min, gates 3 min (`STAGE_BUDGETS` in `src/measure.mjs`). `SMOKE_BUDGETS="review=2,planning=10"`
+overrides them for one session. A budget is a tripwire to investigate, never a failure. A free dry run of
 the loop: `SOLOFACTORY_DEMO=1 SMOKE_PROVIDER=fixture SMOKE_LEDGER=/tmp/smoke.jsonl node scripts/smoke.mjs`.
 
 To A/B the per-feature review, pair runs of the same brief:

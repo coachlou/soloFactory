@@ -1549,7 +1549,7 @@ class Live extends Component {
   appVals() {
     const job = state.jobs.find((j) => j.state === "completed" && !j.rolledBack && j.deployment?.url);
     if (!job) return {};
-    const up = job.deployment.status === "live", r = { jobId: job.id };
+    const up = job.deployment.status === "live", r = { jobId: job.id }, early = job.deployment.earlyExit;
     // The newest shipped update offers a rollback; after one, its card says what to do about data/.
     const offer = state.jobs.find((j) => j.rollbackTo), ask = offer && this.state.rollbackAsk === offer.id;
     const rolled = state.jobs.find((j) => j.rolledBack && j.rollback);
@@ -1565,6 +1565,9 @@ class Live extends Component {
       rollbackAsk: Boolean(ask), rollbackText: offer ? `This puts the app's code back to ${offer.rollbackTo.name} (${new Date(offer.rollbackTo.date).toLocaleDateString()}).` : "",
       rollback: () => { this.setState({ rollbackAsk: null }); return this.post({ jobId: offer.id }, "rollback"); },
       cancelRollback: () => this.setState({ rollbackAsk: null }),
+      // A crash soon after going live (G4) is an attention line; rolling back stays the owner's confirmed choice.
+      crashNote: !up && early ? `The app stopped on its own ${early.afterSeconds} s after it started${early.exitCode == null ? "" : ` (exit ${early.exitCode})`}, so this release may be broken. `
+        + (offer ? `Rolling back to ${offer.rollbackTo.name} may fix it, or Relaunch to try again.` : "Relaunch to try again, or check the app's log.") : "",
       hasRolled: Boolean(rb) && rb.previousJobId === job.id, rolledText: rb?.message || "",
       rolledChanges: rb?.changes?.length ? `What changed in data/: ${rb.changes.join("; ")}.` : "",
       rolledError: rb?.relaunchError ? `The previous release did not start: ${rb.relaunchError} Press Relaunch to try again.` : "",

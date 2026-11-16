@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { activity, formatMeasurement, formatSmokeTable, measureRun, summarizeRun } from "../src/measure.mjs";
+import { activity, formatMeasurement, formatSmokeTable, measureRun, overBudget, parseBudgets, STAGE_BUDGETS, summarizeRun } from "../src/measure.mjs";
 
 let clock = Date.parse("2026-10-11T00:00:00Z");
 const ev = (type, fields = {}, advance = 1000) => ({ at: new Date(clock += advance).toISOString(), type, ...fields });
@@ -100,8 +100,8 @@ test("summarizeRun gives one smoke-ledger row", () => {
   ];
   const state = { id: "r1", provider: "claude", state: "completed", completedAt: "2026-11-09T00:03:00Z", brief: { workingName: "Demo" }, sliceDone: ["A", "B"], slicePlanIds: ["A", "B"], sliceStats: { A: { repairs: 1 } } };
   const row = summarizeRun(state, events, { arm: "x", commit: "abc" });
-  assert.deepEqual({ ...row }, { at: "2026-11-09T00:03:00Z", commit: "abc", brief: "Demo", arm: "x", provider: "claude", run: "r1", result: "passed", features: 2, planned: 2, firstPass: 1, repairs: 1, planBlocks: 1, reviewsRun: 0, reviewsSkipped: 0, skippedFindings: 0, unattributedFindings: 0, costUsd: 3, costPerFeature: 1.5, wallMin: 2 });
-  assert.match(formatSmokeTable([row]), /\| 2026-11-09 \| abc \| Demo \| x \| passed \| 2 of 2 \| 1 \| 1 \| 1 \| 0 \| 0 \| 0 \| 0 \| \$3\.00 \| \$1\.50 \| 2 min \|/);
+  assert.deepEqual({ ...row }, { at: "2026-11-09T00:03:00Z", commit: "abc", brief: "Demo", arm: "x", provider: "claude", run: "r1", result: "passed", features: 2, planned: 2, firstPass: 1, repairs: 1, planBlocks: 1, reviewsRun: 0, reviewsSkipped: 0, skippedFindings: 0, unattributedFindings: 0, costUsd: 3, costPerFeature: 1.5, wallMin: 2, stageMin: { planning: 0, implement: 0, review: 0, repair: 1, gates: 0 } });
+  assert.match(formatSmokeTable([row]), /\| 2026-11-09 \| abc \| Demo \| x \| passed \| 2 of 2 \| 1 \| 1 \| 1 \| 0 \| 0 \| 0 \| 0 \| \$3\.00 \| \$1\.50 \| 2 min \| 0\.0 \| 0\.0 \| 1\.0 \| 0\.0 \|  \|/);
   assert.equal(summarizeRun({ ...state, state: "failed", error: { code: "run_budget_reached" } }, []).result, "failed (run_budget_reached)");
 });
 
@@ -111,4 +111,27 @@ test("summarizeRun counts scoped reviews, skipped features, every final finding 
   const events = [ev("review.finding", { feature: "B" }), ev("review.finding", { feature: "A" }), ev("review.finding", { feature: "R1" }), ev("review.finding", { feature: "R1" }), ev("review.finding", { feature: null }), ev("review.bug", { feature: "B" })];
   const row = summarizeRun(state, events);
   assert.deepEqual([row.reviewsRun, row.reviewsSkipped, row.skippedFindings, row.unattributedFindings], [3, 2, 3, 1]);
+});
+
+test("stage budgets flag a slow stage, scale per feature, and leave old ledger rows alone", () => {
+  const row = { features: 5, stageMin: { planning: 6, implement: 10, review: 19, repair: 0.3, gates: 0.8 } };
+  assert.deepEqual(overBudget(row), ["review 19.0 min > 7.5"]);
+  assert.deepEqual(overBudget({ ...row, stageMin: { ...row.stageMin, planning: 9.25 } }), ["planning 9.3 min > 8", "review 19.0 min > 7.5"]);
+  // No finished feature still gets one feature's budget.
+  assert.deepEqual(overBudget({ features: 0, stageMin: { review: 2 } }), ["review 2.0 min > 1.5"]);
+  assert.deepEqual(overBudget({ features: 3, wallMin: 20 }), []);
+  assert.match(formatSmokeTable([{ ...row, at: "2026-11-16T00:00:00Z", commit: "c", brief: "B", arm: "", result: "passed", planned: 5, firstPass: 5, repairs: 0, planBlocks: 0, costUsd: 1, costPerFeature: 0.2, wallMin: 36 }]), /\| 6\.0 \| 19\.0 \| 0\.3 \| 0\.8 \| review 19\.0 min > 7\.5 \|$/);
+  // A legacy row renders empty stage cells instead of failing.
+  assert.match(formatSmokeTable([{ at: "2026-11-09", commit: "c", brief: "B", result: "passed", features: 1, planned: 1, wallMin: 3 }]), /\| 3 min \|  \|  \|  \|  \|  \|$/);
+});
+
+test("SMOKE_BUDGETS overrides a stage in its own unit and refuses nonsense", () => {
+  const budgets = parseBudgets("review=4, planning=10");
+  assert.deepEqual(budgets.review, { perFeature: 4 });
+  assert.deepEqual(budgets.planning, { min: 10 });
+  assert.deepEqual(budgets.gates, STAGE_BUDGETS.gates);
+  assert.deepEqual(parseBudgets(undefined), STAGE_BUDGETS);
+  assert.throws(() => parseBudgets("speed=3"), /SMOKE_BUDGETS/);
+  assert.throws(() => parseBudgets("review=-1"), /SMOKE_BUDGETS/);
+  assert.deepEqual(overBudget({ features: 5, stageMin: { review: 19 } }, budgets), []);
 });

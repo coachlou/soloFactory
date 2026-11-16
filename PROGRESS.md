@@ -1,3 +1,13 @@
+## Unreleased: four-tier gates
+
+Built from `docs/four-tier-gates-spec.md`, which takes four picks from the four-tier validation article. The 0.11.0 smoke runs showed that gates are 2-4% of run time, so test-result reuse and test time budgets were skipped.
+- Release only from green: `scripts/ci-green.mjs` checks that the Linux CI `test` workflow passed on the exact commit, and the versioned `pre-push` runs it on a push to main that changes the version.
+- Versioned hooks: `scripts/hooks/pre-commit` (staged `.mjs` files must parse) and `scripts/hooks/pre-push` (the old local full-suite hook plus the release check); `npm run hooks` turns them on.
+- Stage budgets: smoke rows record `stageMin` (planning, implement, review, repair, gates). `smoke.mjs` flags stages over `STAGE_BUDGETS` (override with `SMOKE_BUDGETS`), and the table gains Plan, Review, Repair, Gates and Over budget columns.
+- Early crash: an app that exits on its own within 2 min of starting records `deployment.earlyExit`; the Live app panel shows an amber line naming Relaunch and the rollback target. Nothing rolls back automatically.
+- Tests: `test/ci-green.test.mjs` (verdict, and both hooks run in a throwaway repo), `test/early-crash.test.mjs`, and new `test/measure.test.mjs` budget cases.
+- Docs: DEVELOPING gate-tier table, hooks and release-from-green flow, smoke budgets; SPEC §4 early exit; manual Live app section.
+
 ## Unreleased: live apps restart, data backup, rollback
 
 Built from `docs/live-app-restart-rollback-spec.md`. Not released; touching `src/prompts.mjs` and `src/factory.mjs` trips the release smoke gate, which is expected and left for the release.
