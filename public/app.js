@@ -1045,7 +1045,7 @@ class Component extends DCLogic {
           newProject: () => this.setState({ pmOpen: false, np: { name: '', mode: 'empty', folder: '', where: 'default', repo: '' } })
         };
       })(), np: npv, cfg: cfg,
-      info: s.info ? { open: true, title: s.info.title, text: s.info.text, hasPre: !!s.info.pre, pre: s.info.pre || '', copyLabel: s.info.copied ? 'Copied' : 'Copy', copy: () => navigator.clipboard.writeText(s.info.pre).then(() => this.setState((st) => ({ info: st.info && { ...st.info, copied: true } }))).catch(() => this.setState((st) => ({ info: st.info && { ...st.info, text: st.info.text + ' Select the text and press ⌘C / Ctrl+C.' } }))), close: () => this.setState({ info: null }) } : { open: false, title: '', text: '' },
+      info: s.info ? { open: true, title: s.info.title, text: s.info.text, hasPre: !!s.info.pre, pre: s.info.pre || '', copyLabel: s.info.copied ? 'Copied' : 'Copy', copy: () => navigator.clipboard.writeText(s.info.pre).then(() => this.setState((st) => ({ info: st.info && { ...st.info, copied: true } }))).catch(() => this.setState((st) => ({ info: st.info && { ...st.info, text: st.info.text + ' Select the text and press ⌘C / Ctrl+C.' } }))), close: () => this.setState({ info: null }), hasRun: !!s.info.run, run: s.info.run || (() => {}) } : { open: false, title: '', text: '' },
       provider: provider, providerAria: 'Builds with ' + provider + '. Switch the AI for this project.',
       toggleProvider: () => this.setState({ provider: { ...this.state.provider, [this.state.pid]: provider === 'Codex' ? 'Claude Code' : 'Codex' } }),
       onAttach: () => this.showInfo('Attach', 'Drops a spec or notes into the conversation (markdown, text, JSON, YAML, CSV) or lets the Guide look at a mockup or screenshot (png, jpg, gif, webp). Images are saved under the project\'s .factory/uploads/.'),
@@ -1271,6 +1271,7 @@ class Live extends Component {
       await this.loadDraft();
       await this.refresh();
       this.checkUpdate();
+      this.updateDone();
     } catch (error) { showError(error); }
     this.timer = setInterval(() => { if (!this.polling) this.refresh().catch(() => {}); }, 2000);
   }
@@ -1761,9 +1762,39 @@ class Live extends Component {
     this.updFlash = updateLabel(result); this.setState({});
     setTimeout(() => { this.updFlash = ""; this.setState({}); }, 4000);
   }
-  showUpdate() {
+  async showUpdate() {
     const u = this.upd;
-    this.setState({ navOpen: false, info: { title: "Update available", text: `SoloFactory ${u.latest} is available. You have ${u.current}. Paste this into Claude Code or Codex when you are ready. Nothing updates by itself.`, pre: u.prompt || "" } });
+    const run = await api("/api/update/run").catch(() => ({}));
+    const now = run.available && !run.running;
+    this.setState({ navOpen: false, info: { title: "Update available", text: `SoloFactory ${u.latest} is available. You have ${u.current}. ` + (now ? "Update now has Claude Code or Codex run the update and restarts SoloFactory, or paste this into one yourself." : "Paste this into Claude Code or Codex when you are ready.") + " Nothing updates by itself.", pre: u.prompt || "", run: now ? () => this.runUpdate() : null } });
+  }
+  // Update now: the server runs the INSTALL update step with the profile's AI, then restarts on the new version.
+  async runUpdate() {
+    let p = null; try { p = this.profile(); } catch {}
+    const provider = p?.provider === "codex" ? "codex" : "claude";
+    const started = await api("/api/update/run", { method: "POST", body: { provider } }).catch((error) => ({ error: error.message }));
+    if (started.error) return this.setState((st) => ({ info: st.info && { ...st.info, text: started.error, run: null } }));
+    const from = started.update.from;
+    this.setState({ info: { title: "Updating SoloFactory", text: `${provider === "codex" ? "Codex" : "Claude Code"} is updating SoloFactory from ${from} to ${started.update.to}. This page reloads when it restarts, usually within a few minutes. Keep the SoloFactory terminal window open.` } });
+    clearInterval(this.updTimer);
+    this.updTimer = setInterval(async () => {
+      const r = await api("/api/update/run").catch(() => null); // the server is down while it restarts
+      if (!r) return;
+      if (r.current !== from) { clearInterval(this.updTimer); return location.reload(); }
+      if (!r.running && r.last?.state === "failed") {
+        clearInterval(this.updTimer);
+        this.setState({ info: { title: "The update did not finish", text: `${r.last.message} SoloFactory is still on ${from}. The full output is in ${r.last.logPath}. You can paste this into Claude Code or Codex instead.`, pre: this.upd?.prompt || "" } });
+      }
+    }, 3000);
+  }
+  // After Update now restarts the server, say once what changed.
+  async updateDone() {
+    const r = await api("/api/update/run").catch(() => null);
+    const last = r?.last;
+    if (last?.state !== "restarting" || last.to !== r.current) return;
+    const key = "solofactory.updated." + last.to;
+    try { if (localStorage.getItem(key)) return; localStorage.setItem(key, "1"); } catch {}
+    this.setState({ info: { title: "SoloFactory updated", text: `SoloFactory is now ${last.to} (was ${last.from}).`, pre: last.message || "" } });
   }
 
   async select(id) {

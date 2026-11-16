@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import http from "node:http";
 import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
@@ -20,6 +21,7 @@ import {
 import { checkModels, claudeMaxTurns, createProvider, detectProviderDiagnostics, discoverProviders } from "./providers.mjs";
 import { createFixtureProvider } from "./fixture-provider.mjs";
 import { createUpdateChecker } from "./update-check.mjs";
+import { createUpdateRunner } from "./update-run.mjs";
 import { REPORTABLE_STATES, buildDiagnostics, issuesConfig, renderReport, scrub, validateFeedback } from "./feedback.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -276,6 +278,12 @@ export async function createSoloFactoryServer(options = {}) {
   checkForUpdate?.().then((result) => {
     if (result.newer) console.log(`SoloFactory ${result.latest} is available (you have ${version}). Open the app for how to update.`);
   });
+  // Update now (src/update-run.mjs): only in an installed folder, never while anything builds or waits.
+  const updater = createUpdateRunner({
+    root, home, appRoot: projectRoot, current: version, agent: options.updateAgent, onUpdated: () => options.onUpdated?.(),
+    busy: () => (runs.size || queue.length ? "Something is building or waiting to build. Let it finish, or pause it, then update." : null),
+    newer: async () => { const r = await checkForUpdate?.(); return r?.newer ? r.latest : null; },
+  });
   const issuesUrl = options.issuesUrl ?? process.env.SOLOFACTORY_ISSUES_URL;
   const issues = issuesConfig(issuesUrl);
   if (issuesUrl && !issues) console.warn("SOLOFACTORY_ISSUES_URL must look like https://github.com/<owner>/<repo>/issues with no query or fragment; GitHub links are disabled.");
@@ -290,6 +298,17 @@ export async function createSoloFactoryServer(options = {}) {
       if (request.method === "GET" && url.pathname === "/api/update") {
         if (!checkForUpdate) return json(response, 200, { current: version, disabled: true });
         return json(response, 200, await checkForUpdate({ force: url.searchParams.get("force") === "1" }));
+      }
+      if (url.pathname === "/api/update/run") {
+        if (request.method === "GET") return json(response, 200, await updater.status());
+        // It ends in a shell install, so only this page may start it: a JSON body forces a CORS preflight.
+        const origin = request.headers.origin;
+        if (request.method !== "POST" || !/^application\/json/.test(request.headers["content-type"] ?? "") || (origin && !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(origin))) return json(response, 403, { error: "Not allowed." });
+        const { status, ...body } = await updater.start((await readJson(request)).provider);
+        return json(response, status, body);
+      }
+      if (updater.running && request.method === "POST" && url.pathname.startsWith("/api/jobs")) {
+        return json(response, 409, { error: "SoloFactory is updating. Runs can start again after it restarts." });
       }
       if (request.method === "GET" && url.pathname === "/api/board") {
         return json(response, 200, await board());
@@ -1007,7 +1026,19 @@ if (isEntry(import.meta.url)) {
   const port = Number(process.env.PORT || 4173);
   let host;
   try { host = loopbackHost(process.env.HOST); } catch (error) { console.error(error.message); process.exit(1); }
-  const app = await createSoloFactoryServer();
+  // Update now: close this server, then run the updated code as a child on the same terminal, so
+  // Ctrl+C reaches it as before. This process stays as its parent and exits with it.
+  let app;
+  const restart = async () => {
+    console.log("SoloFactory updated. Restarting...");
+    process.removeAllListeners("SIGINT"); process.removeAllListeners("SIGTERM");
+    process.on("SIGINT", () => {});
+    await app.close();
+    const child = spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1)], { stdio: "inherit", env: process.env });
+    process.on("SIGTERM", () => child.kill("SIGTERM"));
+    child.on("exit", (code) => process.exit(code ?? 1));
+  };
+  app = await createSoloFactoryServer({ onUpdated: restart });
   app.server.on("error", async (error) => {
     if (error.code !== "EADDRINUSE") throw error;
     // A running factory answers /api/health with a workers list; anything else is another app.

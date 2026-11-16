@@ -142,8 +142,10 @@ On start, and whenever you load the page or press **Check for updates**, SoloFac
 its version with the latest release (`package.json` on the public `coachlou/soloFactory` main
 branch; one small unauthenticated request, 3-second timeout, no background polling). If a newer
 one exists, the button turns into a green **Update available** pill that stays put without
-covering your work; click it for both versions and the prompt to paste into Claude Code or
-Codex when you are ready to update. It never updates by itself. Offline or failed checks stay
+covering your work; click it for both versions, an **Update now** button and the prompt to paste into Claude Code
+or Codex. Update now (installed copies only) refuses while anything is building or queued, runs
+the INSTALL update step with the profile's AI, then restarts the server in the same terminal and
+reloads the page. It never updates by itself. Offline or failed checks stay
 silent except when you press the button. Turn it off with:
 
 ```bash

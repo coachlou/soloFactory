@@ -36,9 +36,13 @@ If your computer is offline, a manual check says *Couldn't check*. That's the on
 
 When SoloFactory starts, when you open or refresh the page, and when you click the button. That's all. It never polls in the background, and it never slows down startup or a run. The check reads one small public file with SoloFactory's version number and gives up after three seconds if the network is slow. When it finds an update at startup, the terminal window also prints a one-line note.
 
-## It never updates on its own
+## Updating
 
-You stay in control of when your factory changes. To update, paste the prompt from the panel into Claude Code (or Codex) on the computer where SoloFactory lives. On Windows, open it in the Ubuntu window, not in PowerShell.
+Nothing changes until you choose. From 0.11.0 the panel has an **Update now** button: SoloFactory asks Claude Code (or Codex, if the open project's profile uses it) to run the update for you, then restarts itself in the same terminal window and reloads the page. A short note then says which version you're on now. It takes a few minutes; keep the terminal window open.
+
+Update now won't start while anything is building or waiting to build, and no run can start while it works. If the update doesn't finish, the panel says why, SoloFactory stays on the version you had, and the panel shows where the full output is (`.aai/memory/solofactory/update.log` in your SoloFactory folder).
+
+You can still update by hand: paste the prompt from the panel into Claude Code (or Codex) on the computer where SoloFactory lives. On Windows, open it in the Ubuntu window, not in PowerShell. Update now appears only in an installed SoloFactory, not in a developer checkout.
 
 ## Turning it off
 
