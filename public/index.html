@@ -294,7 +294,26 @@
 <sc-if value="{{app.down}}" hint-placeholder-val="{{false}}">
 <button onClick="{{app.relaunch}}" style="min-height: 44px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--inv); background: var(--inv); color: var(--inv-fg); font-size: 13px; font-weight: 700">Relaunch</button>
 </sc-if>
+<sc-if value="{{app.canRollback}}" hint-placeholder-val="{{false}}">
+<button onClick="{{app.askRollback}}" style="min-height: 44px; padding: 10px 14px; border: 1px solid var(--line3); border-radius: 10px; background: transparent; color: var(--fg); font-size: 13px; font-weight: 600">Roll back to the previous release</button>
+</sc-if>
 </div>
+<sc-if value="{{app.rollbackAsk}}" hint-placeholder-val="{{false}}">
+<div role="group" aria-label="Confirm rollback" style="display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--raise)">
+<p style="margin: 0; font-size: 13px; color: var(--text1)">{{app.rollbackText}}</p>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button onClick="{{app.rollback}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid var(--inv); border-radius: 9px; background: var(--inv); color: var(--inv-fg); font-size: 13px; font-weight: 600">Roll back</button>
+<button onClick="{{app.cancelRollback}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid var(--line3); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px; font-weight: 600">Cancel</button>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{app.hasRolled}}" hint-placeholder-val="{{false}}">
+<div role="status" style="display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--raise)">
+<p style="margin: 0; font-size: 13px; color: var(--text1)">{{app.rolledText}}</p>
+<sc-if value="{{app.rolledChanges}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 13px; color: var(--amber)">{{app.rolledChanges}}</p></sc-if>
+<sc-if value="{{app.rolledError}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 13px; color: var(--red-text)">{{app.rolledError}}</p></sc-if>
+</div>
+</sc-if>
 <sc-if value="{{app.hasStats}}" hint-placeholder-val="{{true}}">
 <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
 <sc-for list="{{app.stats}}" as="t" hint-placeholder-count="4">
@@ -338,6 +357,15 @@
 </sc-for>
 <button onClick="{{run.openSpec}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">Open the spec</button>
 </div>
+<sc-if value="{{run.hasBackup}}" hint-placeholder-val="{{false}}">
+<section aria-label="Data backup" style="display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--raise)">
+<strong style="font-weight: 600; color: var(--amber)">Back up your app's data</strong>
+<p style="margin: 0; font-size: 13px; color: var(--text1)">{{run.backup.text}}</p>
+<p style="margin: 0; font-size: 13px; color: var(--text2)">{{run.backup.features}}</p>
+<label style="display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--text1)"><input type="checkbox" checked="{{run.backup.ticked}}" onChange="{{run.backup.onTick}}" style="width: 18px; height: 18px; accent-color: var(--fg)">I have backed up my app's data</label>
+<button onClick="{{run.backup.confirm}}" disabled="{{run.backup.off}}" style="align-self: flex-start; min-height: 40px; padding: 8px 12px; border: 1px solid var(--inv); border-radius: 9px; background: var(--inv); color: var(--inv-fg); font-size: 13px; font-weight: 600; opacity: {{run.backup.opacity}}">Confirm</button>
+</section>
+</sc-if>
 <sc-if value="{{run.hasRecov}}" hint-placeholder-val="{{false}}">
 <section aria-label="Recovery" style="display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--raise)">
 <strong style="font-weight: 600; color: var(--fg-strong)">{{run.recov.title}}</strong>

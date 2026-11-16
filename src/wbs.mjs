@@ -443,7 +443,7 @@ export function validateFeaturePlan(raw, { jobId, contractDigest, checks, source
     }
     if (acceptance.every((item) => item.proof.pending)) throw new Error(`${where} needs at least one obligation provable when the feature is built; only part of its proof may wait for integration.`);
     const writes = slice.writes === undefined ? null : validateWrites(slice, dependsOn);
-    return { id: slice.id, title: slice.title.trim(), objective: slice.objective.trim(), demo: slice.demo.trim(), dependsOn: [...dependsOn], closes: [...slice.closes], acceptance, ...(writes ? { writes } : {}) };
+    return { id: slice.id, title: slice.title.trim(), objective: slice.objective.trim(), demo: slice.demo.trim(), dependsOn: [...dependsOn], closes: [...slice.closes], acceptance, ...(writes ? { writes } : {}), ...(slice.touchesData === true ? { touchesData: true } : {}) };
   });
   assertDisjointWrites(slices);
 

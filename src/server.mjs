@@ -9,6 +9,7 @@ import { withReviewDiagnostics } from "./review.mjs";
 import { amendmentPacket, assertBatch, validateRecoveryApproval } from "./feature-recovery.mjs";
 import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, admitsPlanning, assertPlanInputsRevised, assertPlanReviewable, buildRecovery, buildRecoveryPacket, continuationAction, newerRunBlocks, previousRelease, SoloFactory, withContinuation } from "./factory.mjs";
 import { watchConfig } from "./watchdog.mjs";
+import { backupStatus, dataShape, readConfirmation, shapeChanges, writeConfirmation } from "./data-backup.mjs";
 import {
   COVERAGE_KEYS,
   INTERVIEW_RESPONSE_SCHEMA,
@@ -175,7 +176,7 @@ export async function createSoloFactoryServer(options = {}) {
     for (const project of await discoverProjects(root)) {
       const projectStore = storeFor(project.id);
       const jobs = await projectStore.list();
-      const job = jobs.find((run) => run.state === "completed");
+      const job = jobs.find((run) => run.state === "completed" && !run.rolledBack); // after a rollback, the previous release
       if (job?.deployment?.status !== "stopped" || job.deployment.stoppedBy !== "server" || newerRunBlocks(jobs, job.id)) continue;
       // relaunch never calls the model, so the run's provider is not needed (a demo run restarts outside demo mode too).
       const factory = new SoloFactory({ store: projectStore, provider: { id: job.provider ?? "none" }, maxRepairs, autoStartRepairs });
@@ -202,6 +203,15 @@ export async function createSoloFactoryServer(options = {}) {
   // A past run's brief can be reopened once the run has stopped or finished and nothing is running it again.
   const revisable = (job) => (PARKED.has(job.state) || job.state === "completed") && !queue.some((entry) => entry.jobId === job.id) && ![...runs.values()].some((run) => run.jobId === job.id && !PARKED.has(job.state));
   const busyJobId = () => runs.get(active.id)?.jobId ?? null;
+  // Rollback is a hard reset, so any run of the project, running or queued in any mode, blocks it.
+  const projectBusy = (projectId) => runs.has(projectId) || queue.some((entry) => entry.projectId === projectId);
+  // The release a shipped follow-on rolls back to: only the project's newest completed run, with nothing newer in the folder.
+  const rollbackTarget = (job, list) => {
+    if (job.state !== "completed" || !job.followOn || !job.baseCommit || job.rolledBack || newerRunBlocks(list, job.id)) return null;
+    const at = list.findIndex((run) => run.id === job.id);
+    if (list.findIndex((run) => run.state === "completed" && !run.rolledBack) !== at) return null;
+    return list.slice(at + 1).find((run) => run.state === "completed" && !run.rolledBack) ?? null;
+  };
   // A run persists its parked state before the scheduler releases its writer slot (the settlement reads the
   // final state and logs a failure first). An owner acting on the parked card in that window must not get a
   // "worker is still running" refusal, so wait, bounded, for this job's own run to settle.
@@ -216,19 +226,29 @@ export async function createSoloFactoryServer(options = {}) {
   }
   const schedulerStatus = () => ({ busyJobId: busyJobId(), maxActiveRuns, activeRuns: [...runs].map(([projectId, run]) => ({ projectId, jobId: run.jobId })) });
 
+  // The data-backup question and the rollback offer for a run. list: JobStore.list(), newest first; given only
+  // the run itself, no earlier release is in it, so there is no rollback offer.
+  async function releaseExtras(projectId, job, list, busy) {
+    const asked = backupStatus(job, null).needed;
+    const dataBackup = asked ? backupStatus(job, await readConfirmation(storeFor(projectId).jobDir(job.id))) : backupStatus(job, null);
+    const prior = job.followOn && !busy ? rollbackTarget(job, list) : null;
+    return { dataBackup, rollbackTo: prior && { jobId: prior.id, name: prior.brief?.workingName || prior.id, date: prior.completedAt ?? prior.createdAt } };
+  }
+
   async function annotateJobs(projectId, jobs) {
     const blockedBy = runs.has(projectId) ? null : await blockerFor(projectId);
-    return jobs.map((stored) => {
+    const busy = projectBusy(projectId);
+    return Promise.all(jobs.map(async (stored) => {
       const position = queue.findIndex((entry) => entry.jobId === stored.id);
       const run = runs.get(projectId);
       const live = run?.jobId === stored.id ? run.factory.supervision(stored.id) : null;
       // Supervision is a label beside the lifecycle, never a replacement: live while this server owns the run,
       // the last observation once it parks.
       const supervision = live ?? (PARKED.has(stored.state) && stored.error && stored.watch?.observed ? { ...stored.watch.observed, status: "Action needed", monitoring: false } : null);
-      const job = { ...withContinuation(stored, { maxRepairs, busy: position >= 0 || run?.jobId === stored.id }), supervision, pendingPause: Boolean(run?.factory.pausePending(stored.id)) };
+      const job = { ...withContinuation(stored, { maxRepairs, busy: position >= 0 || run?.jobId === stored.id }), supervision, pendingPause: Boolean(run?.factory.pausePending(stored.id)), ...(await releaseExtras(projectId, stored, jobs, busy)) };
       if (position < 0) return job;
       return { ...job, queuePosition: position + 1, queuedFor: queue[position].mode, blockedBy: queue[position].mode === "start" ? blockedBy : null };
-    });
+    }));
   }
 
   async function listProjects() {
@@ -528,7 +548,7 @@ export async function createSoloFactoryServer(options = {}) {
         const notices = briefNotices(validated.brief);
         // A brief reopened from a past run sets aside the stopped run holding the project's queue, like Start over.
         // The draft names that run (replaces) when it was opened; if another run holds the queue now, the owner
-        // must see that before its files are rolled back. A completed run is never rolled back or dismissed.
+        // must see that before its files are rolled back. A completed run is never dismissed here; it is rolled back only by POST /rollback.
         let blocker = null;
         if (body.revises !== undefined) {
           if (typeof body.revises !== "string" || !/^[a-z0-9-]+$/.test(body.revises)) return json(response, 400, { error: "revises must be a run id.", code: "revise_invalid" });
@@ -562,8 +582,10 @@ export async function createSoloFactoryServer(options = {}) {
         // Superseded plans grow without bound (36MB on a long run) and the 1.5s poll crashed the tab; the UI never reads them.
         const [{ recoveryPhaseHistory, ...annotated }] = await annotateJobs(jobProject.get(job.id) ?? active.id, [job]);
         // Only a parked follow-on has a fallback release, and finding it reads every run's state file.
-        const previous = job.followOn && PARKED.has(job.state) && !job.dismissed ? previousRelease(job, await jobStore.list()) : null;
-        return json(response, 200, { job: { ...annotated, idleGaps: await jobStore.idleGaps(job.id), previousRelease: previous }, events: await jobStore.events(job.id) });
+        const projectId = jobProject.get(job.id) ?? active.id;
+        const list = job.followOn ? await jobStore.list() : [job];
+        const previous = job.followOn && PARKED.has(job.state) && !job.dismissed ? previousRelease(job, list) : null;
+        return json(response, 200, { job: { ...annotated, ...(await releaseExtras(projectId, job, list, projectBusy(projectId))), idleGaps: await jobStore.idleGaps(job.id), previousRelease: previous }, events: await jobStore.events(job.id) });
       }
       const telemetryMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/telemetry$/);
       if (request.method === "GET" && telemetryMatch) {
@@ -651,6 +673,71 @@ export async function createSoloFactoryServer(options = {}) {
           return { status: 202, body: { job } };
         });
         if (outcome.status === 202) await drain();
+        return json(response, outcome.status, outcome.body);
+      }
+      const backupMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/backup-confirmed$/);
+      if (request.method === "POST" && backupMatch) {
+        // The owner backed up data/. A running build reads the file at deploy; a run parked waiting for it resumes
+        // straight into the deploy (no review, repair or model call).
+        const id = backupMatch[1];
+        const projectId = jobProject.get(id) ?? active.id;
+        const jobStore = storeOfJob(id);
+        await settleParked(projectId, id);
+        const outcome = await exclusive(async () => {
+          const job = await jobStore.read(id);
+          if (!backupStatus(job, null).needed) return { status: 409, body: { error: "This run does not change how the app stores its data, so it needs no backup." } };
+          const confirmation = await writeConfirmation(jobStore.jobDir(id), job);
+          const waiting = PARKED.has(job.state) && job.error?.code === "backup_unconfirmed" && !job.dismissed;
+          if (waiting) {
+            Object.assign(job, { dataBackupConfirmed: confirmation, dataBackupConfirmedAt: confirmation.at });
+            await jobStore.writeState(job);
+          }
+          await jobStore.appendEvent(id, { type: "data.backup_confirmed", state: job.state, message: "Owner confirmed data/ is backed up." });
+          return { status: 202, body: { dataBackup: backupStatus(job, confirmation), resumed: waiting }, waiting };
+        });
+        if (outcome.waiting) await enqueue(projectId, id, "resume", { front: true });
+        return json(response, outcome.status, outcome.body);
+      }
+      const rollbackMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/rollback$/);
+      if (request.method === "POST" && rollbackMatch) {
+        const id = rollbackMatch[1];
+        const projectId = jobProject.get(id) ?? active.id;
+        const jobStore = storeOfJob(id);
+        const outcome = await exclusive(async () => {
+          const job = await jobStore.read(id);
+          if (projectBusy(projectId)) return { status: 409, body: { error: "This project has a running or queued run; roll back after it parks or finishes." } };
+          const list = await jobStore.list();
+          const prior = rollbackTarget(job, list);
+          if (!prior) return { status: 409, body: { error: "Only the newest shipped update of a project, with an earlier release to go back to, can be rolled back." } };
+          const tag = `solofactory/rolled-back/${job.id}`;
+          await jobStore.commit(`Before rolling back ${job.id}`); // hand edits since the release go under the tag too, not lost to the reset
+          await jobStore.git("tag", tag); // the rolled-back code stays recoverable by hand
+          // relaunch never calls the model, so no provider is needed.
+          const appFactory = (run) => factories.get(run.id) ?? new SoloFactory({ store: jobStore, provider: { id: run.provider ?? "none" }, maxRepairs, autoStartRepairs });
+          if (job.deployment?.status === "live") await appFactory(job).stopDeployment(job.id);
+          const after = await dataShape(jobStore.appDir(job.id));
+          // ponytail: a run deployed before shapes were recorded has none to compare; any data/ then gets the restore statement.
+          const changes = job.dataShape ? shapeChanges(job.dataShape, after) : [];
+          const restore = job.dataShape ? changes.length > 0 : after.length > 0;
+          await jobStore.reset(job.baseCommit);
+          const name = prior.brief?.workingName || prior.id;
+          const message = restore
+            ? `Rolled back to ${name}. Press Stop, restore the copy of data/ you backed up before this update, then press Relaunch so the app reads it.`
+            : `Rolled back to ${name}. Your app's data kept the same shape, so the older version can read it.`;
+          const rolled = await jobStore.read(id);
+          rolled.rolledBack = true;
+          rolled.rollback = { at: new Date().toISOString(), tag, previousJobId: prior.id, previousName: name, changes: changes.slice(0, 5), restore, message };
+          await jobStore.writeState(rolled);
+          await jobStore.appendEvent(id, { type: "job.rolled_back", state: rolled.state, tag, message: changes.length ? `${message} Changed: ${changes.slice(0, 5).join("; ")}.` : message });
+          const factory = appFactory(prior);
+          factories.set(prior.id, factory); // keeps the relaunched child reachable for stop-app and shutdown
+          try { await factory.relaunch(prior.id); }
+          catch (error) {
+            rolled.rollback.relaunchError = error.message;
+            await jobStore.writeState(rolled);
+          }
+          return { status: 200, body: { job: rolled, previous: await jobStore.read(prior.id) } };
+        });
         return json(response, outcome.status, outcome.body);
       }
       const featureRecoveryMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/recovery-(plan|start)$/);
