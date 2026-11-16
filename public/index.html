@@ -631,7 +631,7 @@
 <button onClick="{{cfg.close}}" style="min-height: 40px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">Done</button>
 </div>
 <div style="flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; padding: 20px 24px 28px">
-<p style="margin: 0; font-size: 13px; color: var(--muted)">Profiles save to profiles.json in the factory home; other settings are read only for now. A setting your environment already sets is locked here and names the variable. Changes apply from the next run: a run in progress keeps the settings it started with.</p>
+<p style="margin: 0; font-size: 13px; color: var(--muted)">Profiles save to profiles.json in the factory home; the other settings are shown for information: each names the variable that changes it. Changes apply from the next run: a run in progress keeps the settings it started with.</p>
 <sc-for list="{{cfg.sections}}" as="sec" hint-placeholder-count="3">
 <section style="display: flex; flex-direction: column; gap: 4px">
 <h3 style="margin: 0 0 6px; font-size: 15px; font-weight: 600">{{sec.title}}</h3>
@@ -653,6 +653,7 @@
 <span style="font-size: 12px; color: {{fd.envColor}}; font-family: ui-monospace, Menlo, monospace">{{fd.envLine}}</span>
 </div>
 <div style="flex: 0 1 260px; min-width: 0; display: flex; gap: 8px; align-items: center">
+<sc-if value="{{fd.isText}}" hint-placeholder-val="{{false}}"><span id="{{fd.id}}" style="font-size: 14px; color: var(--text1)">{{fd.text}}</span></sc-if>
 <sc-if value="{{fd.isSelect}}" hint-placeholder-val="{{false}}">
 <select id="{{fd.id}}" value="{{fd.value}}" onChange="{{fd.onChange}}" disabled="{{fd.locked}}" style="width: 100%; min-height: 40px; padding: 6px 10px; border: 1px solid var(--line2); border-radius: 9px; background: var(--raise); color: var(--fg)">
 <sc-for list="{{fd.options}}" as="op" hint-placeholder-count="2"><option value="{{op.v}}">{{op.label}}</option></sc-for>

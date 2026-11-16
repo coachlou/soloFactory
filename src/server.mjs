@@ -237,6 +237,8 @@ export async function createSoloFactoryServer(options = {}) {
           project: project.name,
           projectId: project.id,
           promise: job.brief?.promise ?? null,
+          workingName: job.brief?.workingName ?? null,
+          dismissed: !!job.dismissed,
           state: job.state,
           stage: job.stage ?? null,
           startedAt: job.startedAt ?? null,
@@ -856,7 +858,8 @@ async function discoverProjects(root) {
       // directly under root only git repos do, so .aai/, .ailib/, node_modules/ never appear.
       if (!parent && !(await stat(path.join(root, id, ".git")).catch(() => null))) continue;
       const runs = await new JobStore(path.join(root, id)).list();
-      const last = runs[0];
+      // Queued runs wait behind the run that holds the project, so that run (often a parked one) is the one shown.
+      const last = runs.find((r) => r.state !== "queued" && !r.dismissed) ?? runs.find((r) => !r.dismissed) ?? null;
       projects.push({ id, name: entry.name, runCount: runs.length, lastRun: last ? { id: last.id, state: last.state, createdAt: last.createdAt, workingName: last.brief?.workingName ?? null } : null });
     }
   }

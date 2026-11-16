@@ -862,13 +862,16 @@ class Component extends DCLogic {
       : ['Build a portal where members see their coaching notes', 'Adopt the app in my existing folder']
     ).map((text) => ({ text: text, use: () => this.setState({ draft: text }) }));
 
-    const pickRows = s.threads[s.pid].filter((m) => m.type === 'pick').map((m) => {
+    // The Work list holds every project's runs; another project's rows show only its sent runs.
+    const pickRows = Object.keys(s.threads).flatMap((tp) => s.threads[tp].filter((m) => m.type === 'pick' && (tp === s.pid || m.sent))).map((m) => {
       const rr = s.runs.find((x) => x.id === m.runId);
       if (rr && rr.state === 'dismissed') return null;
+      const away = !!rr && rr.pid !== s.pid;
       let g = 'done';
       let st = 'Sent';
       let order = 0;
-      if (!m.sent) { g = 'needs'; st = 'Plan waiting for you in the chat'; }
+      if (away && rr.state === 'queued') { g = 'queued'; st = 'Queued'; order = 1e6; }
+      else if (!m.sent) { g = 'needs'; st = 'Plan waiting for you in the chat'; }
       else if (m.kind === 'prd') { g = 'needs'; st = 'Interview in progress'; }
       else if (rr && ['paused', 'stuck', 'revising'].indexOf(rr.state) >= 0) { g = 'needs'; st = stateWord[rr.state]; }
       else if (rr && (rr.state === 'building' || rr.state === 'pausing')) { g = 'running'; st = this.runLine(rr, s.runs); order = -1; }
@@ -884,7 +887,7 @@ class Component extends DCLogic {
         this.setState({ runs: arr });
       };
       return {
-        g: g, order: order, rid: rr ? rr.id : 0,
+        g: g, order: order, rid: rr ? rr.id : 0, away: away, pid: rr ? rr.pid : s.pid, jobId: rr ? rr.jobId : null,
         title: m.ask, kind: K[m.kind].label, chipBg: K[m.kind].chipBg, chipFg: K[m.kind].chipFg, state: st,
         aria: rr ? 'Open the run: ' + m.ask : m.ask + ', in the chat',
         bg: picked ? 'var(--raise)' : 'transparent', weight: g === 'needs' ? '600' : '500',
@@ -991,7 +994,7 @@ class Component extends DCLogic {
               id: 'cfg-' + fd.key, label: fd.label, help: fd.help,
               envLine: fd.locked ? 'Set by ' + fd.env + ' in your environment' : (fd.env || ''),
               envColor: fd.locked ? 'var(--text2)' : 'var(--muted)',
-              locked: !!fd.locked,
+              locked: !!fd.locked, isText: false, text: '',
               isSelect: fd.type === 'select', isInput: fd.type === 'number' || fd.type === 'text', isToggle: fd.type === 'toggle',
               inputType: fd.type === 'number' ? 'number' : 'text', min: fd.min || '', max: fd.max || '',
               hasUnit: !!fd.unit, unit: fd.unit || '',
@@ -1115,6 +1118,13 @@ function feedbackLinks(issues, mode, title, fingerprint) {
     github: `${issues.base}/new?template=${mode}.yml&title=${encodeURIComponent(`${mode === "problem" ? "[Problem]" : "[Improvement]"} ${t}`)}`
   };
 }
+// A settings row that cannot be changed here shows its value as plain text instead of a control.
+function readOnlyField(f) {
+  const text = f.isToggle ? f.toggleText : f.isSelect ? (f.options.find((o) => o.v === f.value)?.label ?? f.value) : f.value + (f.hasUnit ? " " + f.unit : "");
+  // The page shows the built-in defaults, not what this factory was started with, so the row says so.
+  return { isText: true, text: text || "None", isSelect: false, isInput: false, isToggle: false, hasUnit: false, envColor: "var(--muted)",
+    envLine: f.envLine ? "Default. To change it, set " + f.envLine + " before starting the factory." : "Default." };
+}
 function backgroundText(title, jobState, queued) { return `“${title}” is ${jobState} in the background${queued ? ` · ${queued} queued` : ""}.`; }
 function updateLabel(result) { return result?.newer ? "Update available" : result?.disabled ? "Update checks off" : result?.error ? "Couldn't check" : `Up to date (${result?.current ?? "?"})`; }
 
@@ -1184,6 +1194,12 @@ class Live extends Component {
     try { if (pid) localStorage.setItem("solofactory.profile." + pid, name); else localStorage.setItem("solofactory.profile", name); } catch {}
     this.setState(pid ? { profilePick: { ...this.state.profilePick, [pid]: name } } : { profileDefault: name });
   }
+  // Settings edits the profile the Guide box shows: it sets this project's pick and the default for other projects.
+  useProfile(name, extra = {}) {
+    const pid = this.state.pid;
+    try { if (pid) localStorage.setItem("solofactory.profile." + pid, name); localStorage.setItem("solofactory.profile", name); } catch {}
+    this.setState({ ...extra, profileDefault: name, ...(pid ? { profilePick: { ...this.state.profilePick, [pid]: name } } : {}) });
+  }
   // What a Guide turn or a new run uses: the profile's provider and models. Demo mode always uses the fixture provider.
   ai() {
     if (state.config?.fixtureMode) return { provider: "fixture", models: null };
@@ -1195,11 +1211,10 @@ class Live extends Component {
   async saveProfiles(custom, pick) {
     const saved = await api("/api/profiles", { method: "PUT", body: { custom } });
     state.config.profiles.custom = saved.custom;
-    try { localStorage.setItem("solofactory.profile", pick); } catch {}
-    this.setState({ profEdit: null, profileDefault: pick });
+    this.useProfile(pick, { profEdit: null });
   }
   profileSection() {
-    const s = this.state, all = this.profiles(), shown = this.profileNamed(s.profileDefault) || all[0];
+    const s = this.state, all = this.profiles(), shown = this.profile();
     if (!shown) return { title: "AI and models", fields: [], hasBar: false, hasPrompt: false };
     const edit = s.profEdit && s.profEdit.base === shown.name ? s.profEdit : null;
     const rows = edit ? edit.models : profileRows(shown);
@@ -1209,14 +1224,14 @@ class Live extends Component {
       this.setState({ profEdit: { base: shown.name, provider: shown.provider, models, name: edit?.name ?? "", error: "" } });
     };
     const runsOn = shown.provider === "codex" ? "Codex" : "Claude Code";
-    const field = (o) => ({ envLine: "", envColor: "var(--muted)", locked: false, isSelect: false, isInput: false, isToggle: false, inputType: "text", min: "", max: "", hasUnit: false, unit: "", options: [], on: false, toggleText: "", ...o });
+    const field = (o) => ({ envLine: "", envColor: "var(--muted)", locked: false, isText: false, text: "", isSelect: false, isInput: false, isToggle: false, inputType: "text", min: "", max: "", hasUnit: false, unit: "", options: [], on: false, toggleText: "", ...o });
     const efforts = PROFILE_EFFORTS.map((e) => ({ v: e, label: e[0].toUpperCase() + e.slice(1) }));
     const fields = [field({
       id: "cfg-profile", label: "Profile", isSelect: true, value: shown.name,
-      help: "Runs on " + runsOn + ". Used by every project unless you pick another profile for a project from the Guide box." + (shown.builtin ? " Built in: change a row to save your own copy." : ""),
+      help: "Runs on " + runsOn + ". This project uses it, and so do new projects. The Profile button in the Guide box switches it for one project." + (shown.builtin ? " Built in: change a row to save your own copy." : ""),
       options: all.map((p) => ({ v: p.name, label: p.name + (p.builtin ? " (built in)" : " · " + (p.provider === "codex" ? "Codex" : "Claude Code")) })),
       // Read the pick before any setState: a repaint resets the select to the shown profile.
-      onChange: (e) => { const name = e.target.value; if (s.profEdit && !confirm("Discard the unsaved changes to " + s.profEdit.base + "?")) return this.setState({}); this.setState({ profEdit: null }); this.pickProfile("", name); }
+      onChange: (e) => { const name = e.target.value; if (s.profEdit && !confirm("Discard the unsaved changes to " + s.profEdit.base + "?")) return this.setState({}); this.useProfile(name, { profEdit: null }); }
     })];
     for (const [tier, label] of PROFILE_TIERS) {
       const v = rows[tier] || { model: "", effort: "medium" };
@@ -1300,7 +1315,7 @@ class Live extends Component {
       state.projects = projects.projects;
       state.project = projects.active;
       state.board = projects;
-      state.jobs = (await api("/api/jobs")).jobs;
+      [state.jobs, state.work] = await Promise.all([api("/api/jobs").then((r) => r.jobs), api("/api/board").catch(() => null)]);
       this.sync();
       // The shown run's events and spend feed the Q&A, the activity list and the recovery box.
       const r = this.shownRun();
@@ -1460,6 +1475,9 @@ class Live extends Component {
     for (const p of state.projects) {
       threads[p.id] = [];
       if (p.id === state.project) [...state.jobs].reverse().forEach((job) => runOf(p.id, job));
+      // Another project's runs come from the board (every project, by state); its newest run if the board is missing.
+      else if (state.work) Object.values(state.work.columns).flat().filter((c) => c.projectId === p.id && !c.dismissed)
+        .forEach((c) => runOf(p.id, { ...c, id: c.jobId, brief: { workingName: c.workingName, promise: c.promise } }));
       else if (p.lastRun) runOf(p.id, p.lastRun);
     }
     const here = threads[state.project] ?? (threads[state.project || ""] = []);
@@ -1773,8 +1791,9 @@ class Live extends Component {
         api("/api/projects", { method: "POST", body: { name } }).then(() => this.refresh()).then(() => this.loadDraft()).catch(showError);
       };
     }
-    for (const sec of v.cfg.sections) for (const f of sec.fields) { f.locked = true; f.onChange = () => later("Changing settings here"); f.onToggle = f.onChange; }
-    // Only AI and models is live: it is the profile picker. The other sections stay read only for now.
+    // Only AI and models is live: it is the profile picker. The other sections are information only for now, so they
+    // show their values as text, not as controls that look editable.
+    for (const sec of v.cfg.sections) for (const f of sec.fields) Object.assign(f, readOnlyField(f));
     v.cfg.sections[0] = this.profileSection();
     v.cfg.status = this.state.profEdit ? "Unsaved profile changes" : "Profiles and models";
     // The pick card names the draft spec the Guide wrote and opens it in Documents, so it can be read and revised before sending.
@@ -1789,6 +1808,13 @@ class Live extends Component {
     // Queue order lives on the server: each move swaps the run with its neighbour in the project's queue.
     const move = (rid, direction) => { const r = this.state.runs.find((x) => x.id === rid); if (r?.jobId) this.post(r, "queue-move", { direction }); };
     for (const q of v.queue) q.up = () => move(q.id, "up");
+    // A row from another project switches to it, then opens the run there.
+    const names = Object.fromEntries(state.projects.map((p) => [p.id, p.name]));
+    for (const g of v.groups) for (const it of g.items) if (it.away) {
+      it.state = (names[it.pid] || it.pid) + " · " + it.state;
+      it.aria = "Switch to " + (names[it.pid] || it.pid) + " and open the run: " + it.title;
+      it.open = () => { this.setState({ pid: it.pid, selRun: 0, panel: "run" }); this.select(it.pid).then(() => { const r = this.state.runs.find((x) => x.jobId === it.jobId); if (r) this.setState({ selRun: r.id, panel: "run" }); }).catch(showError); };
+    }
     for (const g of v.groups) for (const it of g.items) if (it.queued) { it.up = () => { if (!it.noUp) move(it.rid, "up"); }; it.down = () => { if (!it.noDown) move(it.rid, "down"); }; }
     if (v.run.stops) for (const stop of v.run.stops) stop.canRestart = false;
     const board = state.board;

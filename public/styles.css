@@ -5,8 +5,8 @@ body{margin:0}
 
 *{box-sizing:border-box}
 button{font:inherit;cursor:pointer}
-input{font:inherit}
-button:focus-visible,input:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+input,select,textarea{font:inherit}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
 a{color:var(--fg)}a:hover{color:var(--fg-strong)}
 
 .md>:first-child{margin-top:0}.md>:last-child{margin-bottom:0}
