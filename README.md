@@ -28,8 +28,8 @@ npm start
 
 Open <http://127.0.0.1:4173>. If that port is taken, the server says whether it is another SoloFactory (open that one) or another app (start with `PORT=5000 npm start`). **Menu** → **Manual** at the foot of the left rail opens the illustrated user
 manual (`docs/manual/index.html`, also served at `/manual`). Answer the Factory Guide one turn at a time in the middle of the
-page, read or edit the brief in the **Documents** panel beside it (View and Edit), and choose **Queue for the factory**:
-the Guide gives the brief a final review first and asks if anything is missing. Everything saves as you go. Every check in the brief must be provable offline on
+page, read or edit the brief in the **Documents** panel beside it (*Draft spec*, with Read and Edit), and choose **Send to the factory**:
+the Guide gives the brief one final review first and asks if anything is missing. **Revise the spec** on a stopped or shipped run reopens its brief as a draft to resubmit. Everything saves as you go. Every check in the brief must be provable offline on
 this machine, so the Guide rewrites checks that need a live account, an operating-system change,
 the real time of day or a fixed drive path, and moves the live part to a **Checked by hand after
 install** list that no build or review chases. A keyword scan sends a ready brief back to the

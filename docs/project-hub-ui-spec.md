@@ -137,8 +137,9 @@ A profile names a provider and, for each stage tier (Guide, planning and review,
 - **Storage.** Custom profiles save to `profiles.json` in the factory home through `PUT /api/profiles`, which
   refuses a built-in name, a duplicate, an unknown provider or effort, and a missing tier. The default profile and
   each project's pick stay in the browser (`solofactory.profile`, `solofactory.profile.<project>`).
-- **Per project.** The Guide box button reads Profile: name and cycles through the profiles whose provider is
-  signed in. Interview turns and Send to the factory carry that profile's provider and models; the job stores the
+- **Per project.** Settings shows the open project's profile; picking one there sets this project's pick and the
+  default for new projects. The Guide box button reads Profile: name and cycles this project only through the
+  profiles whose provider is signed in. Interview turns and Send to the factory carry that profile's provider and models; the job stores the
   models and the run log records them, so a run keeps the profile it started with.
 
 ## Attachments
@@ -179,7 +180,7 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | # | Function | Result |
 |---|---|---|
 | 1 | Page loads with no console errors | Pass after guarding projects with no thread yet |
-| 2 | WORK rail lists runs across projects; clicking one switches project and opens it | Pass |
+| 2 | WORK rail lists runs across projects; clicking one switches project and opens it | Pass; recheck on an upgraded 0.10.17 install (:4392, four projects) found only the active project listed, fixed to read `/api/board`: Needs you 3, Queued 1, Done 2, and gamma's row switches to gamma with its run open |
 | 3 | Project switcher lists projects and switches | Pass |
 | 4 | Guide thread and composer render for the selected project | Pass |
 | 5 | Documents panel lists one brief per run and opens it read-only | Pass |
@@ -230,3 +231,4 @@ Driven on an isolated seed server (:4380, temporary home, projects habit-tracker
 | 50 | Check for updates shows the result beside the Menu entry | Pass (live on :4381, "Up to date") |
 | 51 | Background-run strip and tab title count | Pass (unit test on the texts; no background run on the preview to show live) |
 | 52 | Picking Codex in Settings shows its rows (Sol medium, Sol low, Terra low, no advisor) and picking Claude restores Claude's; a Guide turn then posts provider codex with those models | Pass after reading the pick before the repaint reset the select (live on :4381; turn body captured with the network call stubbed) |
+| 53 | Settings and the Guide Profile button agree both ways; model selects and inputs use the page font; non-profile Settings rows show as text with their default and variable, not as controls | Pass (live on :4391, test/settings-ui.test.mjs) |

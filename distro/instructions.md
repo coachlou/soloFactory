@@ -67,8 +67,13 @@ bash "${CLAUDE_PLUGIN_ROOT}/library/ambient-folder/install.sh" solofactory <targ
    factory. Each project is a workspace in `projects/<name>/` — selected in the header, with
    its own `.aai/` and the generated app at its root.
 
-Re-running the installer (or `bash <target>/.ailib/ambient-folder/install.sh solofactory <target>`) is the **update** path: `.ailib/` is refreshed,
-`.aai/` and `projects/` are untouched.
+**Update** ("update my solofactory", or the owner pasted the app's **Update** prompt):
+follow **Updating an existing install** in `INSTALL.md` here (U1 to U3). It checks
+`/api/health` for a running build before stopping the server, re-runs the installer
+(`bash <target>/.ailib/ambient-folder/install.sh solofactory <target>` from a local copy),
+confirms the `app:` version in `<target>/.ailib/manifest.yaml` moved, and restarts. The
+installer refreshes `.ailib/` only: `.aai/` and `projects/` (every project, run and
+interview) are untouched, and a run that was building comes back interrupted with Resume.
 
 ## Operate — inside an installed folder
 

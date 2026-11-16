@@ -40,9 +40,11 @@ app". SoloFactory is this folder's agentic function; projects are its output.
    browser, and chat, read `.aai/memory/solofactory/errors.jsonl` (newest last).
 4. **Resume / recover**: interrupted runs are recoverable from the UI; point the
    owner there rather than editing `state.json` by hand.
-5. **Update the factory**: re-run the installer from the library
-   (`install.sh <this folder>`); it re-syncs `.ailib/` and leaves `.aai/` and
-   `projects/` alone.
+5. **Update the factory**: follow "Updating an existing install" in SoloFactory's
+   `INSTALL.md` (the app's Update button gives the command to read it). It checks
+   `/api/health` for a running build first, re-runs the installer (`install.sh <this
+   folder>`), which re-syncs `.ailib/` and leaves `.aai/` and `projects/` alone, and
+   confirms the version moved.
 
 ## Outputs
 

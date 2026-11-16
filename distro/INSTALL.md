@@ -751,9 +751,24 @@ You arrive here from **Step 0** with a confirmed install at `<SF>`. Nothing from
 git, Node, and the coding agent are already in place. Updating is the same command as
 installing: it refreshes the machinery and leaves all their work untouched.
 
-## U1. Stop the server
+## U1. Check for a running build, then stop the server
 
-Updating underneath a running server leaves it serving stale code until restarted.
+Updating underneath a running server leaves it serving stale code until restarted. First
+check whether anything is building, because stopping the server stops the build too:
+
+```sh
+curl -s http://127.0.0.1:4173/api/health
+```
+
+If it prints `"activeRuns":[]` (or nothing, because the server isn't running), go on. If
+`activeRuns` lists a run, ask the owner:
+
+> Something is building right now. You can let it finish and update afterwards, or press
+> **Pause** on it in the page and update now. Either way nothing is lost: a paused run picks
+> up where it stopped when you press **Resume**.
+
+If they stop it anyway, the run comes back after the update marked interrupted, with a
+**Resume** button. Then:
 
 > If SoloFactory is running right now, go to the text window it's running in and press
 > `Control` and `C` together once. If it isn't running, nothing to do. Tell me either way.
@@ -883,13 +898,14 @@ could change or remove them:
 - New builds use `npm test` with a plain `node --test` script and run the whole suite on the first feature, so a broken test command fails early instead of costing a repair at the end. Existing apps are unchanged.
 - Nothing to migrate by hand.
 
-**If the owner installed or updated from a `solofactory-0.11.0-alpha.<n>.zip`** (an alpha tester), say in one breath that this is a test build with a new Brief page, and that the *Report a problem* button is how they send feedback. What you need to know yourself:
+**If they were below 0.11.0 before the update** (alpha testers included), say in one breath that the page has a new layout and nothing they built is gone. What you need to know yourself:
 
-- The interview and review screens are one **Brief** page: the brief on the left, the Guide on the right, a View/Edit switch and a queue button. Edit mode changes a section in place; everything saves on its own. **Queue** asks the Guide for one final review first, which uses one extra Guide turn.
-- Feedback: *Report a problem* shows **Open GitHub** (coachlou/soloFactory issues) and **Copy & open email** (support@coachlou.com). Ask them to start the title with `[alpha]`.
-- The update pill appears once 0.11.0 or later is released. To go back to the stable release before that, run the normal online update (U2). Projects and runs stay in place.
-- From alpha.2, a Claude turn stops at 150 tool steps (`agent_turn_cap`), and repairs stop when the same check keeps failing the same way although the code changed (*Repeated failure despite code changes*). Both park the run with the files kept; see Troubleshooting.
-- Their tester guide is `docs/alpha-testing.md` in the zip and, after install, `.ailib/solofactory/app/docs/alpha-testing.md`.
+- The left rail holds the **Work** list (every run of every project: Needs you, Running, Queued, Done) and **Menu** (New project, Feedback, Manual, Settings, Check for updates). The Factory board page is gone; the Work list replaces it.
+- The Guide's conversation fills the middle. The brief shows in **Documents** as *Draft spec*, with Read and Edit. **Send to the factory** runs the final review once and queues the run; **Revise the spec** on a stopped or shipped run reopens it as a draft with **Resubmit to the factory**.
+- Every control from before is still there, on the run card, the Run panel or a run's `···` menu: Pause after this step, Cancel, Resume, Restart from here, queue order and Remove from queue, Copy recovery packet, Start over from scratch, Dismiss, Report this run, and the Recovery box.
+- **Settings → Profiles and models** has built-in Claude and Codex profiles and their own custom ones; the profile picked there is the open project's and the default for new projects, and the **Profile** button in the Guide box switches one project. The other Settings rows are read only and show their default as text. `SOLOFACTORY_*` model settings still win.
+- Feedback: **Menu → Feedback** or **Report this run** opens the form; **Copy & open email** goes to support@coachlou.com.
+- Alpha testers: this replaces the alpha zip; the update notice works as usual from here on. Nothing to migrate by hand.
 
 **If they were below 0.10.2 before the update**, a run on Linux or WSL that parked as *Repair budget exhausted* even though its tests passed (the log ends in `EINVAL: invalid argument, fsync`) will pass its checks now. If the card offers **Resume** (it says *SoloFactory changed since this gate failed*), choose it: the check reruns for free and the run carries on. Otherwise choose **Prepare repair plan**. The repair feature normally runs its checks before building anything, so a feature that passes them goes on to review without a rebuild. If the test runner ever crashes after every test passed, the run now stops with an infrastructure error instead of spending its repairs.
 
@@ -915,6 +931,9 @@ update is finished once U4 holds.
    their own) → A4 / B3 to put Node 24 back.
 4. The page loads at `http://127.0.0.1:4173` with a provider signed in.
 5. The project selector lists the projects they had before.
+6. Each project's runs show in the Work list in the state they were in: shipped and cancelled
+   under Done, paused and failed under Needs you, queued under Queued. A run that was building
+   when the server stopped comes back under Needs you as interrupted, with **Resume**.
 
 If any one of these fails, you are not done. Fix it.
 
