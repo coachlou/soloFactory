@@ -1,0 +1,16 @@
+#!/bin/sh
+# Tier 1 (docs/four-tier-gates-spec.md G3): every staged .mjs file must parse. Seconds, not the suite.
+# It checks the staged copy (the index), not the working file. Turn the hooks on once per clone: npm run hooks
+status=0
+tmp=$(mktemp "${TMPDIR:-/tmp}/sf-pre-commit.XXXXXX") || exit 1
+mv "$tmp" "$tmp.mjs"; tmp="$tmp.mjs"
+for f in $(git diff --cached --name-only --diff-filter=ACMR -- '*.mjs'); do
+  git show ":$f" > "$tmp" 2>/dev/null || continue
+  if ! out=$(node --check "$tmp" 2>&1); then
+    echo "pre-commit: $f does not parse:" >&2
+    printf '%s\n' "$out" | sed "s|$tmp|$f|g" | head -6 >&2
+    status=1
+  fi
+done
+rm -f "$tmp"
+exit $status

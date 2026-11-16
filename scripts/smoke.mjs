@@ -7,6 +7,8 @@
 //
 // Real runs cost about $4-15 and 15-50 min each: required before a release that changes prompts, adapters,
 // the Guide skill or the controller (scripts/smoke-gate.mjs checks it at the version bump); never on a schedule. One run per brief is noisy; read it as a tripwire.
+// Each row also records minutes per stage (planning, implement, review, repair, gates); a stage over its budget is
+// printed after the run and shown in the table's Over budget column. SMOKE_BUDGETS overrides budgets, e.g. "review=2".
 // Each run gets a fresh home under .solofactory/smoke-runs/ and an in-process server on an ephemeral
 // port (never :4173). Model and effort come from the usual SOLOFACTORY_* env, e.g.
 //   SMOKE_ARM="opus medium" SOLOFACTORY_CLAUDE_REASONING_EFFORT=medium node scripts/smoke.mjs
@@ -17,7 +19,7 @@ import { execFileSync } from "node:child_process";
 import { appendFile, mkdir, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { formatSmokeTable, summarizeRun } from "../src/measure.mjs";
+import { formatSmokeTable, overBudget, parseBudgets, summarizeRun } from "../src/measure.mjs";
 import { smokeNodeProblem } from "./smoke-gate.mjs";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -25,6 +27,8 @@ const ledger = process.env.SMOKE_LEDGER ?? path.join(repo, "smoke", "results.jso
 const commit = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
 const arm = process.env.SMOKE_ARM ?? "";
 const SETTLED = new Set(["completed", "failed", "cancelled", "interrupted", "paused"]);
+// Stage budgets (docs/four-tier-gates-spec.md G2) flag a slow stage; they never fail a run. SMOKE_BUDGETS="review=2,planning=10".
+const budgets = parseBudgets(process.env.SMOKE_BUDGETS);
 
 async function rowFor(runDir, extra) {
   const state = JSON.parse(await readFile(path.join(runDir, "state.json"), "utf8"));
@@ -58,6 +62,8 @@ async function run(briefFile) {
     }
     const row = await rowFor(path.join(home, "projects", "default", ".solofactory", "runs", job.id), { arm, commit });
     await appendFile(ledger, `${JSON.stringify(row)}\n`);
+    const over = overBudget(row, budgets);
+    console.error(over.length ? `${name}: over budget: ${over.join("; ")}` : `${name}: every stage within budget`);
     return row;
   } finally {
     await app.close();
@@ -69,10 +75,10 @@ if (command === "--help") {
   console.error("Usage: node scripts/smoke.mjs [brief.json ...] | summarize <run dir>... | table");
 } else if (command === "summarize") {
   // Commit is unknown for an old run; the row says so rather than guessing.
-  console.log(formatSmokeTable(await Promise.all(rest.map((dir) => rowFor(dir, { arm, commit: "?" })))));
+  console.log(formatSmokeTable(await Promise.all(rest.map((dir) => rowFor(dir, { arm, commit: "?" }))), budgets));
 } else if (command === "table") {
   const rows = (await readFile(ledger, "utf8").catch(() => "")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
-  console.log(formatSmokeTable(rows));
+  console.log(formatSmokeTable(rows, budgets));
 } else {
   const briefs = command ? [command, ...rest] : (await readdir(path.join(repo, "smoke", "briefs"))).filter((f) => f.endsWith(".json")).sort().map((f) => path.join(repo, "smoke", "briefs", f));
   // Every brief is checked before the first run starts, so a runtime mismatch spends nothing.
@@ -88,5 +94,5 @@ if (command === "--help") {
   }
   const rows = [];
   for (const brief of briefs) rows.push(await run(brief));
-  console.log(formatSmokeTable(rows));
+  console.log(formatSmokeTable(rows, budgets));
 }

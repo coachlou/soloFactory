@@ -160,14 +160,53 @@ export function summarizeRun(state, events, { brief = state.brief?.workingName, 
     unattributedFindings: findings.filter((e) => !e.feature).length,
     costUsd, costPerFeature: costUsd !== null && done.length ? costUsd / done.length : null,
     wallMin: Math.round(m.wallMs / 60000),
+    // Where the minutes went (docs/four-tier-gates-spec.md G2): agent time by stage, and controller gates.
+    stageMin: Object.fromEntries([...STAGES.map((stage) => [stage, minutes(m.buckets.reduce((sum, b) => sum + (b.agent.byActivity[stage] ?? 0), 0))]), ["gates", minutes(m.gateMs)]]),
   };
 }
 
+const STAGES = ["planning", "implement", "review", "repair"];
+const minutes = (ms) => Math.round(ms / 6000) / 10;
+
+// Tripwires, not failures: a smoke run over one of these is worth a look (Claude 0.11.0 runs sit well under them).
+// perFeature budgets scale with the features the run finished (at least one).
+export const STAGE_BUDGETS = {
+  planning: { min: 8 },
+  implement: { perFeature: 3 },
+  review: { perFeature: 1.5 },
+  repair: { min: 5 },
+  gates: { min: 3 },
+};
+
+// "review=2,planning=10" (SMOKE_BUDGETS): a number replaces that stage's budget in its own unit.
+export function parseBudgets(text = "") {
+  const budgets = structuredClone(STAGE_BUDGETS);
+  for (const part of String(text).split(",").map((item) => item.trim()).filter(Boolean)) {
+    const [stage, value] = part.split("=").map((item) => item.trim());
+    const n = Number(value);
+    if (!budgets[stage] || !Number.isFinite(n) || n <= 0) throw new Error(`SMOKE_BUDGETS: "${part}" is not <stage>=<minutes> for one of ${Object.keys(budgets).join(", ")}`);
+    budgets[stage] = budgets[stage].perFeature !== undefined ? { perFeature: n } : { min: n };
+  }
+  return budgets;
+}
+
+// The stages of one ledger row over budget, as "review 19.0 min > 7.5". Rows from before stageMin existed have none.
+export function overBudget(row, budgets = STAGE_BUDGETS) {
+  if (!row?.stageMin) return [];
+  const features = Math.max(1, row.features ?? 0);
+  return Object.entries(budgets).flatMap(([stage, budget]) => {
+    const limit = budget.perFeature !== undefined ? budget.perFeature * features : budget.min;
+    const spent = row.stageMin[stage];
+    return typeof spent === "number" && spent > limit ? [`${stage} ${spent.toFixed(1)} min > ${Math.round(limit * 10) / 10}`] : [];
+  });
+}
+
 const usd = (n) => n === null || n === undefined ? "n/a" : `$${n.toFixed(2)}`;
-export function formatSmokeTable(rows) {
+const mins = (n) => typeof n === "number" ? n.toFixed(1) : "";
+export function formatSmokeTable(rows, budgets = STAGE_BUDGETS) {
   return [
-    "| Date | Commit | Brief | Arm | Result | Features | First-pass | Repairs | Plan blocks | Reviews | Skipped | Skipped findings | Unattributed findings | Cost | $/feature | Wall |",
-    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
-    ...rows.map((r) => `| ${r.at?.slice(0, 10) ?? ""} | ${r.commit} | ${r.brief} | ${r.arm} | ${r.result} | ${r.features} of ${r.planned} | ${r.firstPass} | ${r.repairs} | ${r.planBlocks} | ${r.reviewsRun ?? ""} | ${r.reviewsSkipped ?? ""} | ${r.skippedFindings ?? ""} | ${r.unattributedFindings ?? ""} | ${usd(r.costUsd)} | ${usd(r.costPerFeature)} | ${r.wallMin} min |`),
+    "| Date | Commit | Brief | Arm | Result | Features | First-pass | Repairs | Plan blocks | Reviews | Skipped | Skipped findings | Unattributed findings | Cost | $/feature | Wall | Plan | Review | Repair | Gates | Over budget |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+    ...rows.map((r) => `| ${r.at?.slice(0, 10) ?? ""} | ${r.commit} | ${r.brief} | ${r.arm} | ${r.result} | ${r.features} of ${r.planned} | ${r.firstPass} | ${r.repairs} | ${r.planBlocks} | ${r.reviewsRun ?? ""} | ${r.reviewsSkipped ?? ""} | ${r.skippedFindings ?? ""} | ${r.unattributedFindings ?? ""} | ${usd(r.costUsd)} | ${usd(r.costPerFeature)} | ${r.wallMin} min | ${mins(r.stageMin?.planning)} | ${mins(r.stageMin?.review)} | ${mins(r.stageMin?.repair)} | ${mins(r.stageMin?.gates)} | ${overBudget(r, budgets).join("; ")} |`),
   ].join("\n");
 }

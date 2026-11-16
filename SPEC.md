@@ -153,6 +153,12 @@ app the server stopped is relaunched in the background, on its old port when fre
 nothing and is not retried until the next start. A newer undismissed run blocks it. `SOLOFACTORY_RESTART_APPS=0`
 turns it off.
 
+An app that exits on its own (`stoppedBy: "exited"`) within two minutes of its deployment's `startedAt`
+records `deployment.earlyExit` (`{afterSeconds, exitCode}`), and its `deployment.stopped` event says the
+release may be broken. The Live app panel shows that as an attention line beside **Relaunch** and, for a
+follow-on, the rollback offer; nothing rolls back on its own. A relaunch writes a fresh deployment record
+without it (`docs/four-tier-gates-spec.md` G4).
+
 Data backup before an update deploys. A follow-on whose `data/` was non-empty when it started (`hadData`)
 records `dataFeatures`: plan features marked `touchesData: true`, or whose `writes` cover an existing file
 that is a store module (`store|db|database|storage.*`) or names the data folder. The approved plan and each

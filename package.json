@@ -10,7 +10,8 @@
     "test": "node --test test/*.test.mjs",
     "test:e2e": "node test/e2e.test.mjs",
     "pretest": "bash scripts/build-distro.sh --check",
-    "distro": "bash scripts/build-distro.sh"
+    "distro": "bash scripts/build-distro.sh",
+    "hooks": "git config core.hooksPath scripts/hooks && echo \"hooks on: scripts/hooks (pre-commit parse check, pre-push suite + release CI check)\""
   },
   "engines": {
     "node": ">=22"
