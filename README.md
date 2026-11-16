@@ -8,6 +8,10 @@ live telemetry dashboard.
 
 It does not request or store an OpenAI or Anthropic API key.
 
+How it works, in five diagrams: `docs/anatomy.html` — the runtime shape, the authority
+boundary between the semantic worker and the local controller, the run flow, what happens
+when a gate fails, and the top-level state machine.
+
 ## Requirements
 
 - Node.js 22 to 24; Node 24 LTS is the recommended version. The installer warns on Node 25 and up (it still installs), because some packages the factory builds with ship no prebuilt files for it yet.

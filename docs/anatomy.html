@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Anatomy of SoloFactory</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #f7f8f8;
+    --surface: #ffffff;
+    --surface-2: #eef1f1;
+    --line: #cdd4d4;
+    --fg: #15201f;
+    --muted: #5c6a69;
+    --ctl: #15607f;
+    --ctl-fill: #e1eef4;
+    --agent: #8a3a86;
+    --agent-fill: #f5e7f4;
+    --gate: #a4560a;
+    --gate-fill: #fbeedd;
+    --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --font-body: "Inter", system-ui, -apple-system, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101415;
+      --surface: #182022;
+      --surface-2: #212b2d;
+      --line: #3a4749;
+      --fg: #e6ecee;
+      --muted: #99a7aa;
+      --ctl: #63c2e6;
+      --ctl-fill: #0f2d3a;
+      --agent: #e49bdd;
+      --agent-fill: #331731;
+      --gate: #e8b268;
+      --gate-fill: #33250f;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101415;
+    --surface: #182022;
+    --surface-2: #212b2d;
+    --line: #3a4749;
+    --fg: #e6ecee;
+    --muted: #99a7aa;
+    --ctl: #63c2e6;
+    --ctl-fill: #0f2d3a;
+    --agent: #e49bdd;
+    --agent-fill: #331731;
+    --gate: #e8b268;
+    --gate-fill: #33250f;
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.55;
+    margin: 0;
+  }
+  .wrap {
+    max-width: 960px;
+    margin: 0 auto;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 40px 72px;
+  }
+  header { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(30px, 6vw, 46px);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .lede { max-width: 62ch; color: var(--muted); margin: 0; }
+  h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 22px;
+    letter-spacing: -0.01em;
+    margin: 56px 0 4px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+  }
+  h2 .num {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--muted);
+    margin-right: 10px;
+    font-weight: 500;
+  }
+  p { max-width: 68ch; }
+  code, .m { font-family: var(--font-mono); font-size: 0.88em; }
+  figure { margin: 26px 0 0; display: flex; flex-direction: column; gap: 12px; }
+  .scroller { overflow-x: auto; }
+  figure svg { display: block; width: 100%; min-width: 640px; height: auto; }
+  figcaption { color: var(--muted); font-size: 14px; max-width: 70ch; }
+  figcaption b { color: var(--fg); font-weight: 600; }
+  ul.notes { margin: 14px 0 0; padding-left: 20px; max-width: 70ch; }
+  ul.notes li { margin-bottom: 7px; }
+  .key { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 18px 0 0; font-size: 13.5px; color: var(--muted); }
+  .key span { display: inline-flex; align-items: center; gap: 7px; }
+  .sw { width: 13px; height: 13px; border-radius: 3px; border: 1px solid; flex: none; }
+  .sw-ctl { background: var(--ctl-fill); border-color: var(--ctl); }
+  .sw-agent { background: var(--agent-fill); border-color: var(--agent); }
+  .sw-gate { background: var(--gate-fill); border-color: var(--gate); }
+  footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
+
+  svg text { font-family: var(--font-body); font-size: 12.5px; fill: var(--fg); }
+  svg .hd { font-family: var(--font-display); font-size: 13px; font-weight: 600; }
+  svg .sm { font-size: 11px; fill: var(--muted); }
+  svg .cell { font-size: 11.5px; }
+  svg .mono { font-family: var(--font-mono); font-size: 11px; }
+  svg .box { fill: var(--surface); stroke: var(--line); stroke-width: 1; }
+  svg .zone { fill: var(--surface-2); stroke: var(--line); stroke-width: 1; }
+  svg .ctlbox { fill: var(--ctl-fill); stroke: var(--ctl); stroke-width: 1.2; }
+  svg .agentbox { fill: var(--agent-fill); stroke: var(--agent); stroke-width: 1.2; }
+  svg .gatebox { fill: var(--gate-fill); stroke: var(--gate); stroke-width: 1.2; }
+  svg .ed { stroke: currentColor; stroke-width: 1.4; fill: none; }
+  svg .ed-fail { stroke: var(--gate); stroke-width: 1.4; fill: none; stroke-dasharray: 5 4; }
+  svg .ed-pause { stroke: var(--ctl); stroke-width: 1.4; fill: none; stroke-dasharray: 6 4; }
+  svg .ed-thin { stroke: var(--line); stroke-width: 1; fill: none; }
+  svg .gatetxt { fill: var(--gate); font-size: 11px; }
+  svg .ctltxt { fill: var(--ctl); font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">soloFactory · v0.10.17 · 9d74c1d</p>
+    <h1>Anatomy of SoloFactory</h1>
+    <p class="lede">A local-first software factory for one developer. It interviews you, freezes a PRD/plan/acceptance contract, drives your existing Codex or Claude Code <em>subscription</em> session to build the app, runs deterministic gates it owns itself, repairs bounded failures, and deploys the result on a loopback port. No API key is ever requested or stored. These five drawings are the machine behind that sentence.</p>
+  </header>
+
+  <h2><span class="num">01</span>Architecture</h2>
+  <p>Two things are worth drawing. First, what actually runs: one Node process on loopback, two front ends onto it, and a language model that lives outside it. Second — the real design decision — the line between what the model is allowed to do and what only local code may do.</p>
+
+  <figure>
+    <div class="scroller">
+      <svg viewBox="0 0 880 430" role="img" aria-label="A browser UI and a chat agent both speak HTTP to one local Node process, which drives a subscription CLI through a provider adapter and writes everything into the project's git repository.">
+        <defs>
+          <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <text class="sm mono" x="14" y="16">FRONT ENDS</text>
+        <text class="sm mono" x="262" y="16">ONE LOCAL NODE PROCESS</text>
+        <text class="sm mono" x="598" y="16">OUTSIDE IT</text>
+
+        <rect class="zone" x="262" y="28" width="312" height="368" rx="8"/>
+        <text class="hd mono" x="276" y="50">npm start</text>
+
+        <rect class="box" x="14" y="40" width="206" height="92" rx="6"/>
+        <text class="hd" x="28" y="64">Browser UI</text>
+        <text class="mono" x="28" y="86">public/index.html</text>
+        <text class="mono" x="28" y="104">app.js · styles.css</text>
+        <text class="sm" x="28" y="122">served at 127.0.0.1:4173</text>
+
+        <rect class="box" x="14" y="164" width="206" height="92" rx="6"/>
+        <text class="hd" x="28" y="188">Chat agent</text>
+        <text class="sm" x="28" y="208">Claude Code or Codex,</text>
+        <text class="sm" x="28" y="226">following distro/drive.md</text>
+        <text class="sm" x="28" y="244">no UI, same endpoints</text>
+
+        <text class="sm" x="14" y="286">The API has no authentication,</text>
+        <text class="sm" x="14" y="304">so the server refuses to bind</text>
+        <text class="sm" x="14" y="322">anything but a loopback address.</text>
+
+        <path class="ed" d="M220,86 L274,86" marker-end="url(#arA)"/>
+        <text class="sm" x="226" y="78">HTTP</text>
+        <path class="ed" d="M220,210 L246,210 L246,106 L274,106" marker-end="url(#arA)"/>
+        <text class="sm" x="226" y="202">HTTP</text>
+
+        <rect class="box" x="276" y="62" width="284" height="62" rx="6"/>
+        <text class="hd mono" x="290" y="86">src/server.mjs</text>
+        <text class="sm" x="290" y="106">routes, static UI, run queue</text>
+
+        <path class="ed" d="M418,124 L418,140" marker-end="url(#arA)"/>
+
+        <rect class="ctlbox" x="276" y="140" width="284" height="84" rx="6"/>
+        <text class="hd mono" x="290" y="164">src/factory.mjs</text>
+        <text class="sm" x="290" y="184">the controller — stages, gates,</text>
+        <text class="sm" x="290" y="202">commits, repair and spend budgets</text>
+        <text class="sm" x="290" y="218">2,450 lines; the machine lives here</text>
+
+        <path class="ed" d="M345,224 L345,240" marker-end="url(#arA)"/>
+        <path class="ed" d="M491,224 L491,240" marker-end="url(#arA)"/>
+
+        <rect class="box" x="276" y="240" width="138" height="70" rx="6"/>
+        <text class="hd mono" x="290" y="262">providers</text>
+        <text class="sm" x="290" y="282">codex · claude</text>
+        <text class="sm" x="290" y="300">· fixture (demo)</text>
+
+        <rect class="box" x="422" y="240" width="138" height="70" rx="6"/>
+        <text class="hd mono" x="436" y="262">store</text>
+        <text class="sm" x="436" y="282">JobStore, one</text>
+        <text class="sm" x="436" y="300">per project</text>
+
+        <rect class="box" x="380" y="326" width="180" height="44" rx="6"/>
+        <text class="mono" x="394" y="346">src/watchdog.mjs</text>
+        <text class="sm" x="394" y="362">observes; never writes state</text>
+
+        <path class="ed" d="M560,276 L596,276" marker-end="url(#arA)"/>
+        <text class="sm" x="562" y="264">writes</text>
+
+        <path class="ed" d="M345,310 L345,378 L596,378" marker-end="url(#arA)"/>
+        <text class="sm" x="360" y="392">spawned as an argv array; API-key env vars removed</text>
+
+        <rect class="zone" x="598" y="228" width="268" height="96" rx="8"/>
+        <text class="hd" x="612" y="250">The project — a git repo</text>
+        <text class="mono" x="612" y="270">app at the repo root</text>
+        <text class="mono" x="612" y="288">.factory/ · .aai/</text>
+        <text class="mono" x="612" y="306">.solofactory/runs/&lt;id&gt;/</text>
+
+        <rect class="agentbox" x="598" y="340" width="268" height="76" rx="6"/>
+        <text class="hd" x="612" y="362">Your subscription CLI</text>
+        <text class="sm" x="612" y="382">codex or claude, already signed in</text>
+        <text class="sm" x="612" y="400">the only thing that calls a model</text>
+      </svg>
+    </div>
+    <figcaption><b>One process, two front ends, and a model it holds at arm's length.</b> The browser UI and a chat agent are peers: both drive the same loopback HTTP API, so nothing the dashboard can do is unavailable from Claude Code or Codex. The model is reached only through a provider adapter that spawns the CLI you are already signed in to, as an argument array, with <code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code> and their siblings stripped from the environment — so a worker cannot quietly bill an API account instead of your subscription.</figcaption>
+  </figure>
+
+  <div class="key">
+    <span><i class="sw sw-ctl"></i>local controller code — owns state and gates</span>
+    <span><i class="sw sw-agent"></i>semantic worker — the subscription CLI</span>
+    <span><i class="sw sw-gate"></i>a gate or a failure path</span>
+  </div>
+
+  <figure>
+    <div class="scroller">
+      <svg viewBox="0 0 880 390" role="img" aria-label="A table of the eight lifecycle stages, showing which semantic worker runs each one and the controller-owned exit gate that must pass before the stage ends. Verify, deploy and complete have no worker at all.">
+        <text class="sm mono" x="14" y="26">STAGE</text>
+        <text class="sm mono" x="146" y="26">SEMANTIC WORKER — may be wrong</text>
+        <text class="sm mono" x="490" y="26">CONTROLLER-OWNED EXIT GATE — decides</text>
+
+        <rect class="box" x="14" y="38" width="120" height="32" rx="4"/>
+        <text class="cell" x="26" y="58">Intake</text>
+        <rect class="agentbox" x="146" y="38" width="330" height="32" rx="4"/>
+        <text class="cell" x="158" y="58">Factory Guide (src/interview.mjs)</text>
+        <rect class="ctlbox" x="490" y="38" width="376" height="32" rx="4"/>
+        <text class="cell" x="502" y="58">response schema valid; coverage ledger complete</text>
+
+        <rect class="box" x="14" y="76" width="120" height="32" rx="4"/>
+        <text class="cell" x="26" y="96">Spec + plan</text>
+        <rect class="agentbox" x="146" y="76" width="330" height="32" rx="4"/>
+        <text class="cell" x="158" y="96">subscription CLI</text>
+        <rect class="ctlbox" x="490" y="76" width="376" height="32" rx="4"/>
+        <text class="cell" x="502" y="96">three documents exist, non-trivial, no app code yet</text>
+
+        <rect class="box" x="14" y="114" width="120" height="32" rx="4"/>
+        <text class="cell" x="26" y="134">Build</text>
+        <rect class="agentbox" x="146" y="114" width="330" height="32" rx="4"/>
+        <text class="cell" x="158" y="134">subscription CLI</text>
+        <rect class="ctlbox" x="490" y="114" width="376" height="32" rx="4"/>
+        <text class="cell" x="502" y="134">factory.json valid; commands inside the allowlist</text>
+
+        <rect class="box" x="14" y="152" width="120" height="32" rx="4"/>
+        <text class="cell" x="26" y="172">Verify</text>
+        <rect class="box" x="146" y="152" width="330" height="32" rx="4"/>
+        <text class="cell sm" x="158" y="172">— none; this stage is pure local code —</text>
+        <rect class="ctlbox" x="490" y="152" width="376" height="32" rx="4"/>
+        <text class="cell" x="502" y="172">install · lint · test · build each exit 0 in time</text>
+
+        <rect class="box" x="14" y="190" width="120" height="32" rx="4"/>
+        <text class="cell" x="26" y="210">Repair</text>
+        <rect class="agentbox" x="146" y="190" width="330" height="32" rx="4"/>
+        <text class="cell" x="158" y="210">subscription CLI, given the gate and its log</text>
+        <rect class="ctlbox" x="490" y="190" width="376" height="32" rx="4"/>
+        <text class="cell" x="502" y="210">bounded attempt ends; controller reruns every gate</text>
+
+        <rect class="box" x="14" y="228" width="120" height="32" rx="4"/>
+        <text class="cell" x="26" y="248">Review</text>
+        <rect class="agentbox" x="146" y="228" width="330" height="32" rx="4"/>
+        <text class="cell" x="158" y="248">subscription CLI, a fresh session</text>
+        <rect class="ctlbox" x="490" y="228" width="376" height="32" rx="4"/>
+        <text class="cell" x="502" y="248">verdict delivered; controller reruns tests and build</text>
+
+        <rect class="box" x="14" y="266" width="120" height="32" rx="4"/>
+        <text class="cell" x="26" y="286">Deploy</text>
+        <rect class="box" x="146" y="266" width="330" height="32" rx="4"/>
+        <text class="cell sm" x="158" y="286">— none; this stage is pure local code —</text>
+        <rect class="ctlbox" x="490" y="266" width="376" height="32" rx="4"/>
+        <text class="cell" x="502" y="286">stays alive · /health 2xx · metrics valid · GET / not 5xx</text>
+
+        <rect class="box" x="14" y="304" width="120" height="32" rx="4"/>
+        <text class="cell" x="26" y="324">Complete</text>
+        <rect class="box" x="146" y="304" width="330" height="32" rx="4"/>
+        <text class="cell sm" x="158" y="324">— none; this stage is pure local code —</text>
+        <rect class="ctlbox" x="490" y="304" width="376" height="32" rx="4"/>
+        <text class="cell" x="502" y="324">deployment URL and evidence persisted</text>
+
+        <rect class="gatebox" x="14" y="348" width="852" height="34" rx="6"/>
+        <text class="gatetxt" x="28" y="369">Across this line the worker may never: change job state · skip or rewrite a gate · run a command outside the allowlist · see an API key.</text>
+      </svg>
+    </div>
+    <figcaption><b>The authority boundary is the product.</b> Every stage pairs a semantic worker that may be wrong with a mechanical exit gate that decides. Three of the eight stages have no worker at all. The repair worker is handed the exact failed gate and its log path and is never given authority to skip or rewrite it, so "the agent said it was done" is never what ends a stage — a command exiting 0 is.</figcaption>
+  </figure>
+
+  <h2><span class="num">02</span>Functional flow</h2>
+  <p>A run is one release of one project. Every new run plans before it builds, and an independent reviewer has to approve that plan — bound to its digest, the frozen contract and a token — before a line of application code is written.</p>
+
+  <figure>
+    <div class="scroller">
+      <svg viewBox="0 0 880 400" role="img" aria-label="A run flows from queued through specification, feature planning and an independent plan review into a per-feature loop of implement, check, review and commit, then final integration, final review, deploy and completion.">
+        <defs>
+          <marker id="arC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <rect class="box" x="14" y="40" width="86" height="62" rx="6"/>
+        <text class="hd" x="28" y="64">queued</text>
+        <text class="sm" x="28" y="84">one at a time</text>
+        <text class="sm" x="28" y="98">per project</text>
+
+        <path class="ed" d="M100,71 L116,71" marker-end="url(#arC)"/>
+
+        <rect class="agentbox" x="116" y="40" width="160" height="62" rx="6"/>
+        <text class="hd" x="130" y="62">specifying</text>
+        <text class="sm" x="130" y="80">PRD · PLAN · ACCEPTANCE</text>
+        <text class="sm" x="130" y="96">→ the frozen contract</text>
+
+        <path class="ed" d="M276,71 L292,71" marker-end="url(#arC)"/>
+
+        <rect class="agentbox" x="292" y="40" width="160" height="62" rx="6"/>
+        <text class="hd" x="306" y="62">feature plan</text>
+        <text class="sm" x="306" y="80">.factory/slices.json v2</text>
+        <text class="sm" x="306" y="96">one closing feature each</text>
+
+        <path class="ed" d="M452,71 L468,71" marker-end="url(#arC)"/>
+
+        <rect class="gatebox" x="468" y="40" width="160" height="62" rx="6"/>
+        <text class="hd" x="482" y="62">plan review</text>
+        <text class="gatetxt" x="482" y="80">a fresh reviewer approves</text>
+        <text class="gatetxt" x="482" y="96">that exact plan, or it is fixed</text>
+
+        <path class="ed" d="M548,102 L548,124 L321,124 L321,150" marker-end="url(#arC)"/>
+
+        <rect class="zone" x="14" y="150" width="614" height="150" rx="8"/>
+        <text class="sm mono" x="28" y="170">BUILDING — once per planned feature, in dependency order</text>
+
+        <rect class="agentbox" x="30" y="186" width="136" height="64" rx="6"/>
+        <text class="hd" x="42" y="208">implementing</text>
+        <text class="sm" x="42" y="226">writes only the files</text>
+        <text class="sm" x="42" y="242">this feature owns</text>
+
+        <path class="ed" d="M166,218 L182,218" marker-end="url(#arC)"/>
+
+        <rect class="gatebox" x="182" y="186" width="160" height="64" rx="6"/>
+        <text class="hd" x="194" y="208">checking</text>
+        <text class="gatetxt" x="194" y="226">install · lint · test · build</text>
+        <text class="gatetxt" x="194" y="242">+ this feature's proofs</text>
+
+        <path class="ed" d="M342,218 L358,218" marker-end="url(#arC)"/>
+
+        <rect class="agentbox" x="358" y="186" width="136" height="64" rx="6"/>
+        <text class="hd" x="370" y="208">reviewing</text>
+        <text class="sm" x="370" y="226">scoped, bound to the</text>
+        <text class="sm" x="370" y="242">source it was given</text>
+
+        <path class="ed" d="M494,218 L510,218" marker-end="url(#arC)"/>
+
+        <rect class="ctlbox" x="510" y="186" width="100" height="64" rx="6"/>
+        <text class="hd" x="522" y="208">commit</text>
+        <text class="sm" x="522" y="228">checkpoint</text>
+
+        <path class="ed" d="M560,250 L560,276 L98,276 L98,250" marker-end="url(#arC)"/>
+        <text class="sm" x="268" y="292">next feature</text>
+
+        <path class="ed" d="M321,300 L321,320" marker-end="url(#arC)"/>
+
+        <rect class="ctlbox" x="14" y="320" width="170" height="62" rx="6"/>
+        <text class="hd" x="26" y="342">final integration</text>
+        <text class="sm" x="26" y="360">every verified feature's</text>
+        <text class="sm" x="26" y="376">proofs run once more</text>
+
+        <path class="ed" d="M184,351 L200,351" marker-end="url(#arC)"/>
+
+        <rect class="agentbox" x="200" y="320" width="150" height="62" rx="6"/>
+        <text class="hd" x="212" y="342">final review</text>
+        <text class="sm" x="212" y="360">whole app against</text>
+        <text class="sm" x="212" y="376">the frozen contract</text>
+
+        <path class="ed" d="M350,351 L366,351" marker-end="url(#arC)"/>
+
+        <rect class="gatebox" x="366" y="320" width="150" height="62" rx="6"/>
+        <text class="hd" x="378" y="342">deploying</text>
+        <text class="gatetxt" x="378" y="360">unused loopback port;</text>
+        <text class="gatetxt" x="378" y="376">health + metrics checked</text>
+
+        <path class="ed" d="M516,351 L532,351" marker-end="url(#arC)"/>
+
+        <rect class="ctlbox" x="532" y="320" width="96" height="62" rx="6"/>
+        <text class="hd" x="544" y="342">completed</text>
+        <text class="sm" x="544" y="362">URL + evidence</text>
+
+        <rect class="zone" x="644" y="40" width="222" height="342" rx="8"/>
+        <text class="hd mono" x="658" y="62">GIT IS THE BUILD LOG</text>
+        <text class="sm" x="658" y="88">The controller commits:</text>
+        <text class="sm" x="658" y="106">· after the specification</text>
+        <text class="sm" x="658" y="124">· after every passed gate set</text>
+        <text class="sm" x="658" y="142">· after every verified feature</text>
+        <text class="sm" x="658" y="166">Nothing else writes that history,</text>
+        <text class="sm" x="658" y="184">so git log is the build log and a</text>
+        <text class="sm" x="658" y="202">restart rewinds to a green tree.</text>
+        <text class="sm" x="658" y="232">Run evidence, gitignored:</text>
+        <text class="mono" x="658" y="252">.solofactory/runs/&lt;id&gt;/</text>
+        <text class="sm" x="658" y="272">state.json — atomic snapshot</text>
+        <text class="sm" x="658" y="290">events.jsonl — append-only</text>
+        <text class="sm" x="658" y="320">A follow-on release keeps the</text>
+        <text class="sm" x="658" y="338">previous app live until the new</text>
+        <text class="sm" x="658" y="356">one passes its deploy checks.</text>
+      </svg>
+    </div>
+    <figcaption><b>Plan, have the plan reviewed, then build one feature at a time.</b> The planner must give every must-have and every acceptance scenario exactly one closing feature with executable proofs; a duplicated criterion is rejected, because duplicated criteria mean one feature re-implements another. Each feature then passes the gates, a scoped review bound to the exact source the reviewer read, and a checkpoint commit before the next one starts.</figcaption>
+  </figure>
+
+  <h2><span class="num">03</span>When a gate fails</h2>
+  <p>Repair is where an autonomous builder normally burns a subscription down. SoloFactory's answer is a small budget and three independent reasons to stop.</p>
+
+  <figure>
+    <div class="scroller">
+      <svg viewBox="0 0 880 400" role="img" aria-label="A failed gate is first classified: a timeout or an infrastructure crash parks without spending a repair attempt, everything else gets a bounded repair turn, and three separate counters stop the repair loop.">
+        <defs>
+          <marker id="arD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <rect class="gatebox" x="14" y="56" width="124" height="56" rx="6"/>
+        <text class="hd" x="26" y="80">a gate fails</text>
+        <text class="gatetxt" x="26" y="98">non-zero exit</text>
+
+        <path class="ed" d="M138,84 L162,84" marker-end="url(#arD)"/>
+
+        <rect class="box" x="162" y="48" width="186" height="72" rx="6"/>
+        <text class="hd" x="174" y="70">Did the command</text>
+        <text class="hd" x="174" y="88">prove anything?</text>
+        <text class="sm" x="174" y="108">timeout? Node itself crashed?</text>
+
+        <path class="ed-fail" d="M255,48 L255,30 L400,30" marker-end="url(#arD)"/>
+        <text class="gatetxt" x="262" y="24">no</text>
+
+        <rect class="gatebox" x="400" y="12" width="236" height="56" rx="6"/>
+        <text class="hd" x="412" y="34">park, spend nothing</text>
+        <text class="gatetxt" x="412" y="54">gate_timeout · gate_infrastructure</text>
+
+        <path class="ed" d="M255,120 L255,146 L400,146" marker-end="url(#arD)"/>
+        <text class="sm" x="262" y="140">yes — the code is at fault</text>
+
+        <rect class="agentbox" x="400" y="118" width="212" height="72" rx="6"/>
+        <text class="hd" x="412" y="140">one repair turn</text>
+        <text class="sm" x="412" y="158">gets the exact gate + log path,</text>
+        <text class="sm" x="412" y="176">never authority to skip it</text>
+
+        <path class="ed" d="M612,154 L636,154" marker-end="url(#arD)"/>
+
+        <rect class="ctlbox" x="636" y="118" width="230" height="72" rx="6"/>
+        <text class="hd" x="648" y="140">rerun: failed gate first,</text>
+        <text class="hd" x="648" y="158">then the whole set</text>
+        <text class="sm" x="648" y="178">pass → the run continues</text>
+
+        <path class="ed-fail" d="M751,190 L751,206 L506,206 L506,190" marker-end="url(#arD)"/>
+        <text class="gatetxt" x="560" y="202">still failing → count it</text>
+
+        <text class="sm mono" x="14" y="238">THREE INDEPENDENT REASONS TO STOP REPAIRING</text>
+
+        <rect class="box" x="14" y="248" width="270" height="76" rx="6"/>
+        <text class="hd" x="26" y="270">budget spent</text>
+        <text class="sm" x="26" y="288">two repairs per feature, two for</text>
+        <text class="sm" x="26" y="306">final integration; Resume never refills</text>
+
+        <rect class="box" x="300" y="248" width="270" height="76" rx="6"/>
+        <text class="hd" x="312" y="270">loop detected — 3×</text>
+        <text class="sm" x="312" y="288">the same check fails the same way</text>
+        <text class="sm" x="312" y="306">on code the repairs did not change</text>
+
+        <rect class="box" x="586" y="248" width="280" height="76" rx="6"/>
+        <text class="hd" x="598" y="270">symptom repeats — 4×</text>
+        <text class="sm" x="598" y="288">same failure although the repairs</text>
+        <text class="sm" x="598" y="306">did change the code; line numbers ignored</text>
+
+        <rect class="ctlbox" x="14" y="340" width="852" height="48" rx="6"/>
+        <text class="ctltxt" x="28" y="360">Above those sit whole-run ceilings, checked before each worker starts: 150 workers · $30 of reported cost · 40M tokens · 150 tool steps in one Claude turn.</text>
+        <text class="ctltxt" x="28" y="378">Reaching one parks the run as run_budget_reached or agent_turn_cap. Any owner continuation grants one more allotment — never an open tap.</text>
+      </svg>
+    </div>
+    <figcaption><b>A killed command proves nothing about the code.</b> That is why the first question is not "which gate failed" but "did it actually run": a gate that timed out, or one whose tests all passed before Node itself crashed, parks the run without spending a repair attempt. Only a genuine failing check buys a repair turn, and the three counters below catch the three different ways a repair loop goes bad.</figcaption>
+  </figure>
+
+  <h2><span class="num">04</span>Top-level state machine</h2>
+  <p>Twelve canonical states. Seven are active, four are parked, one is terminal success. Every edge out of the parked band is an owner action — the controller never resumes, retries or starts over on its own.</p>
+
+  <figure>
+    <div class="scroller">
+      <svg viewBox="0 0 880 452" role="img" aria-label="The run state machine: an active spine from queued through specifying, building, verifying, reviewing and deploying to completed, with repairing below it, a parked band of paused, failed, cancelled and interrupted, and four owner actions leading out of that band.">
+        <defs>
+          <marker id="arE" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <text class="sm mono" x="14" y="26">ACTIVE</text>
+
+        <rect class="ctlbox" x="14" y="36" width="84" height="48" rx="6"/>
+        <text class="hd" x="26" y="66">queued</text>
+        <path class="ed" d="M98,60 L118,60" marker-end="url(#arE)"/>
+
+        <rect class="ctlbox" x="118" y="36" width="110" height="48" rx="6"/>
+        <text class="hd" x="130" y="66">specifying</text>
+        <path class="ed" d="M228,60 L248,60" marker-end="url(#arE)"/>
+
+        <rect class="ctlbox" x="248" y="36" width="104" height="48" rx="6"/>
+        <text class="hd" x="260" y="66">building</text>
+        <path class="ed" d="M352,60 L372,60" marker-end="url(#arE)"/>
+
+        <rect class="ctlbox" x="372" y="36" width="104" height="48" rx="6"/>
+        <text class="hd" x="384" y="66">verifying</text>
+        <path class="ed" d="M476,60 L496,60" marker-end="url(#arE)"/>
+
+        <rect class="ctlbox" x="496" y="36" width="104" height="48" rx="6"/>
+        <text class="hd" x="508" y="66">reviewing</text>
+        <path class="ed" d="M600,60 L620,60" marker-end="url(#arE)"/>
+
+        <rect class="ctlbox" x="620" y="36" width="104" height="48" rx="6"/>
+        <text class="hd" x="632" y="66">deploying</text>
+        <path class="ed" d="M724,60 L744,60" marker-end="url(#arE)"/>
+
+        <rect class="ctlbox" x="744" y="36" width="114" height="48" rx="6"/>
+        <text class="hd" x="756" y="66">completed</text>
+
+        <path class="ed-fail" d="M406,84 L406,150" marker-end="url(#arE)"/>
+        <text class="gatetxt" x="312" y="112">gate fails</text>
+        <path class="ed" d="M444,150 L444,84" marker-end="url(#arE)"/>
+        <text class="sm" x="452" y="112">repaired → recheck</text>
+
+        <rect class="gatebox" x="372" y="150" width="104" height="48" rx="6"/>
+        <text class="hd" x="384" y="180">repairing</text>
+
+        <path class="ed-fail" d="M520,84 L520,174 L476,174" marker-end="url(#arE)"/>
+        <text class="gatetxt" x="528" y="170">blockers</text>
+
+        <path class="ed-pause" d="M173,84 L173,222"/>
+        <path class="ed-pause" d="M280,84 L280,222"/>
+        <path class="ed-pause" d="M590,84 L590,222"/>
+        <path class="ed-pause" d="M672,84 L672,222"/>
+        <path class="ed-pause" d="M160,222 L672,222"/>
+        <path class="ed-pause" d="M160,222 L160,266" marker-end="url(#arE)"/>
+
+        <text class="sm mono" x="14" y="250">PARKED</text>
+        <text class="ctltxt" x="76" y="250">pause request</text>
+
+        <rect class="zone" x="14" y="258" width="852" height="88" rx="8"/>
+
+        <rect class="box" x="28" y="272" width="194" height="60" rx="6"/>
+        <text class="hd" x="40" y="294">paused</text>
+        <text class="sm" x="40" y="312">you asked; parked at one</text>
+        <text class="sm" x="40" y="326">of the four points above</text>
+
+        <rect class="box" x="236" y="272" width="194" height="60" rx="6"/>
+        <text class="hd" x="248" y="294">failed</text>
+        <text class="sm" x="248" y="312">an error with no bounded</text>
+        <text class="sm" x="248" y="326">recovery; prior state kept</text>
+
+        <rect class="box" x="444" y="272" width="194" height="60" rx="6"/>
+        <text class="hd" x="456" y="294">cancelled</text>
+        <text class="sm" x="456" y="312">you stopped it now; the</text>
+        <text class="sm" x="456" y="326">tree is left as it was</text>
+
+        <rect class="box" x="652" y="272" width="200" height="60" rx="6"/>
+        <text class="hd" x="664" y="294">interrupted</text>
+        <text class="sm" x="664" y="312">the server restarted while</text>
+        <text class="sm" x="664" y="326">this run was in flight</text>
+
+        <path class="ed" d="M125,346 L125,372" marker-end="url(#arE)"/>
+        <path class="ed" d="M333,346 L333,372" marker-end="url(#arE)"/>
+        <path class="ed" d="M541,346 L541,372" marker-end="url(#arE)"/>
+        <path class="ed" d="M752,346 L752,372" marker-end="url(#arE)"/>
+
+        <text class="sm mono" x="14" y="366">OWNER ACTIONS</text>
+
+        <rect class="ctlbox" x="14" y="372" width="200" height="70" rx="6"/>
+        <text class="hd" x="26" y="394">Resume</text>
+        <text class="sm" x="26" y="412">same run id and workspace,</text>
+        <text class="sm" x="26" y="430">continues from failedState</text>
+
+        <rect class="ctlbox" x="232" y="372" width="200" height="70" rx="6"/>
+        <text class="hd" x="244" y="394">Start over</text>
+        <text class="sm" x="244" y="412">a new run from the same</text>
+        <text class="sm" x="244" y="430">brief; jumps the queue</text>
+
+        <rect class="ctlbox" x="450" y="372" width="200" height="70" rx="6"/>
+        <text class="hd" x="462" y="394">Dismiss</text>
+        <text class="sm" x="462" y="412">frees the project queue so</text>
+        <text class="sm" x="462" y="430">the next brief can build</text>
+
+        <rect class="ctlbox" x="668" y="372" width="198" height="70" rx="6"/>
+        <text class="hd" x="680" y="394">Restart from feature N</text>
+        <text class="sm" x="680" y="412">hard-reset to the commit</text>
+        <text class="sm" x="680" y="430">N−1 left, replay once</text>
+      </svg>
+    </div>
+    <figcaption><b>Parking is the default failure behaviour, and only you unpark it.</b> Pause is a request, not a stop: the run finishes the stage it is in, commits a green tree, and parks before the next one — so it can only land at the four dashed points. A parked run holds its project's queue so nothing builds on a half-repaired tree. On startup every persisted non-terminal run is rewritten to <code>interrupted</code> with its previous state recorded, so a crash during <code>building</code> resumes into <code>building</code> rather than starting again. A run whose recorded worker process is still alive parks further, as <code>worker_unconfirmed</code>, until that process exits — so a second writer never starts beside the first.</figcaption>
+  </figure>
+
+  <h2><span class="num">05</span>What the drawings leave out</h2>
+  <ul class="notes">
+    <li>The <b>Factory Guide</b> interview has its own contract: every reply must satisfy a strict JSON schema, and every check in the compiled brief must be provable offline on this machine. Checks that need a live account, a clock or a fixed path are rewritten and moved to a "checked by hand after install" list that no build or review chases.</li>
+    <li>The <b>watchdog</b> is an observer, not a state. It labels the active run <em>Working</em>, <em>Waiting for command</em>, <em>Progress unknown</em>, <em>Progress needs checking</em>, <em>Recovering</em> or <em>Action needed</em>. It never stops a worker — the idle and hard caps remain the deadlines.</li>
+    <li>There is a <b>legacy path</b>: the older single-pass and slice strategies. New runs are all planned-feature runs (<code>planVersion: 2</code>); older runs still resume on their own path.</li>
+    <li>The repository ships <b>two products from one tree</b>: the Node app under <code>src/</code> and <code>public/</code>, and an installable agent skill under <code>distro/</code> that sets a folder up as a factory and drives it from chat.</li>
+  </ul>
+
+  <footer>Read from the repository at v0.10.17 (9d74c1d): README.md, SPEC.md §4 and §6–7, and src/factory.mjs, server.mjs, store.mjs, providers.mjs, watchdog.mjs, wbs.mjs.</footer>
+</div>
+
+</body>
+</html>
