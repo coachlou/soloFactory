@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
 import { JobStore } from '../src/store.mjs';
@@ -148,6 +150,37 @@ test('repair receives every unfinished requirement and blocker, not only the fir
   assert.equal(env.deployments(), 0);
 });
 
+// Tester report: owner-data evidence used to throw a bare error, so "Prepare repair plan" was offered but always refused.
+test('owner-data evidence fails its check as unverified, so a repair plan can be prepared', async t => {
+  let recovering = false;
+  const env = await setup(t, async args => {
+    if (args.context.stage.startsWith('recovery-plan-')) recovering = true;
+    if (args.context.stage !== 'review' || recovering) return;
+    await mkdir(path.join(args.cwd, 'data'), { recursive: true });
+    await writeFile(path.join(args.cwd, 'data/private.jpg'), 'owner photo');
+    await changeReport(args, r => { r.checks[0].evidence = ['data/private.jpg']; });
+  });
+  const failed = await env.factory.start(env.job.id);
+  assert.equal(failed.error.code, 'review_rejected');
+  const [check] = failed.error.details.failedChecks;
+  assert.equal(check.status, 'unverified');
+  assert.match(check.reason, /data\/private\.jpg/);
+  const ready = await env.factory.planRecovery(env.job.id);
+  assert.notEqual(ready.recoveryPhase?.status, undefined, 'repair planning was accepted');
+});
+
+test('a git-tracked fixture under data/ is accepted as evidence', async t => {
+  const env = await setup(t, async args => {
+    if (args.context.stage !== 'review') return;
+    await mkdir(path.join(args.cwd, 'data'), { recursive: true });
+    await writeFile(path.join(args.cwd, 'data/seed.json'), '{"shipped":true}');
+    await promisify(execFile)('git', ['add', '-f', 'data/seed.json'], { cwd: args.cwd });
+    await changeReport(args, r => { r.checks[0].evidence = ['data/seed.json']; });
+  });
+  const result = await env.factory.start(env.job.id);
+  assert.equal(result.state, 'completed', result.error?.message);
+});
+
 test('an approved repair plan recovers an exhausted review without overwriting prior evidence', async t => {
   let recovering = false;
   const env = await setup(t, async args => {
@@ -169,7 +202,6 @@ test('an approved repair plan recovers an exhausted review without overwriting p
 });
 
 // --- registry, candidate binding and plan verdicts (no factory) ---
-import { mkdir } from 'node:fs/promises';
 import { featureNeedsReview, originalChecks, prepareReview, validateReview, preparePlanReview, validatePlanReview } from '../src/review.mjs';
 
 async function contractDir(t) {
