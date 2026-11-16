@@ -1,7 +1,7 @@
 # Developing SoloFactory
 
-Repo-only: none of this ships in the distro (`distro/APP_FILES`). Coding agents follow `AGENTS.md`
-(Claude Code reads it through `CLAUDE.md`).
+Repo-only: none of this ships in the distro (`distro/APP_FILES`). Coding agents follow `.aai/instructions.md`;
+`CLAUDE.md` and `AGENTS.md` hold only tool-specific notes and route there.
 
 ## Gate tiers
 

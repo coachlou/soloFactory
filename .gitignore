@@ -10,8 +10,9 @@ solofactory-demo/
 # ponytail: literal name; add others here if you test-install under different names
 my-folder/
 
-# project-scoped ambient context (local)
-.aai/
+# project-scoped ambient context (local), except the common agent instructions, which every clone needs
+.aai/*
+!.aai/instructions.md
 
 # run-dashboard demo runtime state (holds nested project git repos)
 run-dashboard/.demo-home/
