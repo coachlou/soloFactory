@@ -29,6 +29,22 @@ push the same commit to main. The `pre-push` hook refuses a push to main that ch
 until `node scripts/ci-green.mjs <sha>` finds a successful `test` run on that exact commit (it uses `gh`, signed in).
 Tag and sync to ambient-library only from that commit.
 
+## Tidy branches and worktrees
+
+GitHub deletes a pull request's branch when it merges, and `fetch.prune` (set once with
+`git config --global fetch.prune true`) drops the stale remote refs on the next fetch. Local branches and
+worktrees stay until you clear them:
+
+```bash
+npm run tidy
+```
+
+It lists local branches merged into main or whose upstream is gone, with their worktrees, and deletes them
+only after you answer `y`. It never forces: it skips a worktree with untracked or modified files, the
+worktree you run it from, and a worktree still at main's tip (likely a session just started), and says why.
+`git branch -d` refuses a branch it cannot prove is merged (for example squash-merged), and tidy reports it
+as kept. It never touches `main`, `claude/ecstatic-tesla-stfhsz` or `scrappy-pipeline` (`KEEP` in `scripts/tidy.mjs`).
+
 ## Verify the factory
 
 ```bash

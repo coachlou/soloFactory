@@ -27,6 +27,12 @@ The one source of rules for every agent in this repo: Claude Code, Codex and oth
 5. A UI change must keep every engine function and control.
 6. Do not delete files in the owner's folders unless the owner approves that deletion.
 
+## Branches
+
+1. Clean up merged branches and worktrees with `npm run tidy`. It deletes only after a y/N confirm.
+2. Agents may run it to show the list, but answer `y` only with the owner's written approval.
+3. Never force-delete a branch or worktree (`git branch -D`, `git worktree remove --force`).
+
 ## Releases
 
 Follow the release steps in DEVELOPING.md: the smoke gate, Linux CI green on the release commit,
