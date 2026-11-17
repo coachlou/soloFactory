@@ -11,6 +11,7 @@
     "test:e2e": "node test/e2e.test.mjs",
     "pretest": "bash scripts/build-distro.sh --check",
     "distro": "bash scripts/build-distro.sh",
+    "tidy": "node scripts/tidy.mjs",
     "hooks": "git config core.hooksPath scripts/hooks && echo \"hooks on: scripts/hooks (pre-commit parse check, pre-push suite + release CI check)\""
   },
   "engines": {
