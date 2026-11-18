@@ -15,7 +15,6 @@ async function installed() {
   await writeFile(path.join(root, "app", "package.json"), JSON.stringify({ version: "0.11.0" }));
   return root;
 }
-const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 test("the update prompt runs only U2 on this folder and never restarts SoloFactory itself", () => {
   const prompt = headlessUpdatePrompt("/x/sf");
@@ -51,14 +50,14 @@ test("a changed app version restarts; an unchanged one records a failure and doe
     const base = { root, home: path.join(root, "home"), appRoot: path.join(root, "app"), current: "0.11.0", busy: () => null, newer: async () => "0.11.1", onUpdated: () => { restarts += 1; } };
     const thrown = createUpdateRunner({ ...base, agent: async () => { await writeFile(path.join(root, "app", "package.json"), JSON.stringify({ version: "0.11.1" })); throw new Error("timed out"); } });
     await thrown.start("claude");
-    await settle();
+    await thrown.settled();
     assert.equal((await thrown.status()).last.state, "restarting"); // the swap happened, so restart onto it
     assert.equal(restarts, 1);
     restarts = 0;
     await writeFile(path.join(root, "app", "package.json"), JSON.stringify({ version: "0.11.0" }));
     const same = createUpdateRunner({ ...base, agent: async () => ({ code: 1, message: "" }) });
     assert.equal((await same.start("claude")).status, 202);
-    await settle();
+    await same.settled();
     const failed = (await same.status()).last;
     assert.equal(failed.state, "failed");
     assert.match(failed.message, /exit 1/);
@@ -77,7 +76,7 @@ test("a changed app version restarts; an unchanged one records a failure and doe
     assert.equal((await runner.start("codex")).status, 409); // one at a time
     assert.equal((await runner.status()).last.state, "running");
     release();
-    await settle();
+    await runner.settled();
     const done = JSON.parse(await readFile(path.join(root, "home", "update.json"), "utf8"));
     assert.deepEqual([done.state, done.from, done.to, done.message], ["restarting", "0.11.0", "0.11.1", "Updated to 0.11.1."]);
     assert.equal(restarts, 1);
@@ -102,7 +101,7 @@ test("the route needs a JSON POST from this machine and blocks new runs while up
     assert.equal(job.status, 409);
     assert.match((await job.json()).error, /updating/);
     release();
-    await settle();
+    await app.updateSettled();
     assert.equal((await fetch(url + "/api/update/run").then((r) => r.json())).last.state, "failed");
   } finally {
     await app.close();

@@ -25,6 +25,16 @@ async function answers(url) {
   }
 }
 
+// list() orders runs newest first by createdAt, and "newest" decides which run may relaunch its app
+// (newerRunBlocks) and the queue order. Two runs created in the same millisecond tied, and the tie
+// fell back to the random id's directory order, so the older run could sort as the newer one. Each
+// create in this process takes a strictly later millisecond than the one before.
+let lastCreatedAt = 0;
+function nextCreatedAt() {
+  lastCreatedAt = Math.max(Date.now(), lastCreatedAt + 1);
+  return lastCreatedAt;
+}
+
 // A JobStore is rooted in one project: a git repo the factory builds into.
 // The app lives at the repo root; run evidence lives in .solofactory/runs/<id>/ (gitignored).
 const OLD_LEAD = "This is one project inside a SoloFactory workspace. The parent folder's\n`.aai/instructions.md` (two levels up) governs the factory as a whole; if it\nexists, load it first, then this file.\n";
@@ -114,7 +124,7 @@ export class JobStore {
   // New runs are planned feature runs (planVersion 2). "single" stays only for callers that recreate history.
   async create({ brief, transcript, provider, models = null, sdlc = "slices", notices = [], featureReview = "all" }) {
     const id = `${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
-    const now = new Date().toISOString();
+    const now = new Date(nextCreatedAt()).toISOString();
     const job = {
       id,
       state: "queued",

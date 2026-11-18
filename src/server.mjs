@@ -940,6 +940,7 @@ export async function createSoloFactoryServer(options = {}) {
   return {
     server,
     appsRestarted: Promise.all(restarts), // settles when every startup restart has gone live or failed
+    updateSettled: () => updater.settled(), // settles once the latest Update now run has recorded its outcome
     get store() {
       return store;
     },
