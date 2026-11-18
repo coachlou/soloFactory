@@ -21,6 +21,7 @@ test("HTTP journey goes from Guide turn to a reachable generated app", async (t)
 
   const config = await getJson(`${base}/api/config`);
   assert.equal(config.providers[0].authenticated, true);
+  assert.equal(config.node.version, process.version, "the page learns which Node the server runs");
   const manual = await fetch(`${base}/manual`);
   assert.equal(manual.status, 200);
   assert.match(await manual.text(), /SoloFactory/);

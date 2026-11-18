@@ -15,6 +15,6 @@
     "hooks": "git config core.hooksPath scripts/hooks && echo \"hooks on: scripts/hooks (pre-commit parse check, pre-push suite + release CI check)\""
   },
   "engines": {
-    "node": ">=22"
+    "node": "^24 || ^26"
   }
 }

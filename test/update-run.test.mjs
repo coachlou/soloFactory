@@ -21,6 +21,7 @@ test("the update prompt runs only U2 on this folder and never restarts SoloFacto
   assert.match(prompt, /Run only its U2 command, with "\/x\/sf"/);
   assert.match(prompt, /never stop, start or restart SoloFactory/);
   assert.match(prompt, /never touch the projects\/ folder/);
+  assert.match(prompt, /Never install, upgrade or switch Node yourself/);
 });
 
 test("Update now refuses outside an install, while busy, with an unknown provider or nothing newer", async () => {

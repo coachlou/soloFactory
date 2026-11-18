@@ -12,7 +12,7 @@ library reachable.
 
 ## Important
 
-- **Node 22 to 24 is required** (24 LTS recommended; newer installs with a warning) and a signed-in `codex` or `claude` CLI. The
+- **Node 26 or 24 LTS is required** (26 recommended; other majors from 22 up run with a warning; below 22 will not start) and a signed-in `codex` or `claude` CLI. The
   installer warns if node is missing but still writes the scaffold.
 - **Building spends subscription quota.** Never start a real build on the
   owner's behalf without an explicit go-ahead. `SOLOFACTORY_DEMO=1` is free.

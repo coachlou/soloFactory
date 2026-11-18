@@ -13,7 +13,7 @@ SoloFactory is running right now and has already checked that nothing is buildin
 
 1. Read the update steps: gh api -H 'Accept: application/vnd.github.raw' repos/coachlou/aimm/contents/aai-release/solofactory/INSTALL.md
 2. Run only its U2 command, with "${folder}" as the folder. Ignore U1 and U3.
-3. If a line starts with warn, follow that runbook's fix only when it needs no one's help; otherwise report it.
+3. If a line starts with warn, follow that runbook's fix only when it needs no one's help; otherwise report it. Never install, upgrade or switch Node yourself: report a node warn line word for word, with the runbook's fix for it.
 4. Print the line from: grep -m1 'app:' "${folder}/.ailib/manifest.yaml"
 End with one short plain sentence saying whether the update worked, then list, in plain words, the runbook's "If they were below ..." notes that apply to someone coming from the version you started on.`;
 }
