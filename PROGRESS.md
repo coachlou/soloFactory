@@ -1,3 +1,14 @@
+## Unreleased: GitHub backup for generated apps
+
+Per project, after each good release, SoloFactory can push the app's code and release tags to a private GitHub repo. Lou's decisions (2026-11-18): a plain backup only (no CI, PRs or deploys on GitHub); off until the owner turns it on; account and repo chosen per project; the owner's own `gh` sign-in, with no credential of Lou's in the distro; Actions turned off on the repo; repo named after the project folder; `data/` backup left for a later brief. Spec: `docs/github-backup-spec.md`.
+- Engine: `src/github-backup.mjs`. Settings in `<project>/.solofactory/backup.json` (gitignored, no secret). The token comes from `gh auth token --user <account>` at push time and reaches git only through a one-shot credential helper and the child's environment. Push: `HEAD` to `main` with `--force-with-lease` (a rollback moves `main` back; older commits stay reachable by their tags), then every `solofactory/*` tag, never forced. Before each push: the repo must still be private, and the new commits must hold no key-shaped value. A remote `solofactory-backup`; `origin` is never touched.
+- Factory: `backupRelease` runs after a tagged release completes, in the background. Events `backup.pushed` / `backup.failed`; a failure never fails the run.
+- Hub: Settings gains *Backup to GitHub* (Connect, Use an existing repo, the on/off switch, Back up now, Open on GitHub, Disconnect; repo, account and last backup as plain text; amber only for a failure). The Live app panel shows one gray backup line, or the amber reason with Retry.
+- API: `GET|PUT|DELETE /api/projects/backup`, `GET /api/projects/backup/accounts`, `POST /api/projects/backup/connect`, `POST /api/projects/backup/push`.
+- Upgrade: no migration. With no `backup.json` nothing changes and nothing calls GitHub.
+- Tests: `test/github-backup.test.mjs` (10, a local bare repo stands in for GitHub).
+- Docs: spec, SPEC §4, README, manual Live app section.
+
 ## Unreleased: release tags for generated apps
 
 Each release of a generated app that passes its deploy checks (health, metrics contract, home page) is tagged `solofactory/release/<n>` in the app's own git repo. Before, only a rollback made a tag (`solofactory/rolled-back/<id>`), so a good version had no name to go back to by hand.

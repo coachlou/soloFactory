@@ -180,6 +180,16 @@ Relaunch never tag. Tagging is best effort: a git error emits `release.tag_faile
 Rollback keeps the rolled-back release's tag; the next release takes the next number. The Live app panel shows
 `release <n>` and the tag; a run shipped before release tags shows its place among the shipped runs.
 
+GitHub backup (`docs/github-backup-spec.md`, `src/github-backup.mjs`). Off until the owner connects a project and
+turns it on; per project, its own GitHub account and private repo, using the owner's own `gh` sign-in (no stored
+or shipped credential). Settings is in `<project>/.solofactory/backup.json`. After a tagged release completes, the
+factory pushes in the background, never holding the deploy: `HEAD` to `main` with `--force-with-lease` (a rollback
+moves `main` back) and every `solofactory/*` tag, never forced. Before each push it checks the repo is still
+private and scans the new commits for key-shaped values. Results are `backup.pushed` / `backup.failed` events and
+`lastPush` in `backup.json`; a failure never fails the run. Connect turns GitHub Actions off on the repo. `data/`,
+`.solofactory/` and other gitignored paths are not backed up. API: `GET|PUT|DELETE /api/projects/backup`,
+`GET /api/projects/backup/accounts`, `POST /api/projects/backup/connect`, `POST /api/projects/backup/push`.
+
 Rollback of a shipped release. `POST /api/jobs/:id/rollback` applies only to a project's newest completed,
 not rolled-back follow-on with a `baseCommit` and an earlier completed release, while nothing in the project
 is running or queued. It commits any hand edits, tags the tree `solofactory/rolled-back/<id>`, stops the app,

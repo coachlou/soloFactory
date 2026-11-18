@@ -9,6 +9,7 @@ import { withReviewDiagnostics } from "./review.mjs";
 import { amendmentPacket, assertBatch, validateRecoveryApproval } from "./feature-recovery.mjs";
 import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, admitsPlanning, assertPlanInputsRevised, assertPlanReviewable, buildRecovery, buildRecoveryPacket, continuationAction, newerRunBlocks, previousRelease, SoloFactory, withContinuation } from "./factory.mjs";
 import { watchConfig } from "./watchdog.mjs";
+import { BackupError, backupState, connectBackup, disconnectBackup, ghGitHub, pushBackup, setBackupEnabled } from "./github-backup.mjs";
 import { backupStatus, dataShape, readConfirmation, shapeChanges, writeConfirmation } from "./data-backup.mjs";
 import {
   COVERAGE_KEYS,
@@ -383,6 +384,28 @@ export async function createSoloFactoryServer(options = {}) {
             { id: "slices", label: "Planned features", detail: "A reviewed feature plan first, then each feature is built, proved and reviewed before the next starts." },
           ],
         });
+      }
+      // GitHub backup of the open project (docs/github-backup-spec.md). GET reads only backup.json, so the hub can poll it.
+      if (url.pathname.startsWith("/api/projects/backup")) {
+        const github = options.github ?? ghGitHub();
+        const dir = store.project;
+        try {
+          if (request.method === "GET" && url.pathname === "/api/projects/backup") return json(response, 200, await backupState(dir));
+          if (request.method === "GET" && url.pathname === "/api/projects/backup/accounts") return json(response, 200, { accounts: await github.accounts() });
+          if (request.method === "POST" && url.pathname === "/api/projects/backup/connect") {
+            const body = await readJson(request);
+            return json(response, 200, await connectBackup(dir, { account: body.account, repo: body.repo || null }, github));
+          }
+          if (request.method === "PUT" && url.pathname === "/api/projects/backup") return json(response, 200, await setBackupEnabled(dir, (await readJson(request)).enabled === true, github));
+          if (request.method === "POST" && url.pathname === "/api/projects/backup/push") {
+            await pushBackup(dir, { github });
+            return json(response, 200, await backupState(dir));
+          }
+          if (request.method === "DELETE" && url.pathname === "/api/projects/backup") return json(response, 200, await disconnectBackup(dir));
+        } catch (error) {
+          if (error instanceof BackupError) return json(response, 400, { error: error.message, code: error.code });
+          throw error;
+        }
       }
       if (request.method === "PUT" && url.pathname === "/api/profiles") {
         const body = await readJson(request);

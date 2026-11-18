@@ -15,6 +15,7 @@ import { addUsage } from "./providers.mjs";
 import { CREDENTIAL_PATTERNS } from "./credentials.mjs";
 import { measureRun } from "./measure.mjs";
 import { dataFeatures, dataShape, readConfirmation, unconfirmed } from "./data-backup.mjs";
+import { ghGitHub, pushBackup, readBackup } from "./github-backup.mjs";
 import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, repeatedSymptom, watchConfig, workerAlive } from "./watchdog.mjs";
 import { amendRepairPlan, archiveReview, assertBatch, consolidationBase, keepCorrecting, assertPlanningCurrent, digest, exhaustedPreparations, planFeatureRecovery, planKey, resumeAmendedReview, reviewedPlanKeys, runFeatureRecovery, sourceBaseline, validateRecoveryApproval, validateRecoveryPlan } from "./feature-recovery.mjs";
 
@@ -141,8 +142,10 @@ async function dataSnapshot(appDir) {
 }
 
 export class SoloFactory {
-  constructor({ store, provider, maxRepairs = 2, batchRepairsFrom = 10, autoStartRepairs = true, commandRunner = runProcess, deployer, watch = watchConfig() } = {}) {
+  constructor({ store, provider, maxRepairs = 2, batchRepairsFrom = 10, autoStartRepairs = true, commandRunner = runProcess, deployer, watch = watchConfig(), github = null } = {}) {
     this.store = store;
+    this.github = github; // GitHub backup access; null means the owner's gh sign-in
+
     this.watch = watch;
     this.provider = provider;
     this.maxRepairs = maxRepairs;
@@ -1185,6 +1188,7 @@ export class SoloFactory {
     await this.store.writeState(job);
     await this.settleDeployment(job);
     await this.emit(job.id, { type: "job.completed", state: "completed", message: `Working app: ${deployment.url}${job.waivedProofs?.length ? ` (owner waived ${job.waivedProofs.map((bug) => bug.id).join(", ")})` : ""}` });
+    if (release) this.backup = this.backupRelease(job, release);
     return job;
   }
 
@@ -1291,6 +1295,24 @@ export class SoloFactory {
       return release;
     } catch (error) {
       await this.emit(job.id, { type: "release.tag_failed", state: job.state, message: `Release tag failed: ${error.message}` }).catch(() => {});
+      return null;
+    }
+  }
+
+  // GitHub backup of a good release (docs/github-backup-spec.md), in the background: the deploy never waits for it,
+  // and a failed backup is an event and an amber line, never a failed run. Off (no backup.json) does nothing.
+  async backupRelease(job, release) {
+    try {
+      const config = await readBackup(this.store.project);
+      if (!config?.enabled) return null;
+      const result = await pushBackup(this.store.project, { github: this.github ?? ghGitHub(), release });
+      const where = `${config.owner}/${config.repo}`;
+      await this.emit(job.id, result.ok
+        ? { type: "backup.pushed", state: job.state, repo: where, release: release.number, commit: result.commit, message: `Backed up release ${release.number} to GitHub (${where}).` }
+        : { type: "backup.failed", state: job.state, repo: where, code: result.code, message: `GitHub backup failed: ${result.reason}` });
+      return result;
+    } catch (error) {
+      await this.emit(job.id, { type: "backup.failed", state: job.state, message: `GitHub backup failed: ${error.message}` }).catch(() => {});
       return null;
     }
   }

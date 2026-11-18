@@ -1,6 +1,6 @@
 # GitHub backup for generated apps
 
-Status: spec for Lou's review. Not implemented. Grounded in `main` at 56b9602 (PR 13, release tags).
+Status: built on `docs/github-backup-spec` (PR 14), for Lou's review. Grounded in `main` at 56b9602 (PR 13, release tags).
 Origin: project chat, 2026-11-18. Decisions below are Lou's from that chat.
 
 ---
@@ -15,8 +15,11 @@ disk dies or the folder is lost, every release goes with it. There is no copy an
    No CI, workflows, pull requests or deploys on GitHub.
 2. Off until the owner turns it on, per project.
 3. The GitHub account and the repo are chosen per project.
-4. `gh` sign-in is fine in development, but the feature must not ship in a release until GitHub
-   device-flow sign-in is in place (see Release gate).
+4. It uses the owner's own `gh` sign-in. No GitHub credential of Lou's, or anyone's, ships in the
+   distro or is stored by SoloFactory (Lou, 2026-11-18: "don't share my github credentials with the
+   distribution release").
+5. Actions is turned off on every backup repo, new or existing. A new repo is named after the project
+   folder. Backing up `data/` is a separate, later brief. (Lou agreed to all three, 2026-11-18.)
 
 ## What is pushed, and what is not
 - Pushed: the `main` branch, every `solofactory/release/<n>` tag, and every `solofactory/rolled-back/<runId>`
@@ -35,7 +38,7 @@ disk dies or the folder is lost, every release goes with it. There is no copy an
      chosen account. A name already taken there gets a `-backup` suffix, then `-backup-2`, and so on.
    - **Use an existing repo**: a list of that account's repos. Only private, empty-or-ours repos are offered
      (see Privacy and Safety).
-4. On creation SoloFactory also turns GitHub Actions off for that repo
+4. On connect SoloFactory also turns GitHub Actions off for that repo, new or existing
    (`PUT /repos/{owner}/{repo}/actions/permissions`, `enabled: false`). So even if a build ever writes a
    file under `.github/workflows/`, nothing runs on GitHub.
 5. SoloFactory adds a git remote named `solofactory-backup`, never `origin`, so an app the owner adopted
@@ -59,24 +62,19 @@ disk dies or the folder is lost, every release goes with it. There is no copy an
 ## Auth: options and recommendation
 | Option | How | For | Against |
 |---|---|---|---|
-| A. `gh` CLI (dev first) | Use the accounts `gh auth status` already lists. At push time, get the token with `gh auth token --hostname github.com --user <login>` and hand it to git for that one command. | `gh` is already the online install and update path, so most owners are signed in. Handles several accounts. SoloFactory stores no secret. | Needs `gh` installed. Its token scopes must include `repo` (the `gh` default does). |
+| **A. `gh` CLI** (built) | Use the accounts `gh auth status` already lists. At push time, get the token with `gh auth token --hostname github.com --user <login>` and hand it to git for that one command. | `gh` is already the online install and update path, so most owners are signed in. Handles several accounts. SoloFactory stores no secret. | Needs `gh` installed. Its token scopes must include `repo` (the `gh` default does). |
 | B. Fine-grained token pasted in Settings | Owner makes a token limited to one repo with Contents read/write. Stored in the macOS Keychain (`security add-generic-password`, service `solofactory-backup`, account = project id). | Works without `gh`. Narrowest scope. | Can't create a repo (fine-grained tokens limited to one repo cannot), so the owner creates it first. Tokens expire; the push then fails with a clear amber line. |
-| **C. OAuth device flow** (required to ship) | SoloFactory shows a code; owner approves on github.com. | Works for members without `gh`. | Needs a registered GitHub OAuth app owned by Lou, its client id shipped in the distro, and token storage like B. More to build and maintain. |
+| C. OAuth device flow (not built) | SoloFactory shows a code; owner approves on github.com. | Works for members without `gh`. | Needs a registered GitHub OAuth app owned by Lou, its client id shipped in the distro, and token storage like B. More to build and maintain. |
 
-Decision (Lou, 2026-11-18): A may be built first for development, but it **must not ship in a release**.
-Members won't have `gh`, so C (device flow) is required before release. B stays as a fallback.
+Built: A. Each owner signs in with their own `gh` on their own Mac; SoloFactory asks `gh` for a token at push time
+and keeps nothing. B and C are not built. C would need a GitHub OAuth app; its client id is public, not a
+credential, but it is not needed while `gh` covers it.
 
-### Release gate
-1. Until device-flow sign-in (C) lands, the whole feature sits behind a dev-only flag,
-   `SOLOFACTORY_DEV_GITHUB_BACKUP=1`. With the flag unset, the Settings section, the Live app line and the
-   `/api/projects/backup*` routes do not exist, and no push ever runs.
-2. The flag is read only from the environment, never from `profiles.json` or the UI, and is not listed in the
-   Settings table.
-3. The release steps (DEVELOPING.md) gain a check: a release that ships this feature must have C done and
-   tested, and the flag removed. Until then the release checklist confirms the flag defaults off.
-4. C needs a GitHub OAuth app registered by Lou, with device flow on and the `repo` scope. Its client id
-   ships in the distro (a client id is public, not a secret). Tokens are stored as in B (Keychain).
-5. With C in place, Connect offers device flow first and uses `gh` silently when it is already signed in.
+### Nothing of Lou's ships
+- The distro holds no token, no account name and no repo name. `backup.json` lives in each project's
+  `.solofactory/` (gitignored, never in the distro), and holds no secret.
+- An owner without `gh` sees: "The GitHub CLI (gh) is not installed. Install it, run gh auth login, then try
+  again." Nothing else changes for them.
 
 ### Where credentials live
 - Never in the project repo, never in `backup.json`, never in a remote URL, never in run events or logs.
@@ -142,30 +140,25 @@ any value not yet editable shown as plain text.
 CI or any GitHub workflow. Backing up `data/`. Restoring a project from GitHub in the UI (a clone by hand
 works: the tags hold every release). GitHub Enterprise hosts. More than one backup remote per project.
 
-## Checks (offline, `test/github-backup.test.mjs`)
-A local bare repo stands in for GitHub; the GitHub API calls go through a stub.
-- With `SOLOFACTORY_DEV_GITHUB_BACKUP` unset, the backup routes answer 404, Settings has no backup section, and a release pushes nothing.
-- With no `backup.json`, a release pushes nothing and adds no remote.
-- Connected but off: a release pushes nothing.
-- On: a release pushes `main` and the new release tag; the panel line names the release.
-- Turning on in a project with three releases pushes all three tags.
-- After a rollback, the next release pushes `main` with lease, and the rolled-back tag is on the remote.
+## Checks (offline, `test/github-backup.test.mjs`, 10 tests)
+A local bare repo stands in for GitHub; the GitHub API is a stub.
+- With no `backup.json`, a release pushes nothing, calls nothing and adds no remote.
+- Connect creates a private repo (the next free name when the folder name is taken), turns Actions off, and pushes nothing.
+- Turning on pushes every release so far; each new release then pushes `main` and its tag (`backup.pushed`).
+- After a rollback, the next release backs up, and the rolled-back tag and the rolled-back release's tag stay on the remote.
 - A remote `main` changed by hand: the lease refuses, `backup.failed` says so, the deploy is still `completed`.
-- A repo stub reporting public: the push is skipped with the paused line.
-- A commit holding a key-shaped string: the push is blocked, the file is named.
-- A failed push leaves the run `completed`, and the next release pushes both releases.
-- The token never appears in `.git/config`, `backup.json` or any event.
-- An existing `origin` is unchanged after Connect, push and Disconnect.
+- A repo made public pauses the backup; a key-shaped value blocks the push and names the file.
+- An existing repo is refused when public or holding unrelated history; an empty one is accepted.
+- No token in `.git/config` or `backup.json`; Disconnect keeps `origin` and deletes nothing on GitHub.
+- `gh` accounts and tokens are read from the owner's own `gh`; a missing `gh` gives the install line.
+- The API reads, connects, turns on, backs up now and disconnects the open project.
 
 ## Docs
 README (Operational boundaries: what is and isn't backed up), SPEC (release section), manual Live app and
 Settings sections, INSTALL note that `gh` sign-in enables backup, changelog and PROGRESS entry.
 
-## Open questions for Lou
-Answered: auth order (Lou, 2026-11-18): `gh` first in development only; device flow before any release.
-
-1. When the owner picks an existing repo that has Actions on, should SoloFactory turn Actions off there
-   too, or only warn? (Proposed: ask once with a plain yes/no.)
-2. Repo name: the project folder name, or the app's working name from the brief?
-3. Should Settings also offer a simple local copy of `data/` (a zip next to the project), since this
-   backup leaves it out? That would be a separate brief.
+## Decided (Lou, 2026-11-18)
+- Auth: the owner's own `gh` sign-in; none of Lou's credentials in the release.
+- Existing repo with Actions on: SoloFactory turns Actions off.
+- Repo name: the project folder name.
+- `data/` backup: a separate, later brief.
