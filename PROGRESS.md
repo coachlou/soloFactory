@@ -1,4 +1,10 @@
-## Unreleased: GitHub backup for generated apps
+## 0.13.0: Node 24/26 LTS, release tags, GitHub backup (2026-11-18)
+
+Minor release: Node 26 LTS (recommended) and 24 LTS supported, each good release of a generated app tagged `solofactory/release/<n>`, an optional per-project GitHub backup that is off until the owner turns it on and uses their own `gh` sign-in, and three flaky tests fixed. Upgrades from 0.12.0 use the same safe update (Update now, the copy prompt or the update skill); projects and run states are untouched, and nothing migrates.
+- Docs: README, SPEC §4, manual (Live app, Settings, start section; header 0.13), DEVELOPING, INSTALL *If they were below 0.13.0* note.
+- Smoke: three-brief set on the Claude profile defaults on b56b944, all passed first try: Habit Ledger 3 of 3 (run e97906e2), Household Inventory 14 of 14 (run 81ff4ba5), Voice Notes 6 of 6 (run 44b41ea4); $23.95, 82 min. Over budget only by small margins (review, planning, implement), no failures.
+
+### GitHub backup for generated apps
 
 Per project, after each good release, SoloFactory can push the app's code and release tags to a private GitHub repo. Lou's decisions (2026-11-18): a plain backup only (no CI, PRs or deploys on GitHub); off until the owner turns it on; account and repo chosen per project; the owner's own `gh` sign-in, with no credential of Lou's in the distro; Actions turned off on the repo; repo named after the project folder; `data/` backup left for a later brief. Spec: `docs/github-backup-spec.md`.
 - Engine: `src/github-backup.mjs`. Settings in `<project>/.solofactory/backup.json` (gitignored, no secret). The token comes from `gh auth token --user <account>` at push time and reaches git only through a one-shot credential helper and the child's environment. Push: `HEAD` to `main` with `--force-with-lease` (a rollback moves `main` back; older commits stay reachable by their tags), then every `solofactory/*` tag, never forced. Before each push: the repo must still be private, and the new commits must hold no key-shaped value. A remote `solofactory-backup`; `origin` is never touched.
@@ -9,7 +15,7 @@ Per project, after each good release, SoloFactory can push the app's code and re
 - Tests: `test/github-backup.test.mjs` (10, a local bare repo stands in for GitHub).
 - Docs: spec, SPEC §4, README, manual Live app section.
 
-## Unreleased: release tags for generated apps
+### Release tags for generated apps
 
 Each release of a generated app that passes its deploy checks (health, metrics contract, home page) is tagged `solofactory/release/<n>` in the app's own git repo. Before, only a rollback made a tag (`solofactory/rolled-back/<id>`), so a good version had no name to go back to by hand.
 - Engine: `tagRelease` in `src/factory.mjs` runs after the deploy passes and before the run completes. It commits anything uncommitted (`factory: release <n>`), adds an annotated tag, records `release: {number, tag, commit, at}` on the run and emits `release.tagged`. Best effort: a git error emits `release.tag_failed` and the run still completes.
@@ -20,7 +26,7 @@ Each release of a generated app that passes its deploy checks (health, metrics c
 - Tests: `test/release-tags.test.mjs` (4: tag order and commit, legacy count, failed tag never fails the deploy, rollback keeps tags and never reuses a number). Full suite 523/523 on Node 22.23.5.
 - Docs: SPEC §4 Release tags, README, manual Live app section.
 
-## Unreleased: Node 24 and 26 LTS
+### Node 24 and 26 LTS
 
 Node 26 became the Active LTS in late October 2026 and Node 24 moved to Maintenance LTS (security fixes to 2028-04-30). SoloFactory supports both. The old "newer than supported" warning on 25+ dated from before 26 was LTS; better-sqlite3 has shipped Node 26 prebuilds since 12.10, and 13.2.0 installs on 26.13.1 with no compile.
 - Settings: `package.json` engines `^24 || ^26` (was `>=22`); `.nvmrc` and `.node-version` say `26`; CI runs the suite on Node 24 and 26 (it ran Node 22 only).
@@ -29,7 +35,7 @@ Node 26 became the Active LTS in late October 2026 and Node 24 moved to Maintena
 - Tests: `test/node-version.test.mjs` (the rule, and every setting naming the same majors); update prompt and `/api/config` assertions. Full suite 518/518 on Node 24.22.3 and on Node 26.13.1.
 - Docs: README, INSTALL (A2 table and version note, A4 and B3 now install 26 with an nvm/fnm option, U2 warn note, U4, new-install checklist, Fixing a bad install), distro instructions and template, manual start section, DEVELOPING Node version section. Release note for members: the next release's INSTALL "If they were below" note.
 
-## Unreleased: flaky tests fixed (2026-11-18)
+### Flaky tests fixed (2026-11-18)
 
 Two tests turned 3 of the last 18 CI runs red, and a third failed under load (runs 43975374301, 43976454700, 44220157155). Each fix removes the cause; nothing retries.
 - `test/update-run.test.mjs`: the tests slept 20 ms and then expected the background update to have finished. Under CPU load it had not (12 of 24 parallel runs failed; CI run 44220157155). Run 43976454700's half-written `update.json` was already fixed by the atomic save. The update runner now exposes `settled()` (and the server `updateSettled()`), and the tests await it. After: 0 of 40 parallel runs failed under the same load.

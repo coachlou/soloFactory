@@ -903,6 +903,13 @@ could change or remove them:
 - New builds use `npm test` with a plain `node --test` script and run the whole suite on the first feature, so a broken test command fails early instead of costing a repair at the end. Existing apps are unchanged.
 - Nothing to migrate by hand.
 
+**If they were below 0.13.0 before the update**, say in one breath that SoloFactory now supports Node 26 LTS (recommended) and Node 24 LTS, each good release of an app gets a numbered tag, and they can turn on a GitHub backup per project if they want one. What you need to know yourself:
+
+- Node: 24 and 26 are supported. On any other major from 22 up, the update and the server print `warn  node <n> is not supported by SoloFactory` and the page shows *Switch to a supported Node* once; everything still runs. Never install or switch Node for them unattended: report the warn line and point to A4 / B3 (Node 26). Below 22 SoloFactory will not start.
+- Release tags: each release that passes its deploy checks is tagged `solofactory/release/<n>` in the app's own git repo. Numbers carry on from the project's earlier shipped runs, so the first tagged release is not "release 1" for an older project.
+- GitHub backup: off for every project until they turn it on in **Settings** → *Backup to GitHub*. It needs their own `gh` signed in (`gh auth login`); SoloFactory stores no token. It pushes code and release tags to a private repo with Actions turned off, and does not back up `data/`. Mention it only if they ask about backups.
+- Nothing to migrate by hand.
+
 **If they were below 0.12.0 before the update**, say in one breath that apps they had running come back on their own when SoloFactory starts, and a shipped update can be rolled back. What you need to know yourself:
 
 - Restart on start: an app that was live when SoloFactory stopped (a crash, a forced quit or a power cut included) starts again on its old port when free. An app they stopped themselves stays stopped. `SOLOFACTORY_RESTART_APPS=0` turns this off.
