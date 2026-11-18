@@ -1,3 +1,12 @@
+## Unreleased: Node 24 and 26 LTS
+
+Node 26 became the Active LTS in late October 2026 and Node 24 moved to Maintenance LTS (security fixes to 2028-04-30). SoloFactory supports both. The old "newer than supported" warning on 25+ dated from before 26 was LTS; better-sqlite3 has shipped Node 26 prebuilds since 12.10, and 13.2.0 installs on 26.13.1 with no compile.
+- Settings: `package.json` engines `^24 || ^26` (was `>=22`); `.nvmrc` and `.node-version` say `26`; CI runs the suite on Node 24 and 26 (it ran Node 22 only).
+- One rule, `src/node-version.mjs`: 24 and 26 are supported; other majors from 22 up run with a warning; below 22 will not start. `post.sh` (install and Update now) warns on any unsupported major (it warned only above 24, so it warned on 26); `run.sh` refuses below 22 instead of only when Node is missing; the server prints a `warn` line at startup and `/api/config` reports `node`; the page shows *Switch to a supported Node* once per Node version. Nothing blocks a runnable major, so projects keep working.
+- Update now: the unattended agent is told never to install or switch Node itself, only to report the warn line with the runbook fix.
+- Tests: `test/node-version.test.mjs` (the rule, and every setting naming the same majors); update prompt and `/api/config` assertions. Full suite 518/518 on Node 24.22.3 and on Node 26.13.1.
+- Docs: README, INSTALL (A2 table and version note, A4 and B3 now install 26 with an nvm/fnm option, U2 warn note, U4, new-install checklist, Fixing a bad install), distro instructions and template, manual start section, DEVELOPING Node version section. Release note for members: the next release's INSTALL "If they were below" note.
+
 ## 0.12.0: live apps restart, rollback, four-tier gates (2026-11-17)
 
 Minor release: live apps come back when SoloFactory starts, a data backup step before a data-changing update deploys, rollback of a shipped update, and release-from-green-CI gates. Upgrades from 0.11.0 use the same safe update (Update now, the copy prompt or the update skill); projects and run states are untouched.

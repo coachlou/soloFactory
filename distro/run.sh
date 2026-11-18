@@ -15,7 +15,11 @@ while [ ! -d "$FOLDER/.aai" ]; do
   [ "$FOLDER" = "/" ] && { echo "no .aai/ above $HERE — run install.sh first" >&2; exit 1; }
   FOLDER="$(dirname "$FOLDER")"
 done
-command -v node >/dev/null || { echo "node 22+ is required" >&2; exit 1; }
+# Node 24 and 26 LTS: same rule as src/node-version.mjs. Below 22 cannot run; the server warns on any other major.
+SUPPORTED="24 26"
+command -v node >/dev/null || { echo "node 22+ is required — install Node 26 LTS (see INSTALL.md A4 / B3)" >&2; exit 1; }
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+[ "$NODE_MAJOR" -ge 22 ] || { echo "node 22+ is required (found $(node --version)) — install Node 26 LTS (see INSTALL.md A4 / B3)" >&2; exit 1; }
 mkdir -p "$FOLDER/projects" "$FOLDER/.aai/memory/solofactory"
 export SOLOFACTORY_HOME="${SOLOFACTORY_HOME:-$FOLDER/.aai/memory/solofactory}"
 export SOLOFACTORY_ROOT="${SOLOFACTORY_ROOT:-$FOLDER}"

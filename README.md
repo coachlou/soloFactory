@@ -14,7 +14,7 @@ when a gate fails, and the top-level state machine.
 
 ## Requirements
 
-- Node.js 22 to 24; Node 24 LTS is the recommended version. The installer warns on Node 25 and up (it still installs), because some packages the factory builds with ship no prebuilt files for it yet.
+- Node.js 26 LTS (recommended) or 24 LTS: `package.json` engines and CI cover both, and `.nvmrc` / `.node-version` name 26. Other majors from 22 up still run, but the installer, the server at startup and the page all warn, because they are untested. Below 22 it will not start.
 - macOS or Linux. On Windows it runs inside WSL2 (Ubuntu); there is no native-Windows path. See `docs/INSTALL.md` Track B, which has not yet been walked end to end on a real Windows machine.
 - Codex CLI signed in with ChatGPT (`codex login status` should say `Logged in using ChatGPT`),
   or Claude Code signed in with a subscription account.

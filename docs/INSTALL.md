@@ -69,7 +69,7 @@ Nothing is written to a file this time — the app checks for the CLI every time
 But if they open the web page before signing in, they see a dead provider list, conclude the
 install failed, and you spend the next ten minutes undoing that impression.
 
-Correct order, both platforms: **git → Node 24 LTS → coding agent (installed AND logged in) → `gh` signed in (online
+Correct order, both platforms: **git → Node 26 LTS (or 24) → coding agent (installed AND logged in) → `gh` signed in (online
 install only) → SoloFactory installer → start it.**
 
 ---
@@ -226,15 +226,16 @@ Read the report yourself. Then handle only what's missing:
 | Line says | What to do |
 |---|---|
 | `git: MISSING` or `python3: MISSING` | A3 (the same Command Line Tools install provides both) |
-| `node: MISSING`, below `v22`, or `v25` and up | A4 |
+| `node: MISSING`, or anything other than `v24` or `v26` | A4 |
 | both `claude:` and `codex:` are `MISSING` | A5 |
 | `gh: MISSING`, or not signed in (`gh auth status`) | only needed for the online install; see GitHub access above, or use the zip |
-| everything present and `node` is v22, v23 or v24 | skip to A6 |
+| everything present and `node` is v24 or v26 | skip to A6 |
 
-**Reading the node version:** it prints like `v22.12.0` or `v24.3.0`. The requirement is
-major version **22 to 24** — `v24.3.0` passes, `v20.19.0` and `v26.1.0` do not. Newer is not
-better here: some packages the factory builds with ship no prebuilt files for Node 26 yet and
-fail to install, which costs a paid repair turn. SoloFactory is pinned to **Node 24 LTS**.
+**Reading the node version:** it prints like `v24.3.0` or `v26.13.1`. SoloFactory supports
+the two LTS lines: **Node 26 LTS** (recommended) and **Node 24 LTS**. `v24.3.0` and
+`v26.13.1` pass; `v22.12.0`, `v25.1.0` and `v27.0.0` do not. Other majors 22 and up still
+start it, with a warning, because they are untested and builds can fail on them; below 22 it
+will not start.
 
 **macOS already has** `curl`, `tar`, `rsync`, and `bash`. Do not install those, and do not
 mention them.
@@ -271,9 +272,9 @@ Do **not** send a non-technical owner to Homebrew. Use Apple's own installer pac
 > SoloFactory runs on something called Node. I'll have you download it the normal way —
 > like installing any other Mac app.
 >
-> 1. Go to **https://nodejs.org/dist/latest-v24.x/**
+> 1. Go to **https://nodejs.org/dist/latest-v26.x/**
 > 2. It's a plain list of files. Click the one ending in **.pkg** (it looks like
->    `node-v24.x.y.pkg`).
+>    `node-v26.x.y.pkg`).
 > 3. Open the file that lands in your Downloads folder.
 > 4. Click Continue / Agree / Install through the windows. It will ask for your Mac password
 >    near the end — type it and press Enter. The password stays invisible while you type;
@@ -287,13 +288,15 @@ newly installed programs), and verify:
 node --version
 ```
 
-Expect `v24`. If it still says missing in a *fresh* window, the installer did not
-finish — have them re-open the downloaded file and complete it. If it still says `v25` or
-higher, another Node sits ahead on PATH (Homebrew, nvm): run `which -a node`, tell the owner
-which one it is, and ask before removing anything.
+Expect `v26`. If it still says missing in a *fresh* window, the installer did not
+finish — have them re-open the downloaded file and complete it. If it still says another
+version, another Node sits ahead on PATH (Homebrew, nvm, fnm): run `which -a node`, tell the
+owner which one it is, and ask before removing anything. An nvm owner can keep their other
+versions and run `nvm install 26 && nvm alias default 26` instead (fnm: `fnm install 26 &&
+fnm default 26`). An owner already on v24 is fine: leave it.
 
-Do not send them to the nodejs.org home page: from late October 2026 its **LTS** button
-downloads Node 26.
+Use the plain file list above rather than the nodejs.org home page, so the download is a
+`.pkg` for Node 26 and not a newer Current release.
 
 ## A5. Install and sign in to the coding agent
 
@@ -576,7 +579,7 @@ Ubuntu's built-in Node is far too old. Use NodeSource, which is the standard way
 current Node on Ubuntu.
 
 ```sh
-curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt install -y nodejs
+curl -fsSL https://deb.nodesource.com/setup_26.x | sudo -E bash - && sudo apt install -y nodejs
 ```
 
 > This installs the engine SoloFactory runs on. It'll ask for your Ubuntu password again and
@@ -588,7 +591,7 @@ Verify:
 node --version
 ```
 
-Expect `v24`. If it prints `v25` or higher, an older NodeSource setup is still installed:
+Expect `v26`. If it prints another version, an older NodeSource setup is still installed:
 run `sudo apt remove -y nodejs`, then the command above again.
 
 ## B4. Install and sign in to the coding agent
@@ -797,7 +800,9 @@ each means, so you can tell the owner in plain words if they ask:
 
 Treat any line beginning with `warn` as a failure to fix, not a note to pass along — see
 **Fixing a bad install**. `warn node 22+ not found` after an update almost always means a
-stale window: fresh window, then A4 / B3 only if it persists.
+stale window: fresh window, then A4 / B3 only if it persists. `warn node N is not supported`
+means Node is not 24 or 26 LTS: A4 / B3. Do not change Node from an unattended Update now;
+report the line instead.
 
 Confirm the version actually moved:
 
@@ -936,8 +941,8 @@ update is finished once U4 holds.
 
 1. The server was stopped before the update, and started again after it.
 2. The `app:` line in `.ailib/manifest.yaml` shows a newer version than before.
-3. `node --version` prints v22, v23 or v24. Higher (a member who installed Node 26 on
-   their own) → A4 / B3 to put Node 24 back.
+3. `node --version` prints v24 or v26. Anything else (a member on Node 22, 23 or 25)
+   → A4 / B3 to install Node 26 LTS.
 4. The page loads at `http://127.0.0.1:4173` with a provider signed in.
 5. The project selector lists the projects they had before.
 6. Each project's runs show in the Work list in the state they were in: shipped and cancelled
@@ -955,7 +960,8 @@ Work these yourself. Do not read this table out loud.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `warn  node 22+ not found on PATH` | Node missing, or installed in a stale window | Fresh terminal window first; if still missing, A4 / B3 |
-| `warn  node 26 is newer than SoloFactory supports` (any version above 24) | Node too new for some packages the factory builds with | A4 / B3 to install Node 24 |
+| `warn  node 25 is not supported by SoloFactory` (any major but 24 or 26) | Node is not an LTS line SoloFactory is tested on | A4 / B3 to install Node 26 |
+| Page shows *Switch to a supported Node* | The server is running on a Node other than 24 or 26 | A4 / B3, fresh window, restart the server |
 | `node 22+ is required` and it **exits** | Node not on PATH at all | A4 / B3 |
 | `no .aai/ above ...` | Running `start.sh` from the wrong folder, or a half-install | `cd "<SF>"` first; if that fails, re-run the installer |
 | Page says *"Select an authenticated subscription provider"* | CLI missing or not signed in | C2 |
@@ -1001,7 +1007,7 @@ This checklist is for a new install. An update is judged by **U4** instead. Do n
 owner they are finished until every one of these is true. Verify them
 yourself; do not ask the owner to confirm them.
 
-1. `node --version` prints v22, v23 or v24.
+1. `node --version` prints v24 or v26.
 2. `git --version` prints a version.
 3. `command -v claude` (or `codex`) prints a path, in the same window the server starts from.
 4. `<SF>/start.sh` exists.
