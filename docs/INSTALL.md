@@ -898,6 +898,14 @@ could change or remove them:
 - New builds use `npm test` with a plain `node --test` script and run the whole suite on the first feature, so a broken test command fails early instead of costing a repair at the end. Existing apps are unchanged.
 - Nothing to migrate by hand.
 
+**If they were below 0.12.0 before the update**, say in one breath that apps they had running come back on their own when SoloFactory starts, and a shipped update can be rolled back. What you need to know yourself:
+
+- Restart on start: an app that was live when SoloFactory stopped (a crash, a forced quit or a power cut included) starts again on its old port when free. An app they stopped themselves stays stopped. `SOLOFACTORY_RESTART_APPS=0` turns this off.
+- An update to an app that stores data, whose features change how it stores that data, asks them to back up the app's `data/` folder first (a *Needs you* row and a checkbox on the run card). Only the deploy waits for it.
+- The newest shipped update of a project offers **Roll back to the previous release** in the Live app panel. Their hand edits are kept in a tagged commit, the previous release starts again, and `data/` is left alone; if the update changed the data's shape, restore the backup.
+- An app that quits on its own within 2 minutes of starting shows an amber line in the Live app panel naming **Relaunch** and the rollback. Nothing rolls back by itself.
+- Nothing to migrate by hand.
+
 **If they were below 0.11.0 before the update** (alpha testers included), say in one breath that the page has a new layout and nothing they built is gone. What you need to know yourself:
 
 - The left rail holds the **Work** list (every run of every project: Needs you, Running, Queued, Done) and **Menu** (New project, Feedback, Manual, Settings, Check for updates). The Factory board page is gone; the Work list replaces it.

@@ -1,4 +1,10 @@
-## Unreleased: four-tier gates
+## 0.12.0: live apps restart, rollback, four-tier gates (2026-11-17)
+
+Minor release: live apps come back when SoloFactory starts, a data backup step before a data-changing update deploys, rollback of a shipped update, and release-from-green-CI gates. Upgrades from 0.11.0 use the same safe update (Update now, the copy prompt or the update skill); projects and run states are untouched.
+- Docs: README, SPEC §4/§9, manual (Live app, Work list; header 0.12), DEVELOPING gate tiers, INSTALL *If they were below 0.12.0* note.
+- Smoke: three-brief set on the Claude profile defaults on f455025: Habit Ledger passed (run dac80169), Household Inventory 11 of 11 and Voice Notes 6 of 6 passed on rerun ($14.87, 42 min). The first Household Inventory try ran out of final-review repairs on three bad-input bugs in a row (not a regression; class-wide hardening repair is planned for the next release).
+
+### Four-tier gates
 
 Built from `docs/four-tier-gates-spec.md`, which takes four picks from the four-tier validation article. The 0.11.0 smoke runs showed that gates are 2-4% of run time, so test-result reuse and test time budgets were skipped.
 - Release only from green: `scripts/ci-green.mjs` checks that the Linux CI `test` workflow passed on the exact commit, and the versioned `pre-push` runs it on a push to main that changes the version.
@@ -9,9 +15,9 @@ Built from `docs/four-tier-gates-spec.md`, which takes four picks from the four-
 - Agents: `.aai/instructions.md` (now tracked) holds the common rules: run `npm run hooks`, never use `--no-verify`, release from green CI. `CLAUDE.md` and `AGENTS.md` hold only Claude- and Codex-specific notes and route there.
 - Docs: DEVELOPING gate-tier table, hooks and release-from-green flow, smoke budgets; SPEC §4 early exit; manual Live app section.
 
-## Unreleased: live apps restart, data backup, rollback
+### Live apps restart, data backup, rollback
 
-Built from `docs/live-app-restart-rollback-spec.md`. Not released; touching `src/prompts.mjs` and `src/factory.mjs` trips the release smoke gate, which is expected and left for the release.
+Built from `docs/live-app-restart-rollback-spec.md`.
 - Restart on start: apps the server stopped (or that died with it: a crash, a forced quit, a power cut) start again when SoloFactory starts, on their old port when free; an app the owner stopped stays stopped. `SOLOFACTORY_RESTART_APPS=0` turns it off.
 - Data backup: an update to an app with data, whose features change how it stores data, asks the owner to back up `data/` (Needs you row and run-card checkbox). Only the deploy waits; confirming deploys with no model call.
 - Rollback: the newest shipped update offers *Roll back to the previous release*: hand edits committed and tagged `solofactory/rolled-back/<id>`, tree reset to the run's base, previous release relaunched, `data/` untouched; the owner is told to restore the backup when the data's shape changed.
