@@ -1,3 +1,14 @@
+## Unreleased: release tags for generated apps
+
+Each release of a generated app that passes its deploy checks (health, metrics contract, home page) is tagged `solofactory/release/<n>` in the app's own git repo. Before, only a rollback made a tag (`solofactory/rolled-back/<id>`), so a good version had no name to go back to by hand.
+- Engine: `tagRelease` in `src/factory.mjs` runs after the deploy passes and before the run completes. It commits anything uncommitted (`factory: release <n>`), adds an annotated tag, records `release: {number, tag, commit, at}` on the run and emits `release.tagged`. Best effort: a git error emits `release.tag_failed` and the run still completes.
+- Numbering: one past both the highest release tag and the count of the project's other shipped runs (rolled-back ones included). Numbers never repeat. A project shipped before this change carries on its count, so its next release is not "release 1". Relaunch, restart on start and Dismiss, then Relaunch never tag.
+- Rollback: the rolled-back release keeps its tag; the `rollback` record adds `release` and `previousRelease`, and the message names the release it went back to (*Rolled back to Pocket Pulse (release 1)*). The rollback offer names it too.
+- Hub: the Live app header's *release N* now comes from the tag (it showed the project's count of all runs, failed ones included); a muted line under the address shows the git tag. Runs from before tags show their place among shipped runs.
+- Upgrade: no migration. Existing runs and projects are untouched; the first release after the update is tagged with the carried-on number.
+- Tests: `test/release-tags.test.mjs` (4: tag order and commit, legacy count, failed tag never fails the deploy, rollback keeps tags and never reuses a number). Full suite 523/523 on Node 22.23.5.
+- Docs: SPEC §4 Release tags, README, manual Live app section.
+
 ## Unreleased: Node 24 and 26 LTS
 
 Node 26 became the Active LTS in late October 2026 and Node 24 moved to Maintenance LTS (security fixes to 2028-04-30). SoloFactory supports both. The old "newer than supported" warning on 25+ dated from before 26 was LTS; better-sqlite3 has shipped Node 26 prebuilds since 12.10, and 13.2.0 installs on 26.13.1 with no compile.

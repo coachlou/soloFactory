@@ -285,6 +285,9 @@
 <div style="display: flex; flex-direction: column; gap: 4px">
 <span style="display: flex; gap: 8px; align-items: center"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 99px; background: {{app.dot}}"></span><strong style="font-weight: 600">{{app.statusText}} · {{app.release}}</strong></span>
 <span style="font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--text2)">{{app.url}}</span>
+<sc-if value="{{app.releaseTag}}" hint-placeholder-val="{{false}}">
+<span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted)">{{app.releaseTag}}</span>
+</sc-if>
 </div>
 <div style="display: flex; flex-wrap: wrap; gap: 8px">
 <sc-if value="{{app.up}}" hint-placeholder-val="{{true}}">
