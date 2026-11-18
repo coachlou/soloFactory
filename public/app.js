@@ -1813,7 +1813,7 @@ class Live extends Component {
       }
     }, 3000);
   }
-  // Pinned to Node 24 LTS (src/node-version.mjs): say once per Node version when the server runs another.
+  // Node 24 and 26 LTS (src/node-version.mjs): say once per Node version when the server runs another.
   // It is a notice, never a block: projects and runs keep working while the owner switches.
   checkNode() {
     const node = state.config?.node;
@@ -1821,7 +1821,7 @@ class Live extends Component {
     if (this.state.info) return; // another notice is open: ask again on the next page load
     const key = "solofactory.node-warned." + node.version;
     try { if (localStorage.getItem(key)) return; localStorage.setItem(key, "1"); } catch {}
-    this.setState({ info: { title: "Switch to Node 24 LTS", text: node.problem } });
+    this.setState({ info: { title: "Switch to a supported Node", text: node.problem } });
   }
   // After Update now restarts the server, say once what changed.
   async updateDone() {

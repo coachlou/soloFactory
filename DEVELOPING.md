@@ -5,12 +5,14 @@ Repo-only: none of this ships in the distro (`distro/APP_FILES`). Coding agents 
 
 ## Node version
 
-SoloFactory is pinned to Node 24 LTS. `.nvmrc` and `.node-version` say `24`, `package.json` engines say `24.x`,
-and CI reads `.nvmrc`. `src/node-version.mjs` holds the rule that `distro/install.d/post.sh`, `distro/run.sh`,
-the server (a `warn` line at startup) and the page (a once-per-version notice) all follow: 24 is supported,
-22, 23 and 25+ run with a warning, below 22 refuses to start. To move the pin, change all of these together;
-`test/node-version.test.mjs` fails when they disagree. With nvm or fnm, `nvm use` / `fnm use` in the repo
-picks Node 24 without changing the system Node.
+SoloFactory supports both Node LTS lines: 26 (Active LTS, recommended) and 24 (Maintenance LTS to 2028-04-30).
+`.nvmrc` and `.node-version` say `26`, `package.json` engines say `^24 || ^26`, and CI runs the suite on both.
+`src/node-version.mjs` holds the rule that `distro/install.d/post.sh`, `distro/run.sh`, the server (a `warn`
+line at startup) and the page (a once-per-version notice) all follow: 24 and 26 are supported, other majors
+from 22 up run with a warning, below 22 refuses to start. When the LTS lines move (Node 28 LTS in late
+October 2028 by the usual schedule), change all of these together; `test/node-version.test.mjs` fails when
+they disagree. With nvm or fnm, `nvm use` / `fnm use` in the repo picks the recommended Node without
+changing the system Node.
 
 ## Gate tiers
 

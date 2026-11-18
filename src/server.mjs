@@ -372,7 +372,7 @@ export async function createSoloFactoryServer(options = {}) {
           : discoverProviders();
         return json(response, 200, {
           providers,
-          // Pinned to Node 24 LTS: the page shows problem once per Node version.
+          // Node 24 and 26 LTS (src/node-version.mjs): the page shows problem once per Node version.
           node: options.nodeStatus ?? nodeVersionStatus(),
           opening: makeOpeningTurn(),
           fixtureMode,
