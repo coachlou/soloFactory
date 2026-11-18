@@ -175,6 +175,14 @@ function railMarks(progressState) {
   return { active, done: stageOrder.slice(0, Math.max(0, at)) };
 }
 const MAX_AMENDED_PLAN_BYTES = 4_000_000;
+// A shipped run's release number: the one tagged at deploy, or for a run shipped before release tags,
+// its place among the project's shipped runs (the count the next tag carries on from).
+function releaseNumber(job, jobs) {
+  if (job.release?.number) return job.release.number;
+  const at = (run) => new Date(run.createdAt).getTime();
+  return jobs.filter((run) => run.state === "completed" && run.deployment && at(run) <= at(job)).length || 1;
+}
+
 function previousReleaseNote(job) {
   const prior = job.previousRelease;
   if (!prior) return null;
@@ -1517,7 +1525,7 @@ class Live extends Component {
     const list = (state.projects || []).map((p) => {
       const shipped = p.id === state.project ? state.jobs.find((job) => job.state === "completed" && !job.rolledBack && job.deployment?.url) : null;
       const url = shipped?.deployment?.url || "";
-      return { id: p.id, name: p.name, hasDocs: p.runCount > 0, url, release: url ? "release " + p.runCount : "", live: url ? "Live at " + url : p.runCount ? "Built here" : "Not built yet" };
+      return { id: p.id, name: p.name, hasDocs: p.runCount > 0, url, release: url ? "release " + releaseNumber(shipped, state.jobs) : "", live: url ? "Live at " + url : p.runCount ? "Built here" : "Not built yet" };
     });
     return list.length ? list : [{ id: "", name: "No project yet", hasDocs: false, live: "Not built yet" }];
   }
@@ -1563,7 +1571,9 @@ class Live extends Component {
       up, down: !up, statusText: up ? "Live" : "Stopped", dot: up ? "var(--inv)" : "var(--muted)",
       stop: () => this.post(r, "stop-app"), relaunch: () => this.post(r, "relaunch"),
       canRollback: Boolean(offer) && !ask, askRollback: () => this.setState({ rollbackAsk: offer.id }),
-      rollbackAsk: Boolean(ask), rollbackText: offer ? `This puts the app's code back to ${offer.rollbackTo.name} (${new Date(offer.rollbackTo.date).toLocaleDateString()}).` : "",
+      rollbackAsk: Boolean(ask), rollbackText: offer ? `This puts the app's code back to ${offer.rollbackTo.name} (${offer.rollbackTo.release ? `release ${offer.rollbackTo.release}, ` : ""}${new Date(offer.rollbackTo.date).toLocaleDateString()}).` : "",
+      // Informational: the git tag the release's code is kept under in the app's repo, when it has one.
+      releaseTag: job.release?.tag ? `Git tag ${job.release.tag}` : "",
       rollback: () => { this.setState({ rollbackAsk: null }); return this.post({ jobId: offer.id }, "rollback"); },
       cancelRollback: () => this.setState({ rollbackAsk: null }),
       // A crash soon after going live (G4) is an attention line; rolling back stays the owner's confirmed choice.

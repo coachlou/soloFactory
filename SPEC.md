@@ -170,11 +170,21 @@ call. A first release, an empty `data/`, or a plan with no data feature never as
 the run records `dataShape`: file patterns, JSON key paths and types and SQLite schemas under `data/`, with
 ids, dates and values ignored.
 
+Release tags. When a deploy passes its checks (health, metrics contract, home page), the run commits the tree
+(`factory: release <n>`, only when anything is uncommitted) and adds the annotated tag `solofactory/release/<n>`
+(`Release <n>: <working name> (run <id>)`) in the project's repo before it completes. The run records
+`release: {number, tag, commit, at}` and emits `release.tagged`. `n` is one past both the highest existing release
+tag and the count of the project's other completed runs with a deployment, rolled-back ones included, so numbers
+never repeat and a project shipped before release tags carries on its count. Relaunch, restart and Dismiss, then
+Relaunch never tag. Tagging is best effort: a git error emits `release.tag_failed` and the run still completes.
+Rollback keeps the rolled-back release's tag; the next release takes the next number. The Live app panel shows
+`release <n>` and the tag; a run shipped before release tags shows its place among the shipped runs.
+
 Rollback of a shipped release. `POST /api/jobs/:id/rollback` applies only to a project's newest completed,
 not rolled-back follow-on with a `baseCommit` and an earlier completed release, while nothing in the project
 is running or queued. It commits any hand edits, tags the tree `solofactory/rolled-back/<id>`, stops the app,
 hard-resets to `baseCommit` (`data/` is gitignored and untouched), marks the run `rolledBack` with a
-`rollback` record, emits `job.rolled_back`, and relaunches the previous release. It compares the data's
+`rollback` record (including `release` and `previousRelease` numbers when tagged), emits `job.rolled_back`, and relaunches the previous release. It compares the data's
 shape now with `dataShape`: when it changed (or none was recorded and `data/` is non-empty) the message tells
 the owner to stop the app, restore the backup and relaunch; otherwise it says the older version can read the
 data. A rolled-back run is never relaunched or restarted, does not block newer runs, and is skipped as a

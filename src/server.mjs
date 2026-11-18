@@ -233,7 +233,7 @@ export async function createSoloFactoryServer(options = {}) {
     const asked = backupStatus(job, null).needed;
     const dataBackup = asked ? backupStatus(job, await readConfirmation(storeFor(projectId).jobDir(job.id))) : backupStatus(job, null);
     const prior = job.followOn && !busy ? rollbackTarget(job, list) : null;
-    return { dataBackup, rollbackTo: prior && { jobId: prior.id, name: prior.brief?.workingName || prior.id, date: prior.completedAt ?? prior.createdAt } };
+    return { dataBackup, rollbackTo: prior && { jobId: prior.id, name: prior.brief?.workingName || prior.id, date: prior.completedAt ?? prior.createdAt, release: prior.release?.number ?? null } };
   }
 
   async function annotateJobs(projectId, jobs) {
@@ -724,12 +724,13 @@ export async function createSoloFactoryServer(options = {}) {
           const restore = job.dataShape ? changes.length > 0 : after.length > 0;
           await jobStore.reset(job.baseCommit);
           const name = prior.brief?.workingName || prior.id;
+          const label = prior.release?.number ? `${name} (release ${prior.release.number})` : name;
           const message = restore
-            ? `Rolled back to ${name}. Press Stop, restore the copy of data/ you backed up before this update, then press Relaunch so the app reads it.`
-            : `Rolled back to ${name}. Your app's data kept the same shape, so the older version can read it.`;
+            ? `Rolled back to ${label}. Press Stop, restore the copy of data/ you backed up before this update, then press Relaunch so the app reads it.`
+            : `Rolled back to ${label}. Your app's data kept the same shape, so the older version can read it.`;
           const rolled = await jobStore.read(id);
           rolled.rolledBack = true;
-          rolled.rollback = { at: new Date().toISOString(), tag, previousJobId: prior.id, previousName: name, changes: changes.slice(0, 5), restore, message };
+          rolled.rollback = { at: new Date().toISOString(), tag, previousJobId: prior.id, previousName: name, release: job.release?.number ?? null, previousRelease: prior.release?.number ?? null, changes: changes.slice(0, 5), restore, message };
           await jobStore.writeState(rolled);
           await jobStore.appendEvent(id, { type: "job.rolled_back", state: rolled.state, tag, message: changes.length ? `${message} Changed: ${changes.slice(0, 5).join("; ")}.` : message });
           const factory = appFactory(prior);
