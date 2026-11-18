@@ -1,3 +1,11 @@
+## Unreleased: pinned to Node 24 LTS
+
+- Pin: `.nvmrc` and `.node-version` (`24`), `package.json` engines `24.x`, CI `setup-node` reads `.nvmrc` (it ran Node 22 before).
+- One rule, `src/node-version.mjs`: Node 24 is supported; 22, 23 and 25+ run with a warning; below 22 will not start. `post.sh` (install and Update now) now also warns on 22 and 23; `run.sh` refuses below 22 instead of only when Node is missing; the server prints a `warn` line at startup and `/api/config` reports `node`; the page shows *Switch to Node 24 LTS* once per Node version. Nothing blocks a supported-but-wrong major, so projects keep working.
+- Update now: the unattended agent is told never to install or switch Node itself, only to report the warn line with the runbook fix.
+- Tests: `test/node-version.test.mjs` (the rule, and every pin naming the same major); update prompt and `/api/config` assertions.
+- Docs: README, INSTALL (A2 table, A4/B3 verify with nvm/fnm option, U2 warn note, U4, Fixing a bad install), distro instructions and template, manual start section, DEVELOPING Node version section.
+
 ## 0.12.0: live apps restart, rollback, four-tier gates (2026-11-17)
 
 Minor release: live apps come back when SoloFactory starts, a data backup step before a data-changing update deploys, rollback of a shipped update, and release-from-green-CI gates. Upgrades from 0.11.0 use the same safe update (Update now, the copy prompt or the update skill); projects and run states are untouched.

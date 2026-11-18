@@ -1273,6 +1273,7 @@ class Live extends Component {
       await this.refresh();
       this.checkUpdate();
       this.updateDone();
+      this.checkNode();
     } catch (error) { showError(error); }
     this.timer = setInterval(() => { if (!this.polling) this.refresh().catch(() => {}); }, 2000);
   }
@@ -1811,6 +1812,16 @@ class Live extends Component {
         this.setState({ info: { title: "The update did not finish", text: `${r.last.message} SoloFactory is still on ${from}. The full output is in ${r.last.logPath}. You can paste this into Claude Code or Codex instead.`, pre: this.upd?.prompt || "" } });
       }
     }, 3000);
+  }
+  // Pinned to Node 24 LTS (src/node-version.mjs): say once per Node version when the server runs another.
+  // It is a notice, never a block: projects and runs keep working while the owner switches.
+  checkNode() {
+    const node = state.config?.node;
+    if (!node?.problem) return;
+    if (this.state.info) return; // another notice is open: ask again on the next page load
+    const key = "solofactory.node-warned." + node.version;
+    try { if (localStorage.getItem(key)) return; localStorage.setItem(key, "1"); } catch {}
+    this.setState({ info: { title: "Switch to Node 24 LTS", text: node.problem } });
   }
   // After Update now restarts the server, say once what changed.
   async updateDone() {

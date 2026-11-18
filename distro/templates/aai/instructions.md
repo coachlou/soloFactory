@@ -58,7 +58,7 @@ app". SoloFactory is this folder's agentic function; projects are its output.
 
 - The factory handles one active build at a time and binds to 127.0.0.1.
   Keep it running while a generated app is in use.
-- Node 22+ and a signed-in `codex` or `claude` CLI are prerequisites; check
+- Node 24 LTS and a signed-in `codex` or `claude` CLI are prerequisites; check
   them before diagnosing a "provider not found" error.
 - Project ids look like `YYYY-MM-DD-xxxxxxxx`; refer to projects by id.
 - Generated code runs with the owner's OS permissions. Never put credentials

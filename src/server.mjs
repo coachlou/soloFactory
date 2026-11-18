@@ -23,6 +23,7 @@ import { checkModels, claudeMaxTurns, createProvider, detectProviderDiagnostics,
 import { createFixtureProvider } from "./fixture-provider.mjs";
 import { createUpdateChecker } from "./update-check.mjs";
 import { createUpdateRunner } from "./update-run.mjs";
+import { nodeVersionStatus } from "./node-version.mjs";
 import { REPORTABLE_STATES, buildDiagnostics, issuesConfig, renderReport, scrub, validateFeedback } from "./feedback.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -371,6 +372,8 @@ export async function createSoloFactoryServer(options = {}) {
           : discoverProviders();
         return json(response, 200, {
           providers,
+          // Pinned to Node 24 LTS: the page shows problem once per Node version.
+          node: options.nodeStatus ?? nodeVersionStatus(),
           opening: makeOpeningTurn(),
           fixtureMode,
           version,
@@ -1155,6 +1158,8 @@ if (isEntry(import.meta.url)) {
   });
   app.server.listen(port, host, () => {
     console.log(`SoloFactory is ready at http://${host}:${port}`);
+    const node = nodeVersionStatus();
+    if (node.problem) console.warn(`warn  ${node.problem}`);
   });
   const stop = async () => {
     // Backstop: close() still waits, unbounded, on runs that ignore cancellation. Never outlive a signal by more than 10s.

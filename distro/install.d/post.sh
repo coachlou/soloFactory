@@ -13,11 +13,15 @@ RUN="$HERE/.aai/skills/solofactory/run.sh"; [ -f "$RUN" ] || RUN="$HERE/.ailib/s
 exec bash "$RUN" "$@"
 SH
 chmod +x "$TARGET/start.sh"
+# Pinned to Node 24 LTS: same rule as src/node-version.mjs. Warn only; nothing here stops an install.
+SUPPORTED=24
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
 if [ "$NODE_MAJOR" -lt 22 ]; then
-  echo "  warn  node 22+ not found on PATH — SoloFactory will not start until it is installed"
-elif [ "$NODE_MAJOR" -gt 24 ]; then
-  # ponytail: warn only; the app runs, but native packages (better-sqlite3) often lack prebuilds this new. Bump when 26 has them.
-  echo "  warn  node $NODE_MAJOR is newer than SoloFactory supports — install Node 24 LTS (see INSTALL.md A4 / B3)"
+  echo "  warn  node 22+ not found on PATH — SoloFactory will not start until Node $SUPPORTED LTS is installed (see INSTALL.md A4 / B3)"
+elif [ "$NODE_MAJOR" -gt "$SUPPORTED" ]; then
+  # ponytail: native packages (better-sqlite3) often lack prebuilds this new. Bump SUPPORTED, .nvmrc and engines together.
+  echo "  warn  node $NODE_MAJOR is newer than SoloFactory supports — install Node $SUPPORTED LTS (see INSTALL.md A4 / B3)"
+elif [ "$NODE_MAJOR" -lt "$SUPPORTED" ]; then
+  echo "  warn  node $NODE_MAJOR is older than SoloFactory supports — install Node $SUPPORTED LTS (see INSTALL.md A4 / B3)"
 fi
 echo "start:  bash '$TARGET/start.sh'   → http://127.0.0.1:4173"
