@@ -288,6 +288,12 @@
 <sc-if value="{{app.releaseTag}}" hint-placeholder-val="{{false}}">
 <span style="font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted)">{{app.releaseTag}}</span>
 </sc-if>
+<sc-if value="{{app.backupLine}}" hint-placeholder-val="{{false}}">
+<span style="font-size: 12px; color: var(--muted)">{{app.backupLine}} · <a href="{{app.backupUrl}}" target="_blank" rel="noopener" style="color: var(--muted)">{{app.backupRepo}}</a></span>
+</sc-if>
+<sc-if value="{{app.backupFail}}" hint-placeholder-val="{{false}}">
+<span role="status" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; color: var(--amber)">{{app.backupFail}} <button onClick="{{app.retryBackup}}" style="min-height: 32px; padding: 4px 10px; border: 1px solid var(--amber-line); border-radius: 8px; background: transparent; color: var(--amber); font-size: 12px">Retry</button></span>
+</sc-if>
 </div>
 <div style="display: flex; flex-wrap: wrap; gap: 8px">
 <sc-if value="{{app.up}}" hint-placeholder-val="{{true}}">
