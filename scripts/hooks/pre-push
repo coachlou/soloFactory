@@ -13,6 +13,9 @@ while read -r _ local_sha remote_ref remote_sha; do
     echo "pre-push: release push ($old -> $new) to $remote main: checking Linux CI on ${local_sha%"${local_sha#???????}"}" >&2
     node scripts/ci-green.mjs "$local_sha" || exit 1
   fi
+  # git exports GIT_DIR and friends to hooks; tests that run git in throwaway repos would inherit them and write
+  # to this repo's config instead (it set core.bare=true and user t@t on the main checkout in 0.12.0's push).
+  unset $(git rev-parse --local-env-vars)
   exec npm test
 done
 exit 0

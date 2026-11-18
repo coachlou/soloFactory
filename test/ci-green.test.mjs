@@ -36,7 +36,7 @@ async function hookRepo() {
     await chmod(path.join(dir, "scripts", "hooks", hook), 0o755);
   }
   await writeFile(path.join(dir, "scripts", "ci-green.mjs"), `console.log("ci-green " + process.argv[2]); process.exit(process.env.CI_GREEN === "1" ? 0 : 1);\n`);
-  await writeFile(path.join(dir, "package.json"), JSON.stringify({ version: "1.0.0", scripts: { test: "echo suite-ran" } }));
+  await writeFile(path.join(dir, "package.json"), JSON.stringify({ version: "1.0.0", scripts: { test: "echo suite-ran GIT_DIR=$GIT_DIR." } }));
   git("config", "core.hooksPath", "scripts/hooks");
   return { dir, git };
 }
@@ -57,7 +57,7 @@ test("pre-push: a release push to main needs green CI, then runs the suite; othe
   const { dir, git } = await hookRepo();
   git("add", "-A"); git("commit", "-qm", "base");
   const base = git("rev-parse", "HEAD");
-  await writeFile(path.join(dir, "package.json"), JSON.stringify({ version: "1.1.0", scripts: { test: "echo suite-ran" } }));
+  await writeFile(path.join(dir, "package.json"), JSON.stringify({ version: "1.1.0", scripts: { test: "echo suite-ran GIT_DIR=$GIT_DIR." } }));
   git("commit", "-qam", "release");
   const release = git("rev-parse", "HEAD");
   const push = (line, env = {}) => spawnSync("sh", ["scripts/hooks/pre-push", "origin", "x"], { cwd: dir, input: `${line}\n`, encoding: "utf8", env: { ...process.env, ...env } });
@@ -75,10 +75,11 @@ test("pre-push: a release push to main needs green CI, then runs the suite; othe
   // Same version on both sides: the suite runs and the CI check does not.
   await writeFile(path.join(dir, "notes.txt"), "x");
   git("add", "-A"); git("commit", "-qm", "docs");
-  const plain = push(`refs/heads/main ${git("rev-parse", "HEAD")} refs/heads/main ${release}`);
+  const plain = push(`refs/heads/main ${git("rev-parse", "HEAD")} refs/heads/main ${release}`, { GIT_DIR: path.join(dir, ".git") }); // git exports GIT_DIR to hooks
   assert.equal(plain.status, 0);
   assert.doesNotMatch(plain.stdout, /ci-green/);
   assert.match(plain.stdout, /suite-ran/);
+  assert.match(plain.stdout, /GIT_DIR=\./); // the suite never inherits the hook's GIT_DIR
 
   // A branch push runs neither: that is where a release commit gets its CI run.
   const branch = push(`refs/heads/release ${release} refs/heads/release ${base}`);
