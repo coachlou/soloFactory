@@ -65,12 +65,25 @@ test("restart from slice keeps the run's repair count, rebuilds with a normal bu
 const appSource = `import http from "node:http";
 http.createServer((q, r) => r.end(q.url === "/health" ? "ok" : JSON.stringify({ uptimeSeconds: 1, requests: { total: 0, errors: 0 }, latencyMs: { average: 0 }, routes: [] }))).listen(process.env.PORT);`;
 
+// A port for an app that is "dead": nothing may answer on it until the test starts one there.
+// listen(0) hands out ports from the kernel's ephemeral range (Linux 32768-60999, macOS and Windows
+// 49152-65535), the same range every other test file's servers and the fetch client draw from while
+// node --test runs files in parallel. A port released here could be handed straight to one of them,
+// and then recovery saw an answer and kept the "dead" app live (CI run 43975374301). So pick below
+// every ephemeral range, where only an explicit bind can land, and check that it is free.
+const PORT_FLOOR = 20000, PORT_SPAN = 12000; // 20000-31999
 async function freePort() {
-  const server = createNetServer();
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address();
-  await new Promise((resolve) => server.close(resolve));
-  return port;
+  const bindable = (port, host) => new Promise((resolve) => {
+    const server = createNetServer();
+    server.once("error", () => resolve(false));
+    server.listen(port, host, () => server.close(() => resolve(true)));
+  });
+  for (let tries = 0; tries < 50; tries += 1) {
+    const port = PORT_FLOOR + Math.floor(Math.random() * PORT_SPAN);
+    // The app binds every interface, so check loopback and the wildcard address both.
+    if ((await bindable(port, "127.0.0.1")) && (await bindable(port))) return port;
+  }
+  throw new Error(`no free port in ${PORT_FLOOR}-${PORT_FLOOR + PORT_SPAN - 1}`);
 }
 
 // One project under root/projects/demo whose newest completed run's app was live when the server last stopped.
@@ -192,4 +205,14 @@ test("an older completed run behind a newer undismissed run is never relaunched"
   const state = await store.read(job.id);
   assert.equal(state.deployment.status, "stopped");
   assert.ok(!(await types(store, job.id)).some((type) => type.startsWith("deployment.restart")));
+});
+
+test("runs created back to back always list newest first, so the older one never passes for the newer", async () => {
+  // Same-millisecond creates used to tie on createdAt and fall back to the random id's order,
+  // which let the test above relaunch the older run about one time in two when they tied.
+  const store = new JobStore(await mkdtemp(path.join(os.tmpdir(), "solo-factory-order-")));
+  await store.init();
+  const made = [];
+  for (let i = 0; i < 40; i += 1) made.push((await store.create({ brief, transcript, provider: "fixture" })).id);
+  assert.deepEqual((await store.list()).map((run) => run.id), made.reverse());
 });

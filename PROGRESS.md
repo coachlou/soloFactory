@@ -7,6 +7,14 @@ Node 26 became the Active LTS in late October 2026 and Node 24 moved to Maintena
 - Tests: `test/node-version.test.mjs` (the rule, and every setting naming the same majors); update prompt and `/api/config` assertions. Full suite 518/518 on Node 24.22.3 and on Node 26.13.1.
 - Docs: README, INSTALL (A2 table and version note, A4 and B3 now install 26 with an nvm/fnm option, U2 warn note, U4, new-install checklist, Fixing a bad install), distro instructions and template, manual start section, DEVELOPING Node version section. Release note for members: the next release's INSTALL "If they were below" note.
 
+## Unreleased: flaky tests fixed (2026-11-18)
+
+Two tests turned 3 of the last 18 CI runs red, and a third failed under load (runs 43975374301, 43976454700, 44220157155). Each fix removes the cause; nothing retries.
+- `test/update-run.test.mjs`: the tests slept 20 ms and then expected the background update to have finished. Under CPU load it had not (12 of 24 parallel runs failed; CI run 44220157155). Run 43976454700's half-written `update.json` was already fixed by the atomic save. The update runner now exposes `settled()` (and the server `updateSettled()`), and the tests await it. After: 0 of 40 parallel runs failed under the same load.
+- `test/restart.test.mjs` had two causes. (1) `freePort()` took a port from the kernel's ephemeral range and released it, so another test file's server could take it, answer, and keep the "dead" app live. It now picks a free port in 20000-31999, below every OS's ephemeral range. (2) Two runs created in the same millisecond tied on `createdAt`, and `list()` then ordered them by random id, so the older run could pass for the newer one and relaunch (the CI failure at the "older completed run" test; a forced tie fails it 3 times in 10). `JobStore.create` now gives each run a strictly later `createdAt`, and a new test creates 40 runs back to back and checks the order.
+- `test/project-last-run.test.mjs` failed once in a full suite under CPU load (likely the pre-push failure during the 0.12.0 release that passed alone). Its "parked" run had no `startedAt`, so the scheduler saw no blocker and started the queued run; the test passed only while that start lost the race with its fetch. The parked run now has `startedAt`, as every real parked run does, and the queued run stays queued.
+- Docs: DEVELOPING *Verify the factory* has the three rules for tests that hold under load.
+
 ## 0.12.0: live apps restart, rollback, four-tier gates (2026-11-17)
 
 Minor release: live apps come back when SoloFactory starts, a data backup step before a data-changing update deploys, rollback of a shipped update, and release-from-green-CI gates. Upgrades from 0.11.0 use the same safe update (Update now, the copy prompt or the update skill); projects and run states are untouched.

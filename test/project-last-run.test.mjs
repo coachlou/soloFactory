@@ -13,8 +13,9 @@ test("a project with a parked run and a queued run behind it reports the parked 
   await store.init();
   const brief = { workingName: "Voice Notes" };
   const held = await store.create({ brief, transcript: [], provider: "fixture" });
-  await store.writeState({ ...held, state: "interrupted" });
-  await new Promise((r) => setTimeout(r, 5));
+  // A run is parked only after it started. Without startedAt the scheduler saw no blocker and started
+  // the queued run, and the test passed only while that start lost the race with the fetch below.
+  await store.writeState({ ...held, state: "interrupted", startedAt: new Date().toISOString() });
   const queued = await store.create({ brief, transcript: [], provider: "fixture" });
   const app = await createSoloFactoryServer({ home: path.join(root, ".aai/memory/solofactory"), root, fixtureMode: true });
   await new Promise((r) => app.server.listen(0, "127.0.0.1", r));

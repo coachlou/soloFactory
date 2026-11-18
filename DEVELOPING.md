@@ -68,6 +68,18 @@ failure repair, the complete HTTP workflow, a real generated Node app, health ch
 live metrics. It runs the distro check first, and GitHub Actions runs it on Linux for every
 push and pull request.
 
+Tests must pass under load, because `node --test` runs the test files in parallel and the pre-push
+suite runs on a busy machine. Three rules keep them that way:
+
+1. Wait for the thing itself, never a fixed sleep. A background job exposes a promise to await
+   (`updater.settled()`, `app.updateSettled()`, `app.appsRestarted`). A 20 ms sleep failed about one run in two
+   under CPU load.
+2. A port that must stay silent comes from below every ephemeral range (`freePort()` in
+   `test/restart.test.mjs` picks 20000-31999). A port from `listen(0)` can be handed to another test file's
+   server a moment after it is released.
+3. Never rely on two runs created in the same millisecond to sort in order. `JobStore.create` gives each run in
+   a process a strictly later `createdAt`, and the ordering test in `test/restart.test.mjs` guards it.
+
 A release that changes prompts, adapters (models included), the Guide skill or the controller
 (`src/prompts.mjs`, `src/providers.mjs`, `skills/factory-guide.md`, `src/factory.mjs`) must run the
 real-provider smoke set first. Once `package.json` carries a version that has no tag yet, `npm test`
