@@ -275,6 +275,9 @@ ready for deterministic controller verification.
 ${DATA_RULE}`;
 }
 
+// Gates run on the build machine; this covers an app later moved by hand to a case-sensitive or other-shell host.
+const PORTABLE_RULE = `Import paths match file names' exact case; package.json scripts use no shell-specific commands.`;
+
 // Owner decisions from repair planning, newest last; rendered only when there are any.
 function ownerDecisionsBlock(ownerDecisions, verb) {
   return ownerDecisions?.length ? `The owner's decisions from repair planning, newest last. What they explicitly approve is approved: ${verb} and do not work around them.\n${ownerDecisions.map((d) => `- ${d.text ?? d}`).join("\n")}\n` : "";
@@ -305,7 +308,7 @@ message with the same three lines. Fix the root cause of the recorded controller
 gate failure with the smallest coherent change. Do not weaken, skip, rename, or delete tests,
 health checks, metrics, build commands, or acceptance criteria. A test that fails, then passes when rerun, is a bug
 in the app or the test (a race, an unawaited promise, a timer, shared state): find the cause and fix it; never leave it
-as "intermittent".${sliceLines}${bugLines}
+as "intermittent". ${PORTABLE_RULE}${sliceLines}${bugLines}
 ${ownerDecisionsBlock(ownerDecisions, "repair to them")}Run the relevant checks and leave the app ready for the controller to rerun every gate.
 
 ${DATA_RULE}`;
@@ -680,7 +683,7 @@ Build one case at a time: write its proof test, then the minimum real behavior t
 proof until it passes before starting the next case, so an interrupted turn leaves passing cases, not half-wired
 code. Run only this feature's proof commands, plus targeted tests of earlier code you changed; do not run the
 whole test suite, which the controller runs at final integration and which can exhaust your 45-minute turn. Source-
-string assertions do not prove user behavior. Give every form control you render an accessible name (a label or aria-label)
+string assertions do not prove user behavior. ${PORTABLE_RULE} Give every form control you render an accessible name (a label or aria-label)
 that says which item it acts on when it repeats per row, e.g. "Mark Read done": final review blocks on a nameless control
 (run dc4129e4: an unnamed per-habit checkbox cost a review round and a repair). An obligation with cases needs one node:test per case
 whose name contains [CASE-ID], run by its proof command without a --test-reporter flag of its own; the
