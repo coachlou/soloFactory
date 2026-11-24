@@ -1,3 +1,10 @@
+## Unreleased: Guide chat box wraps and grows (2026-11-24)
+
+Lou reported that the Guide box kept long text on one line, cut off at the right edge, and could not be resized.
+- Hub: the Guide box on the main page (`#guide-a`) and in the document viewer (`#guide-doc`) are now `<textarea class="chat-input">`. Text wraps, the box grows with the text up to 40% of the window height and then scrolls, and the user can drag its corner to make it taller (that height stays as the box's minimum until the page reloads). Attach and Send stay at the bottom edge.
+- Keys: <kbd>Enter</kbd> sends and <kbd>Shift</kbd>+<kbd>Enter</kbd> adds a line, as manual §3 already said. <kbd>Enter</kbd> that confirms an IME composition does not send.
+- Render: `morph()` keeps the inline `style` of `.chat-input` boxes, so a repaint during a drag does not undo it; `paint()` calls `growChat` after each repaint. Neutral palette only; no control or engine behavior changed.
+
 ## Unreleased: return summary, risk report, Guide discovery style
 
 Spec v2 items 7, 4 and 6 (`vibe-pilot-adoption-spec-v2.md`, release B). Item 5 (quick-fix lane) stays deferred to a design pass.

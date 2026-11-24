@@ -213,10 +213,10 @@
 </sc-for>
 </ul>
 </sc-if>
-<div style="display: flex; gap: 8px; align-items: center; max-width: 720px; width: 100%; margin: 0 auto; padding: 6px 6px 6px 14px; border: 1px solid var(--line2); border-radius: 14px; background: var(--card); box-shadow: 0 4px 18px var(--shadow)">
+<div style="display: flex; gap: 8px; align-items: flex-end; max-width: 720px; width: 100%; margin: 0 auto; padding: 6px 6px 6px 14px; border: 1px solid var(--line2); border-radius: 14px; background: var(--card); box-shadow: 0 4px 18px var(--shadow)">
 <button onClick="{{onAttach}}" aria-label="Attach a file" style="flex: none; min-height: 40px; padding: 6px 10px; border: 1px solid var(--line2); border-radius: 9px; background: transparent; color: var(--text2); font-size: 13px">Attach</button>
 <label for="guide-a" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0)">Message the Guide</label>
-<input id="guide-a" type="text" value="{{draft}}" onChange="{{onDraft}}" onKeyDown="{{onKey}}" placeholder="{{placeholder}}" autocomplete="off" style="flex: 1 1 auto; min-width: 0; min-height: 44px; border: 0; outline-offset: 4px; background: transparent; color: var(--fg)">
+<textarea id="guide-a" class="chat-input" rows="1" value="{{draft}}" onChange="{{onDraft}}" onKeyDown="{{onKey}}" placeholder="{{placeholder}}" autocomplete="off"></textarea>
 <button onClick="{{onSend}}" style="flex: none; min-height: 44px; padding: 10px 18px; border: 0; border-radius: 10px; background: var(--inv); color: var(--inv-fg); font-weight: 700">Send</button>
 </div>
 <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; max-width: 720px; width: 100%; margin: 0 auto; font-size: 12px; color: var(--muted)">
@@ -591,9 +591,9 @@
 </div>
 </sc-for>
 </div>
-<div style="flex: none; display: flex; gap: 8px; align-items: center; margin: 12px 16px 16px; padding: 5px 5px 5px 12px; border: 1px solid var(--line2); border-radius: 12px; background: var(--raise)">
+<div style="flex: none; display: flex; gap: 8px; align-items: flex-end; margin: 12px 16px 16px; padding: 5px 5px 5px 12px; border: 1px solid var(--line2); border-radius: 12px; background: var(--raise)">
 <label for="guide-doc" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0)">Ask the Guide about this document</label>
-<input id="guide-doc" type="text" value="{{vw.draft}}" onChange="{{vw.onDraft}}" onKeyDown="{{vw.onKey}}" placeholder="Tell the Guide what to change" autocomplete="off" style="flex: 1 1 auto; min-width: 0; min-height: 44px; border: 0; outline-offset: 4px; background: transparent; color: var(--fg)">
+<textarea id="guide-doc" class="chat-input" rows="1" value="{{vw.draft}}" onChange="{{vw.onDraft}}" onKeyDown="{{vw.onKey}}" placeholder="Tell the Guide what to change" autocomplete="off"></textarea>
 <button onClick="{{vw.send}}" style="flex: none; min-height: 44px; padding: 10px 14px; border: 0; border-radius: 9px; background: var(--inv); color: var(--inv-fg); font-weight: 700">Send</button>
 </div>
 </aside>

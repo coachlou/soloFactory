@@ -64,6 +64,21 @@ function draw(nodes, sc, H) {
   }
   return out;
 }
+// Guide chat boxes wrap and grow with the text, up to the CSS max-height, then scroll.
+// A height the user drags with the resize handle becomes that box's minimum until the page reloads.
+// morph() leaves these boxes' inline style alone, so a paint during a drag does not undo it.
+const chatMin = new Map();
+function growChat(f) {
+  if (f._h && Math.abs(f.offsetHeight - f._h) > 2) chatMin.set(f.id, f.offsetHeight);
+  const top = f.scrollTop;
+  f.style.height = "auto";
+  f._h = Math.max(f.scrollHeight, chatMin.get(f.id) || 0);
+  f.style.height = f._h + "px";
+  f._h = f.offsetHeight;
+  f.scrollTop = top;
+}
+// Enter sends; Shift+Enter adds a line; Enter that confirms an IME composition does neither.
+function sendKey(e) { return e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229; }
 // Index-wise morph keeps focus, caret and scroll across re-renders.
 function morph(live, next) {
   const a = live.childNodes, b = Array.from(next.childNodes);
@@ -72,7 +87,8 @@ function morph(live, next) {
     if (!o) return live.appendChild(n);
     if (o.nodeType !== n.nodeType || o.nodeName !== n.nodeName) return live.replaceChild(n, o);
     if (o.nodeType !== 1) { if (o.nodeValue !== n.nodeValue) o.nodeValue = n.nodeValue; return; }
-    for (const at of Array.from(o.attributes)) if (!n.hasAttribute(at.name)) o.removeAttribute(at.name);
+    const grow = o.classList?.contains("chat-input");
+    for (const at of Array.from(o.attributes)) if (!n.hasAttribute(at.name) && !(grow && at.name === "style")) o.removeAttribute(at.name);
     for (const at of Array.from(n.attributes)) if (o.getAttribute(at.name) !== at.value) o.setAttribute(at.name, at.value);
     morph(o, n);
   });
@@ -120,6 +136,7 @@ class DCLogic {
         morph(this.el, t.content);
         for (const f of this.el.querySelectorAll("[data-v]")) if (f.value !== f.dataset.v) f.value = f.dataset.v;
         for (const f of this.el.querySelectorAll("input[type=checkbox]")) f.checked = f.hasAttribute("checked");
+        for (const f of this.el.querySelectorAll("textarea.chat-input")) growChat(f);
       } while (this.again);
     } finally { this.painting = false; }
   }
@@ -835,7 +852,7 @@ class Component extends DCLogic {
         .concat((s.docChat[key] || []).map((m) => ({ mine: m.who === 'you', guide: m.who === 'guide', text: m.text, html: md(m.text) }))).reverse(),
       draft: s.vdraft,
       onDraft: (e) => this.setState({ vdraft: e.target.value }),
-      onKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); vsend(); } },
+      onKey: (e) => { if (sendKey(e)) { e.preventDefault(); vsend(); } },
       send: vsend,
       close: () => this.setState({ viewer: '', viewerEdit: false, activeSec: -1, secDraft: '' })
     } : { open: false, name: '', tag: '', hasLine: false, line: '', revising: false, revTitle: '', ctrls: [], modes: [], hasNotes: false, notes: [], sections: [], footer: '', chat: [], draft: '' };
@@ -1045,7 +1062,7 @@ class Component extends DCLogic {
       draft: s.draft,
       placeholder: 'Tell the Guide what ' + current.name + ' needs',
       onDraft: (e) => this.setState({ draft: e.target.value }),
-      onKey: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.submit(this.state.draft); } },
+      onKey: (e) => { if (sendKey(e)) { e.preventDefault(); this.submit(this.state.draft); } },
       onSend: () => this.submit(this.state.draft),
       theme: {
         mode: s.themeMode, isAuto: s.themeMode === 'auto', isLight: s.themeMode === 'light', isDark: s.themeMode === 'dark',
@@ -2050,7 +2067,7 @@ class Live extends Component {
       // The chat is newest first; design A's opening note stays at the bottom.
       v.vw.chat = talk.reverse().concat(v.vw.chat.slice(-1));
     }
-    v.vw.onKey = (e) => { if (e.key === "Enter") { e.preventDefault(); v.vw.send(); } };
+    v.vw.onKey = (e) => { if (sendKey(e)) { e.preventDefault(); v.vw.send(); } };
     v.suggestions = [];
     if (v.run.stops) for (const stop of v.run.stops) if (stop.state === "Failed twice") stop.state = "Failed";
     const shownRun = this.shownRun();
