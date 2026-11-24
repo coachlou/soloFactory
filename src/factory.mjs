@@ -14,6 +14,7 @@ import { contractDigest, originalChecks, preparePlanReview, prepareReview, runIn
 import { addUsage } from "./providers.mjs";
 import { CREDENTIAL_PATTERNS } from "./credentials.mjs";
 import { measureRun } from "./measure.mjs";
+import { releaseRisks } from "./risk.mjs";
 import { dataFeatures, dataShape, readConfirmation, unconfirmed } from "./data-backup.mjs";
 import { ghGitHub, pushBackup, readBackup } from "./github-backup.mjs";
 import { RunMonitor, failureSignature, incidentRecord, repeatedFailure, repeatedSymptom, watchConfig, workerAlive } from "./watchdog.mjs";
@@ -24,6 +25,8 @@ const harnessRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), ".."
 const CASE_REPORTER = fileURLToPath(new URL("./case-reporter.mjs", import.meta.url));
 // Gate failures a repair turn cannot fix: they say nothing about the app's code.
 const NO_REPAIR_GATE = new Set(["gate_timeout", "gate_infrastructure"]);
+// git's empty tree: the risk scan base for a first build in a project with no commits yet.
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 // Deploy failures that are usually a code defect the repair worker can fix; same bounded budget as the gates.
 const DEPLOY_REPAIR_CODES = ["invalid_metrics", "deployment_exited", "page_check_failed", "health_check_failed"];
 // An app that exits on its own this soon after going live most likely broke with this release
@@ -342,6 +345,8 @@ export class SoloFactory {
       // The shipped app (plus anything attached since) is what "Set it aside" and "Start over"
       // rewind a failed follow-on to; data/ is gitignored, so the rewind keeps owner data.
       // Only a clean tree is a safe point: if the commit failed, record nothing and never rewind.
+      // A first build's own starting point, so the release risk scan has a base (a follow-on uses baseCommit).
+      if (!job.followOn && !job.startCommit) job.startCommit = await this.store.git("rev-parse", "HEAD").catch(() => EMPTY_TREE);
       if (job.followOn && !job.baseCommit) {
         await this.commit(job, "factory: before follow-on");
         if (!(await this.store.git("status", "--porcelain").catch(() => "unknown"))) job.baseCommit = await this.store.git("rev-parse", "HEAD");
@@ -1195,6 +1200,7 @@ export class SoloFactory {
     job.failedState = null;
     const release = await this.tagRelease(job);
     if (release) job.release = release;
+    job.risks = await this.releaseRisks(job);
     job = await this.stage(job, "completed", "Application is live and verified");
     job.completedAt = new Date().toISOString();
     await this.store.writeState(job);
@@ -1292,6 +1298,19 @@ export class SoloFactory {
   // solofactory/release/<n> in the project's repo. Numbers never repeat and never go back: n is one past both the
   // highest release tag and the count of earlier shipped runs (rolled-back ones included), so a project from before
   // release tags carries on its count. Best effort: a git problem is evidence, never a failed deploy.
+  // Spec item 4: informational only. Never throws; undefined means "not recorded for this run".
+  async releaseRisks(job) {
+    const base = job.baseCommit || job.startCommit;
+    if (!base) return undefined;
+    try {
+      const show = (rev) => this.store.git("show", `${rev}:package.json`).catch(() => null);
+      const before = base === EMPTY_TREE ? null : await show(base);
+      return releaseRisks(await this.store.git("diff", "--name-status", "-M", base, "HEAD"), { before, after: await show("HEAD") });
+    } catch {
+      return undefined;
+    }
+  }
+
   async tagRelease(job) {
     if (job.release?.tag) return job.release;
     try {

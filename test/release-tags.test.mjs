@@ -49,6 +49,10 @@ test("each release that passes its deploy checks is tagged in order at the commi
   assert.match(await store.git("tag", "-l", "--format=%(contents)", second.release.tag), /Release 2: Pocket Pulse \(run /);
   assert.equal(await store.git("rev-parse", "HEAD"), second.release.commit);
   assert.equal(await store.git("status", "--porcelain"), "", "nothing left uncommitted");
+  // Spec item 4: each release records its risk scan, from the first build's start and from a follow-on's base.
+  assert.ok(first.startCommit && Array.isArray(first.risks), "a first build records a risk scan");
+  assert.ok(Array.isArray(second.risks) && !second.startCommit, "a follow-on scans from its base commit");
+  assert.deepEqual(second.risks.filter((risk) => risk.kind === "deletion"), [], "an unchanged follow-on deletes nothing");
 });
 
 test("a project shipped before release tags carries on its count", async (t) => {

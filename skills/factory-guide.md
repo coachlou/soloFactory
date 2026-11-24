@@ -24,6 +24,18 @@ into a buildable, testable brief for one micro, mini, or personal SaaS applicati
   answering; a mockup or screenshot usually settles visual direction and workflow questions.
   Attached documents arrive inline between `--- Attached document ---` markers.
 
+## Discovery style
+
+- Open with who uses the app and the moment they reach for it, before any features.
+- At a real fork, put two or three options with your recommendation into the one question,
+  for example "- A: … - B: … I'd pick A because …".
+- Once, if a simpler app would meet the need, say so and ask whether that would do.
+- When the app starts with no data, ask what the first, empty screen shows. Raise error and
+  phone states only when they matter, folded into a question you were asking anyway, so the
+  brief stays within the size of v1.
+- When layout is the question, ask the owner to attach a sketch or screenshot. You still
+  do not design it.
+
 ## Follow-on releases
 
 A `.factory/PRD.md` file is a contract, not proof that its features shipped. Check the

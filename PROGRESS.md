@@ -1,3 +1,30 @@
+## Unreleased: return summary, risk report, Guide discovery style
+
+Spec v2 items 7, 4 and 6 (`vibe-pilot-adoption-spec-v2.md`, release B). Item 5 (quick-fix lane) stays deferred to a design pass.
+- Docs: manual §3 (Guide discovery style) and §5 (*What this run did*, *How do you know it works?*).
+
+### Return summary and "How do you know it works?" (item 7)
+
+Before, a finished run showed steps and an event list, and the owner had to piece together what shipped and what proved it.
+- Engine: `src/summary.mjs` (pure). `proofResults` keeps the last result of each gate per feature from the full events file; `runSummary` writes the sentences; `runEvidence` returns proofs, logs, deploy checks and risks, with `null` for anything the run did not record. No agent turn.
+- Store: `proofResults(id)` reads the whole `events.jsonl`, cached by file size, so the 160-event window the hub gets is unchanged.
+- API: `GET /api/jobs/:id` adds `summary` and `evidence`. New read-only `GET /api/jobs/:id/logs/:name`: only a `.log` name the listing returned, only for the project's newest run (later runs overwrite `.factory/logs/`), regular files only (no symlinks), last 64 KB, `text/plain`, `no-store`; anything else is 404.
+- Hub: a *What this run did* box on the run panel with the summary, the risk line and a native `<details>` *How do you know it works?*. Existing tokens only (R2); no control removed (R1).
+- Never claims live for a parked or rolled-back run.
+- Tests: `test/summary.test.mjs` (5, incl. traversal, encoded slash, non-.log, missing, symlink, bad encoding, and an older run's logs).
+
+### Risk report (item 4)
+
+Informational only: it never holds or asks. A blocking ask waits until 10 real runs show the findings are worth acting on.
+- Engine: `src/risk.mjs` `releaseRisks(nameStatus, {before, after})` reports `dependency` (added, removed or changed in `dependencies` / `devDependencies`, by parsing both `package.json` versions) and `deletion` (a `D` line, not `.factory/` or a test path; renames are not deletions). `riskLine` gives one line, or `null` for a run from before the scan.
+- Factory: a first build records `job.startCommit` (HEAD at run start, or the empty tree). After `tagRelease`, `deployAndComplete` diffs `baseCommit || startCommit` to HEAD into `job.risks`. A git error leaves `job.risks` unset and never fails the run.
+- Deviation from the spec: the scan runs after `tagRelease`, not at the start of `deployAndComplete`, so it covers the release commit too.
+- Tests: `test/risk.test.mjs` (4); `test/release-tags.test.mjs` asserts `startCommit` and `risks` on a first build and a follow-on.
+
+### Guide discovery style (item 6)
+
+`skills/factory-guide.md` gains a *Discovery style* section: who uses the app and when first, options with a recommendation at a real fork, one simpler-app challenge, the empty first screen, and a sketch for layout. Coverage keys, schema and the Ready rule are unchanged (R3). Ships unmeasured; Lou judges it from the first real interviews. The smoke set must run before release because the skill changed.
+
 ## Unreleased: start check, plain stop titles, notifications (2026-11-23)
 
 Items 1 to 3 of the vibe-pilot adoption spec (v2, audited by Codex, Grok and Fable). A crash on launch now fails early as a repairable gate, a parked run says in plain words why it stopped, and the hub can notify the owner from a background tab.

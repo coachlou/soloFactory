@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import http from "node:http";
-import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, lstat, mkdir, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,7 @@ import { withReviewDiagnostics } from "./review.mjs";
 import { amendmentPacket, assertBatch, validateRecoveryApproval } from "./feature-recovery.mjs";
 import { MAX_AMENDED_PLAN_BYTES, assertPlanAmendable, admitsPlanning, assertPlanInputsRevised, assertPlanReviewable, buildRecovery, buildRecoveryPacket, continuationAction, newerRunBlocks, previousRelease, SoloFactory, withContinuation } from "./factory.mjs";
 import { watchConfig } from "./watchdog.mjs";
+import { runEvidence, runSummary } from "./summary.mjs";
 import { BackupError, backupState, connectBackup, disconnectBackup, ghGitHub, pushBackup, setBackupEnabled } from "./github-backup.mjs";
 import { backupStatus, dataShape, readConfirmation, shapeChanges, writeConfirmation } from "./data-backup.mjs";
 import {
@@ -611,7 +612,23 @@ export async function createSoloFactoryServer(options = {}) {
         const projectId = jobProject.get(job.id) ?? active.id;
         const list = job.followOn ? await jobStore.list() : [job];
         const previous = job.followOn && PARKED.has(job.state) && !job.dismissed ? previousRelease(job, list) : null;
-        return json(response, 200, { job: { ...annotated, ...(await releaseExtras(projectId, job, list, projectBusy(projectId))), idleGaps: await jobStore.idleGaps(job.id), previousRelease: previous }, events: await jobStore.events(job.id) });
+        const proofs = await jobStore.proofResults(job.id);
+        const logs = (await isLatestRun(jobStore, job)) ? await runLogs(jobStore) : null;
+        return json(response, 200, { job: { ...annotated, ...(await releaseExtras(projectId, job, list, projectBusy(projectId))), idleGaps: await jobStore.idleGaps(job.id), previousRelease: previous, summary: runSummary(job, proofs), evidence: runEvidence(job, proofs, logs) }, events: await jobStore.events(job.id) });
+      }
+      // Read-only, and only a .log the folder listing names: no path segments ever reach the filesystem.
+      const logMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/logs\/([^/]+)$/);
+      if (request.method === "GET" && logMatch) {
+        const jobStore = storeOfJob(logMatch[1]);
+        const job = await jobStore.read(logMatch[1]);
+        let name;
+        try { name = decodeURIComponent(logMatch[2]); } catch { name = ""; }
+        const names = (await isLatestRun(jobStore, job)) ? await runLogs(jobStore) : [];
+        if (!names.includes(name)) return json(response, 404, { error: "No such log for this run" });
+        const text = await logTail(path.join(jobStore.appDir(job.id), ".factory", "logs", name));
+        if (text === null) return json(response, 404, { error: "No such log for this run" });
+        response.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+        return response.end(text);
       }
       const telemetryMatch = url.pathname.match(/^\/api\/jobs\/([a-z0-9-]+)\/telemetry$/);
       if (request.method === "GET" && telemetryMatch) {
@@ -1016,6 +1033,33 @@ async function discoverProjects(root) {
     }
   }
   return projects.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// .factory/logs is shared by a project's runs and each run rewrites it, so only the most recently started run owns it.
+async function isLatestRun(store, job) {
+  if (!job.startedAt) return false;
+  const started = (await store.list()).filter((run) => run.startedAt);
+  return started.sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0]?.id === job.id;
+}
+
+async function runLogs(store) {
+  const names = await readdir(path.join(store.project, ".factory", "logs")).catch(() => []);
+  return names.filter((name) => name.endsWith(".log") && !name.includes("/") && !name.includes("\\")).sort();
+}
+
+const LOG_TAIL_BYTES = 64 * 1024;
+// Regular files only (a symlink could point anywhere), last 64 KB.
+async function logTail(file) {
+  const info = await lstat(file).catch(() => null);
+  if (!info?.isFile()) return null;
+  const handle = await open(file, "r");
+  try {
+    const length = Math.min(info.size, LOG_TAIL_BYTES);
+    const { buffer, bytesRead } = await handle.read(Buffer.alloc(length), 0, length, info.size - length);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await handle.close();
+  }
 }
 
 async function ensureRecovery(job, store) {

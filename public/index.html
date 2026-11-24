@@ -369,6 +369,27 @@
 </sc-for>
 <button onClick="{{run.openSpec}}" style="min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--fg); font-size: 13px">Open the spec</button>
 </div>
+<sc-if value="{{run.hasProof}}" hint-placeholder-val="{{false}}">
+<section aria-label="What this run did" style="display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--raise)">
+<p style="margin: 0; font-size: 13px; color: var(--text1)">{{run.proof.summary}}</p>
+<sc-if value="{{run.proof.riskLine}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 13px; color: var(--text2)">{{run.proof.riskLine}}</p></sc-if>
+<details style="font-size: 13px; color: var(--text1)">
+<summary style="min-height: 32px; padding: 4px 0; color: var(--fg); cursor: pointer">How do you know it works?</summary>
+<div style="display: flex; flex-direction: column; gap: 8px; padding-top: 6px">
+<div><span style="font-size: 12px; color: var(--muted)">Checks, last result of each</span>
+<sc-if value="{{run.proof.proofsNone}}" hint-placeholder-val="{{false}}"><p style="margin: 4px 0 0; color: var(--muted)">{{run.proof.proofsNone}}</p></sc-if>
+<ul style="margin: 4px 0 0; padding-left: 20px; max-height: 200px; overflow: auto"><sc-for list="{{run.proof.proofs}}" as="p"><li style="color: {{p.color}}">{{p.text}}</li></sc-for></ul></div>
+<div><span style="font-size: 12px; color: var(--muted)">Logs, last 64 KB of each</span>
+<sc-if value="{{run.proof.logsNone}}" hint-placeholder-val="{{false}}"><p style="margin: 4px 0 0; color: var(--muted)">{{run.proof.logsNone}}</p></sc-if>
+<ul style="margin: 4px 0 0; padding-left: 20px"><sc-for list="{{run.proof.logs}}" as="l"><li><a href="{{l.href}}" target="_blank" rel="noopener" style="color: var(--fg)">{{l.name}}</a></li></sc-for></ul></div>
+<div><span style="font-size: 12px; color: var(--muted)">At deploy</span><p style="margin: 4px 0 0">{{run.proof.deployChecks}}</p></div>
+<div><span style="font-size: 12px; color: var(--muted)">Packages and deleted files</span>
+<sc-if value="{{run.proof.risksNone}}" hint-placeholder-val="{{false}}"><p style="margin: 4px 0 0; color: var(--muted)">{{run.proof.risksNone}}</p></sc-if>
+<ul style="margin: 4px 0 0; padding-left: 20px"><sc-for list="{{run.proof.risks}}" as="k"><li>{{k}}</li></sc-for></ul></div>
+</div>
+</details>
+</section>
+</sc-if>
 <sc-if value="{{run.hasBackup}}" hint-placeholder-val="{{false}}">
 <section aria-label="Data backup" style="display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--raise)">
 <strong style="font-weight: 600; color: var(--amber)">Back up your app's data</strong>
