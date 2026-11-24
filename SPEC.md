@@ -91,6 +91,10 @@ The interview must collect:
 11. Observable acceptance scenarios.
 12. Technical, time, legal, and accessibility constraints.
 
+How the Guide asks is set by the skill's *Discovery style*: who uses the app and when first,
+options with a recommendation at a real fork, one simpler-app challenge, the empty first screen,
+and a sketch for layout. It changes the questions, never the categories, schema or Ready rule.
+
 The structured response contains `message`, `status`, `coverage`, and `brief`. Coverage is
 reported for each required category as `missing`, `partial`, or `complete`. The controller
 will accept `ready` only when every required category is complete and at least one
@@ -443,7 +447,13 @@ versions and the paste-in prompt that points the owner's agent at the install ru
   structured coverage; the transcript is appended to that project's `.aai/memory/interviews/guide.log`.
 - `POST /api/jobs` — validate intake, freeze input, queue a run; `202` with `queuePosition`.
 - `GET /api/jobs/:id` — current state, `queuePosition`/`blockedBy` while queued, bounded
-  event history, and `previousRelease` (the release a parked follow-on falls back to, else `null`).
+  event history, `previousRelease` (the release a parked follow-on falls back to, else `null`),
+  `summary` (plain sentences on what the run did, computed from the full event log) and
+  `evidence` (per-feature gate results, logs, deploy checks and `risks`; `null` for anything the run
+  did not record). `risks` is informational: changed dependencies and deleted files from the run's
+  start commit to its release commit; it never holds a run.
+- `GET /api/jobs/:id/logs/:name` — read-only: a `.log` file the evidence listing named, for the
+  project's newest run only, regular files only, last 64 KB as `text/plain`; anything else is `404`.
 - `POST /api/jobs/:id/cancel` — cancel active work, or remove a queued run (`dequeued: true`).
 - `POST /api/jobs/:id/dismiss` — mark a parked run dismissed so its project's queue proceeds.
 - `POST /api/jobs/:id/pause` — ask the active run to park at its next stage boundary;

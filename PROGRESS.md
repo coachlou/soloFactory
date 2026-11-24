@@ -1,4 +1,20 @@
-## Unreleased: patch release lane (2026-11-24)
+## 0.14.0: start check, run evidence, Guide discovery style (2026-11-24)
+
+Minor release from the vibe pilot adoption spec v2 (items 1-4, 6; item 5, the quick-fix lane, stays deferred). A crash on launch is caught by a start check before deploy and repaired like any gate, a stopped run says in plain words why, a finished run shows *What this run did* and *How do you know it works?*, a risk line flags changed dependencies and deleted files (information only), the hub can notify the owner from a background tab, the Guide interviews in a new discovery style, the Guide chat box wraps, grows and can be resized, and later fixes can ship as patch releases (0.14.1 and on) through a new patch lane. Upgrades from 0.13.0 use the same safe update (Update now, the copy prompt or the update skill); projects and run states are untouched, and nothing migrates. Older runs show less in the new panel because they did not record it.
+- Docs: README (start check, run panel, notifications), SPEC §3 Discovery style and §9 (`summary`, `evidence`, logs route), manual header 0.14, INSTALL *If they were below 0.14.0* note, DEVELOPING *Patch release lane*.
+- Smoke: SMOKE_PENDING
+
+### Start check, plain stop titles, notifications (spec items 1-3)
+
+Items 1 to 3 of the vibe-pilot adoption spec (v2, audited by Codex, Grok and Fable). A crash on launch now fails early as a repairable gate, a parked run says in plain words why it stopped, and the hub can notify the owner from a background tab.
+- Start gate: at final integration, after the gates pass and before review, `startGate` runs the start command with `PORT` and `NODE_ENV=production`, waits for the health path, and stops the app (`startAndCheck`, split out of `deployLocal`; it never promotes). A failure is `quality_gate_failed` with gate `start` and the start log. Skipped with a custom deployer and on a data follow-on, before the backup hold. A pass records `job.startChecked`.
+- Deploy repairs: `health_check_failed` is a repairable deploy code, and all deploy codes count toward `repairsExhausted`. A deploy health failure on the exact tree that just passed the start check is retried once on a fresh port with no repair. The health error names the last HTTP status, and the repair prompt carries the port.
+- Stop titles: `STOP_TITLES` gives a plain title and summary to stops that had none (health, exited, metrics, page, restart, unexpected error, gate timeout, runner crash, failed gate by name). Specific titles still win. Other codes keep the generic title and now show their code. The Recovery box shows the watchdog's *What I saw* line when it adds something.
+- Notifications: the hub asks for permission when the owner first sends a run, never on load. From a background tab it shows one notice per run that completes or stops needing the owner; an owner pause and the first poll send none.
+- Tests: `test/start-gate.test.mjs` (6), `test/stop-notices.test.mjs` (4).
+- Docs: SPEC §2, §6 final review, §7 failure behavior; manual sections 5 (start check, notifications) and 8 (plain stop titles, What I saw).
+
+### Patch release lane (for 0.14.1 onward)
 
 Lou asked for a quick release lane after PR 17 (a hub CSS fix) could not ship without the full smoke set, because it merged behind unreleased engine and Guide changes.
 - Lane gate: `scripts/release-lane.mjs`. A patch version (`X.Y.Z+1` over the newest release tag) passes only when every change since the tag is an added or edited file in `public/`, `docs/` (not `docs/INSTALL.md`), a top-level `*.md`, `test/` or `smoke/results.jsonl`, and `package.json` changes only its version. Deletions, renames, untracked files outside the list and a patch on an older line fail. Minor and major versions are not checked. Run by `build-distro.sh --check` (so `npm test`); quiet without tags, as in CI. `node scripts/release-lane.mjs` prints the lane.
@@ -7,19 +23,19 @@ Lou asked for a quick release lane after PR 17 (a hub CSS fix) could not ship wi
 - Spec: `docs/patch-release-lane-spec.md`. Docs: DEVELOPING (*Patch release lane*), `.aai/instructions.md` Releases.
 - Tests: `test/release-lane.test.mjs` (7). Checked by hand: PR 17 cherry-picked onto v0.13.0 as 0.13.1 classifies as patch; the same tree plus a `src/factory.mjs` edit fails.
 
-## Unreleased: Guide chat box wraps and grows (2026-11-24)
+### Guide chat box wraps and grows
 
 Lou reported that the Guide box kept long text on one line, cut off at the right edge, and could not be resized.
 - Hub: the Guide box on the main page (`#guide-a`) and in the document viewer (`#guide-doc`) are now `<textarea class="chat-input">`. Text wraps, the box grows with the text up to 40% of the window height and then scrolls, and the user can drag its corner to make it taller (that height stays as the box's minimum until the page reloads). Attach and Send stay at the bottom edge.
 - Keys: <kbd>Enter</kbd> sends and <kbd>Shift</kbd>+<kbd>Enter</kbd> adds a line, as manual §3 already said. <kbd>Enter</kbd> that confirms an IME composition does not send.
 - Render: `morph()` keeps the inline `style` of `.chat-input` boxes, so a repaint during a drag does not undo it; `paint()` calls `growChat` after each repaint. Neutral palette only; no control or engine behavior changed.
 
-## Unreleased: return summary, risk report, Guide discovery style
+### Return summary, risk report, Guide discovery style (spec items 7, 4, 6)
 
 Spec v2 items 7, 4 and 6 (`vibe-pilot-adoption-spec-v2.md`, release B). Item 5 (quick-fix lane) stays deferred to a design pass.
 - Docs: manual §3 (Guide discovery style) and §5 (*What this run did*, *How do you know it works?*).
 
-### Return summary and "How do you know it works?" (item 7)
+#### Return summary and "How do you know it works?" (item 7)
 
 Before, a finished run showed steps and an event list, and the owner had to piece together what shipped and what proved it.
 - Engine: `src/summary.mjs` (pure). `proofResults` keeps the last result of each gate per feature from the full events file; `runSummary` writes the sentences; `runEvidence` returns proofs, logs, deploy checks and risks, with `null` for anything the run did not record. No agent turn.
@@ -29,7 +45,7 @@ Before, a finished run showed steps and an event list, and the owner had to piec
 - Never claims live for a parked or rolled-back run.
 - Tests: `test/summary.test.mjs` (5, incl. traversal, encoded slash, non-.log, missing, symlink, bad encoding, and an older run's logs).
 
-### Risk report (item 4)
+#### Risk report (item 4)
 
 Informational only: it never holds or asks. A blocking ask waits until 10 real runs show the findings are worth acting on.
 - Engine: `src/risk.mjs` `releaseRisks(nameStatus, {before, after})` reports `dependency` (added, removed or changed in `dependencies` / `devDependencies`, by parsing both `package.json` versions) and `deletion` (a `D` line, not `.factory/` or a test path; renames are not deletions). `riskLine` gives one line, or `null` for a run from before the scan.
@@ -37,20 +53,9 @@ Informational only: it never holds or asks. A blocking ask waits until 10 real r
 - Deviation from the spec: the scan runs after `tagRelease`, not at the start of `deployAndComplete`, so it covers the release commit too.
 - Tests: `test/risk.test.mjs` (4); `test/release-tags.test.mjs` asserts `startCommit` and `risks` on a first build and a follow-on.
 
-### Guide discovery style (item 6)
+#### Guide discovery style (item 6)
 
 `skills/factory-guide.md` gains a *Discovery style* section: who uses the app and when first, options with a recommendation at a real fork, one simpler-app challenge, the empty first screen, and a sketch for layout. Coverage keys, schema and the Ready rule are unchanged (R3). Ships unmeasured; Lou judges it from the first real interviews. The smoke set must run before release because the skill changed.
-
-## Unreleased: start check, plain stop titles, notifications (2026-11-23)
-
-Items 1 to 3 of the vibe-pilot adoption spec (v2, audited by Codex, Grok and Fable). A crash on launch now fails early as a repairable gate, a parked run says in plain words why it stopped, and the hub can notify the owner from a background tab.
-- Start gate: at final integration, after the gates pass and before review, `startGate` runs the start command with `PORT` and `NODE_ENV=production`, waits for the health path, and stops the app (`startAndCheck`, split out of `deployLocal`; it never promotes). A failure is `quality_gate_failed` with gate `start` and the start log. Skipped with a custom deployer and on a data follow-on, before the backup hold. A pass records `job.startChecked`.
-- Deploy repairs: `health_check_failed` is a repairable deploy code, and all deploy codes count toward `repairsExhausted`. A deploy health failure on the exact tree that just passed the start check is retried once on a fresh port with no repair. The health error names the last HTTP status, and the repair prompt carries the port.
-- Stop titles: `STOP_TITLES` gives a plain title and summary to stops that had none (health, exited, metrics, page, restart, unexpected error, gate timeout, runner crash, failed gate by name). Specific titles still win. Other codes keep the generic title and now show their code. The Recovery box shows the watchdog's *What I saw* line when it adds something.
-- Notifications: the hub asks for permission when the owner first sends a run, never on load. From a background tab it shows one notice per run that completes or stops needing the owner; an owner pause and the first poll send none.
-- Tests: `test/start-gate.test.mjs` (6), `test/stop-notices.test.mjs` (4).
-- Docs: SPEC §2, §6 final review, §7 failure behavior; manual sections 5 (start check, notifications) and 8 (plain stop titles, What I saw).
-- Smoke: not run. The real-provider smoke set is needed before release.
 
 ## 0.13.0: Node 24/26 LTS, release tags, GitHub backup (2026-11-18)
 

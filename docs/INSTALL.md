@@ -903,6 +903,14 @@ could change or remove them:
 - New builds use `npm test` with a plain `node --test` script and run the whole suite on the first feature, so a broken test command fails early instead of costing a repair at the end. Existing apps are unchanged.
 - Nothing to migrate by hand.
 
+**If they were below 0.14.0 before the update**, say in one breath that a new app is now started once before it goes live so a crash on launch gets fixed on its own, a stopped run explains in plain words why, a finished run shows what it did and how it was checked, and the hub can notify them when a run finishes or needs them. What you need to know yourself:
+
+- Start check: at the end of a build, the app is started once with `NODE_ENV=production` and its health path is checked before deploy. A failure shows as the `start` gate and is repaired like any gate.
+- Notifications: the browser asks for permission the first time they send a run, never on page load. Declining changes nothing else.
+- *What this run did* on the run panel lists the run's summary, a risk line (changed dependencies, deleted files) and *How do you know it works?*. The risk line is information only and never holds a run. Runs from before the update show less, because they did not record it.
+- The Guide asks its questions a little differently (who uses the app first, a recommendation at real choices). Projects, briefs and runs are unchanged.
+- Nothing to migrate by hand.
+
 **If they were below 0.13.0 before the update**, say in one breath that SoloFactory now supports Node 26 LTS (recommended) and Node 24 LTS, each good release of an app gets a numbered tag, and they can turn on a GitHub backup per project if they want one. What you need to know yourself:
 
 - Node: 24 and 26 are supported. On any other major from 22 up, the update and the server print `warn  node <n> is not supported by SoloFactory` and the page shows *Switch to a supported Node* once; everything still runs. Never install or switch Node for them unattended: report the warn line and point to A4 / B3 (Node 26). Below 22 SoloFactory will not start.

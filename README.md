@@ -46,6 +46,13 @@ release keeps running until the new one passes its deploy checks, so a failed de
 of every project grouped as Needs you, Running, Queued and Done, with slice progress; click a row to open that run
 (switching project if needed), or use a queued row's `···` menu to remove it from the queue.
 
+Before a run deploys, a **start check** launches the built app once and waits for its health path, so a
+crash on launch is caught and repaired like any failed gate. A stopped run says in plain words why it
+stopped. A finished run shows **What this run did**: a short summary, a one-line note of changed
+dependencies or deleted files (information only, it never holds the run) and *How do you know it works?*
+with each feature's checks and their logs. The hub can notify you from a background tab when a run finishes
+or needs you; it asks for permission the first time you send a run.
+
 A **project** is the workspace the factory builds into. Projects are discovered under
 `SOLOFACTORY_ROOT` (default: the home, `.solofactory/`): any directory in `<root>/projects/`,
 or a `<root>/<name>/` that contains `.git/`. The header selector switches projects or creates
