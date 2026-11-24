@@ -2,7 +2,7 @@
 
 Minor release from the vibe pilot adoption spec v2 (items 1-4, 6; item 5, the quick-fix lane, stays deferred). A crash on launch is caught by a start check before deploy and repaired like any gate, a stopped run says in plain words why, a finished run shows *What this run did* and *How do you know it works?*, a risk line flags changed dependencies and deleted files (information only), the hub can notify the owner from a background tab, the Guide interviews in a new discovery style, the Guide chat box wraps, grows and can be resized, and later fixes can ship as patch releases (0.14.1 and on) through a new patch lane. Upgrades from 0.13.0 use the same safe update (Update now, the copy prompt or the update skill); projects and run states are untouched, and nothing migrates. Older runs show less in the new panel because they did not record it.
 - Docs: README (start check, run panel, notifications), SPEC §3 Discovery style and §9 (`summary`, `evidence`, logs route), manual header 0.14, INSTALL *If they were below 0.14.0* note, DEVELOPING *Patch release lane*.
-- Smoke: SMOKE_PENDING
+- Smoke: real-provider set passed on the Claude profile defaults (2026-11-24): Habit Ledger 3 of 3, Household Inventory 12 of 12 (5 repairs), Voice Notes 6 of 6 (2 repairs, $7.21, 34 min). Rows in `smoke/results.jsonl`.
 
 ### Start check, plain stop titles, notifications (spec items 1-3)
 
