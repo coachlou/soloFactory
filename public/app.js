@@ -133,6 +133,25 @@ function runsNeedingYou(projects, viewingId) {
   return projects.filter((project) => NEEDS_YOU.includes(project.lastRun?.state) && project.lastRun.id !== viewingId)
     .map((project) => ({ projectId: project.id, jobId: project.lastRun.id, name: project.lastRun.workingName || project.name, state: project.lastRun.state }));
 }
+// The watchdog's plain account of a stop for the recovery box; empty when it only repeats the summary.
+function recoverySaw(job) {
+  const seen = job?.watch?.incident?.observed;
+  return seen && seen !== job.recovery?.summary ? seen : "";
+}
+// Desktop notices for runs that finished or now need the owner, compared with the previous poll. The first poll
+// (previous null) and jobs it did not list (another project's, or new) fire nothing; an owner's own pause is not news.
+function notifyTransitions(previous, jobs) {
+  if (!previous) return [];
+  const before = new Map(previous.map((job) => [job.id, job.state]));
+  return jobs.filter((job) => before.has(job.id) && before.get(job.id) !== job.state
+    && (job.state === "completed" || (NEEDS_YOU.includes(job.state) && job.error?.code !== "paused")))
+    .map((job) => {
+      const name = job.brief?.workingName || "Your app";
+      return job.state === "completed"
+        ? { jobId: job.id, title: `${name} is done`, body: job.summary || (job.deployment?.url ? `Live at ${job.deployment.url}.` : "The run finished.") }
+        : { jobId: job.id, title: `${name} needs you`, body: job.recovery?.title || "The run stopped and needs a decision." };
+    });
+}
 const BRIEF_SECTIONS = [
   ["promise", "Promise", "promise"],
   ["primaryUser", "Primary user", "user"],
@@ -1374,6 +1393,9 @@ class Live extends Component {
       state.project = projects.active;
       state.board = projects;
       [state.jobs, state.work, state.backup] = await Promise.all([api("/api/jobs").then((r) => r.jobs), api("/api/board").catch(() => null), api("/api/projects/backup").catch(() => null)]);
+      const notices = notifyTransitions(this.seenJobs ?? null, state.jobs);
+      this.seenJobs = state.jobs;
+      if (document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted") for (const n of notices) new Notification(n.title, { body: n.body });
       this.sync();
       // The shown run's events and spend feed the Q&A, the activity list and the recovery box.
       const r = this.shownRun();
@@ -1478,6 +1500,7 @@ class Live extends Component {
       title: job.recovery?.title || (phase?.status === "planning" ? "Preparing repair plan" : "Recovery"),
       summary: job.recovery?.summary || (phase?.plan ? `${phase.done.length} of ${phase.plan.slices.length} repair features verified.` : ""),
       spend: spend && parked ? `Spent so far: ${plural(spend.workers, "worker")}, ${count(spend.tokens)} tokens, cost ${spend.costUsd == null ? "unknown" : `$${spend.costUsd.toFixed(2)}`}, ${formatSpan(spend.elapsedMs)} elapsed.${spend.grantTurns == null ? "" : ` Approving grants up to ${plural(spend.grantTurns, "repair turn")}.`}${spend.idleApprovals ? ` Last ${spend.idleApprovals === 1 ? "approval" : `${spend.idleApprovals} approvals`} verified no features.` : ""}` : "",
+      saw: recoverySaw(job),
       prior: prior?.text || "",
       allowance: phase?.status === "ready" && phase.plan ? `Repair allowance: up to ${2 * (phase.plan.slices.length + 1)} attempts (2 per feature plus 2 for the full final review).` : "",
       lists, amend, waives, acts, hasActs: acts.length > 0 || actionable,
@@ -1747,6 +1770,8 @@ class Live extends Component {
   // press while the review runs used to start another identical review (three ran at once on 2026-11-14).
   async queue() {
     if (this.sending) return;
+    // Asked here, on the owner's own press, never on page load; a refusal changes nothing (the tab title still counts).
+    if (typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission().catch(() => {});
     this.sending = true;
     try { await this.sendBrief(); } finally { this.sending = false; }
   }

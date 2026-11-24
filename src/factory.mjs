@@ -24,6 +24,8 @@ const harnessRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), ".."
 const CASE_REPORTER = fileURLToPath(new URL("./case-reporter.mjs", import.meta.url));
 // Gate failures a repair turn cannot fix: they say nothing about the app's code.
 const NO_REPAIR_GATE = new Set(["gate_timeout", "gate_infrastructure"]);
+// Deploy failures that are usually a code defect the repair worker can fix; same bounded budget as the gates.
+const DEPLOY_REPAIR_CODES = ["invalid_metrics", "deployment_exited", "page_check_failed", "health_check_failed"];
 // An app that exits on its own this soon after going live most likely broke with this release
 // (docs/four-tier-gates-spec.md G4): the Live app panel says so beside Relaunch and the rollback offer.
 export const EARLY_CRASH_MS = 2 * 60_000;
@@ -1143,6 +1145,7 @@ export class SoloFactory {
   async deployAndComplete(job, signal) {
     const appDir = this.store.appDir(job.id);
     let deployment;
+    let healthRetried = false;
     // Legacy deployment resumes also need the new review gate.
     if (!job.reviewRequest) job = await this.reviewAndVerify(job, signal);
     for (;;) {
@@ -1157,9 +1160,15 @@ export class SoloFactory {
         break;
       } catch (error) {
         // A broken metrics contract, a failing home page or a crash on launch is usually a code defect the repair worker can fix
-        // (e.g. a production-only env check); a port or timeout problem is not. Same bounded repair budget as the gates.
-        if (!["invalid_metrics", "deployment_exited", "page_check_failed"].includes(error.code)) throw error;
+        // (e.g. a production-only env check), and so is a health route that never answers. Same bounded repair budget as the gates.
+        if (!DEPLOY_REPAIR_CODES.includes(error.code)) throw error;
         stopApp(this.deployments.get(job.id));
+        // The same code just answered its start gate, so a slow or contended start gets one more try on a fresh port first.
+        if (error.code === "health_check_failed" && !healthRetried && job.startChecked && job.startChecked === await sourceBaseline(this.store, { head: false })) {
+          healthRetried = true;
+          await this.emit(job.id, { type: "deployment.retry", state: job.state, message: `${error.message} The start check passed on this code, so the launch is retried once on a fresh port.` });
+          continue;
+        }
         await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "deploy", message: error.message });
         let output;
         if (error.code === "invalid_metrics") {
@@ -1168,6 +1177,9 @@ export class SoloFactory {
         } else if (error.code === "page_check_failed") {
           const log = await readFile(path.join(appDir, ".factory", "logs", "deployment.log"), "utf8").catch(() => "");
           output = `GET / failed the controller's page check: ${error.message}${error.details?.body ? `\nResponse body:\n${error.details.body}` : ""}\nThe home page must answer without a 5xx and with a non-empty page when the app runs with only PORT and NODE_ENV=production set.\n${log.slice(-8_000)}`;
+        } else if (error.code === "health_check_failed") {
+          const log = await readFile(path.join(appDir, ".factory", "logs", "deployment.log"), "utf8").catch(() => "");
+          output = `GET ${manifest.healthPath} never answered with a 2xx on PORT ${error.details?.port}: ${error.message}\nThe app runs with only PORT and NODE_ENV=production set and must listen on PORT.\n${log.slice(-8_000)}`;
         } else {
           const log = await readFile(path.join(appDir, ".factory", "logs", "deployment.log"), "utf8").catch(() => "");
           output = `The app exited on launch. It runs with only PORT and NODE_ENV=production set; it must start without any other env vars.\n${error.message}\n${log.slice(-8_000)}`;
@@ -1860,6 +1872,13 @@ export class SoloFactory {
       // After install, since install may write the lockfile.
       if (gate === "install") job.installedDeps = await depsDigest(this.store.appDir(job.id));
     }
+    // At integration the app starts as production will run it, before review: a crash on launch is then an ordinary
+    // repairable gate, not a deploy failure after review. Skipped where the deploy waits for a data backup, since the
+    // new code must not touch the owner's data before then.
+    if (rerun && !this.deployer && !broken.length && !(job.followOn && job.hadData && job.dataFeatures?.length)) {
+      const failure = await this.startGate(job, manifest, signal);
+      if (failure) return failure;
+    }
     job.activeCommand = null;
     await this.store.writeState(job);
     if (broken.length < 2) return broken[0] ?? null;
@@ -1872,16 +1891,74 @@ export class SoloFactory {
 
   // port: a port to try first (a restart keeps the app's old address when it is free).
   async deployLocal(job, manifest, signal, { port: preferred } = {}) {
-    const command = manifest.commands.start;
     const port = preferred && (await portFree(preferred)) ? preferred : await availablePort();
     const url = `http://127.0.0.1:${port}`;
     const appDir = this.store.appDir(job.id);
-    // Checked here, after the awaits above: from spawn to this.deployments.set is synchronous, so a stop
+    const child = await this.startAndCheck(job, manifest, signal, { port, logPath: path.join(appDir, ".factory", "logs", "deployment.log"), flags: "a", onSpawn: (child) => {
+      this.deployments.set(job.id, child);
+      child.once("exit", async (code) => {
+        this.deployments.delete(job.id);
+        if (liveByProject.get(appDir)?.child === child) liveByProject.delete(appDir);
+        try {
+          const latest = await this.store.read(job.id);
+          if (latest.deployment?.status === "live") {
+            latest.deployment.status = "stopped";
+            latest.deployment.stoppedAt = new Date().toISOString();
+            latest.deployment.exitCode = code;
+            latest.deployment.stoppedBy ??= "exited"; // owner and server stops write theirs before the kill
+            const early = earlyExit(latest.deployment, latest.deployment.stoppedAt);
+            if (early) latest.deployment.earlyExit = early;
+            await this.store.writeState(latest);
+            await this.emit(job.id, { type: "deployment.stopped", state: latest.state, message: `App process stopped with exit ${code}.${earlyNote(early)}`, ...(early ? { earlyExit: early } : {}) });
+          }
+        } catch {
+          // The durable run evidence remains readable even if shutdown races process exit.
+        }
+      });
+    } });
+    // The previous release served until now. Anything it reads from disk per request comes from the new
+    // release's files, as it already did for the whole follow-on build; this adds the seconds the checks take.
+    await this.retirePrevious(job, appDir);
+    if (child.exitCode === null && child.signalCode === null) liveByProject.set(appDir, { jobId: job.id, child });
+    return { mode: "local", status: "live", url, port, pid: child.pid, startedAt: new Date().toISOString() };
+  }
+
+  // The integration start gate: deployLocal's checks on a spare port, then the app is stopped again.
+  async startGate(job, manifest, signal) {
+    const command = manifest.commands.start;
+    const port = await availablePort();
+    const relative = gateLog(job, "start");
+    const started = Date.now();
+    job.activeCommand = { gate: "start", command, startedAt: new Date().toISOString() };
+    await this.store.writeState(job);
+    await this.emit(job.id, { type: "gate.started", state: job.state, gate: "start", command, feature: featureOf(job), message: `start: ${command.join(" ")} with PORT=${port} NODE_ENV=production` });
+    try {
+      stopApp(await this.startAndCheck(job, manifest, signal, { port, logPath: path.join(this.store.appDir(job.id), relative), flags: "w" }));
+    } catch (error) {
+      if (error.code === "cancelled") throw error;
+      const durationMs = Date.now() - started;
+      await this.emit(job.id, { type: "gate.failed", state: job.state, gate: "start", feature: featureOf(job), durationMs, message: "start failed" });
+      const log = await readFile(path.join(this.store.appDir(job.id), relative), "utf8").catch(() => "");
+      return new FactoryError("quality_gate_failed", `start failed: ${error.message}`, {
+        gate: "start", command, durationMs, startCode: error.code,
+        output: `The app was started as production runs it: ${command.join(" ")} with only PORT=${port} and NODE_ENV=production set.\nIt must answer ${manifest.healthPath} and ${manifest.metricsPath} (the metrics contract) and serve a non-empty home page without a 5xx.\n${error.message}${error.details?.received ? `\nReceived top-level keys: ${error.details.received.join(", ")}` : ""}${error.details?.body ? `\nResponse body:\n${error.details.body}` : ""}\n${log.slice(-8_000)}`,
+      });
+    }
+    job.startChecked = await sourceBaseline(this.store, { head: false });
+    await this.emit(job.id, { type: "gate.passed", state: job.state, gate: "start", feature: featureOf(job), durationMs: Date.now() - started, message: "start passed" });
+    return null;
+  }
+
+  // Starts the app as production runs it and runs the deploy checks; returns the running child. Never promotes it:
+  // the integration start gate stops it again, deployLocal makes it the live release.
+  async startAndCheck(job, manifest, signal, { port, logPath, flags, onSpawn = () => {} }) {
+    const command = manifest.commands.start;
+    const url = `http://127.0.0.1:${port}`;
+    // Checked here, after the awaits above: from spawn to onSpawn is synchronous, so a stop
     // or shutdown that landed earlier would otherwise leave an app nobody kills (an aborted signal never fires).
     if (signal.aborted) throw new FactoryError("cancelled", "Deployment cancelled.");
     if (this.closed) throw new FactoryError("cancelled", "SoloFactory is shutting down.");
-    const logPath = path.join(appDir, ".factory", "logs", "deployment.log");
-    const log = createWriteStream(logPath, { flags: "a" });
+    const log = createWriteStream(logPath, { flags });
     const child = spawn(command[0], command.slice(1), {
       cwd: this.store.appDir(job.id),
       env: subscriptionEnvironment({ PORT: String(port), NODE_ENV: "production" }),
@@ -1892,28 +1969,9 @@ export class SoloFactory {
     });
     child.stdout.pipe(log);
     child.stderr.pipe(log);
-    this.deployments.set(job.id, child);
+    child.once("exit", () => log.end());
+    onSpawn(child);
     signal.addEventListener("abort", () => stopApp(child), { once: true });
-    child.once("exit", async (code) => {
-      log.end();
-      this.deployments.delete(job.id);
-      if (liveByProject.get(appDir)?.child === child) liveByProject.delete(appDir);
-      try {
-        const latest = await this.store.read(job.id);
-        if (latest.deployment?.status === "live") {
-          latest.deployment.status = "stopped";
-          latest.deployment.stoppedAt = new Date().toISOString();
-          latest.deployment.exitCode = code;
-          latest.deployment.stoppedBy ??= "exited"; // owner and server stops write theirs before the kill
-          const early = earlyExit(latest.deployment, latest.deployment.stoppedAt);
-          if (early) latest.deployment.earlyExit = early;
-          await this.store.writeState(latest);
-          await this.emit(job.id, { type: "deployment.stopped", state: latest.state, message: `App process stopped with exit ${code}.${earlyNote(early)}`, ...(early ? { earlyExit: early } : {}) });
-        }
-      } catch {
-        // The durable run evidence remains readable even if shutdown races process exit.
-      }
-    });
 
     await this.emit(job.id, { type: "deployment.started", state: job.state, message: `Waiting for ${url}${manifest.healthPath}` });
     try {
@@ -1927,13 +1985,10 @@ export class SoloFactory {
       if (child.exitCode !== null || child.signalCode !== null) throw new FactoryError("deployment_exited", `App exited with ${child.exitCode ?? child.signalCode} right after its health check.`);
     } catch (error) {
       stopApp(child); // a release that failed its checks never replaces the live one
+      error.details = { ...error.details, port };
       throw error;
     }
-    // The previous release served until now. Anything it reads from disk per request comes from the new
-    // release's files, as it already did for the whole follow-on build; this adds the seconds the checks take.
-    await this.retirePrevious(job, appDir);
-    if (child.exitCode === null && child.signalCode === null) liveByProject.set(appDir, { jobId: job.id, child });
-    return { mode: "local", status: "live", url, port, pid: child.pid, startedAt: new Date().toISOString() };
+    return child;
   }
 
   // Retires the project's previous release once the new one passed its checks. The record is written
@@ -2148,7 +2203,7 @@ export function inferFailedState(job) {
 
 // A rejected review, failed gate or failed integration proof with no repair attempts left: another Resume would only rerun it.
 export function repairsExhausted(job, maxRepairs = 2) {
-  return (["review_rejected", "quality_gate_failed"].includes(job.error?.code) || Boolean(pendingProofFailure(job))) && (job.attempt ?? 0) >= (job.repairBudgetLimit ?? maxRepairs);
+  return (["review_rejected", "quality_gate_failed", ...DEPLOY_REPAIR_CODES].includes(job.error?.code) || Boolean(pendingProofFailure(job))) && (job.attempt ?? 0) >= (job.repairBudgetLimit ?? maxRepairs);
 }
 
 // Stopped because approved inputs changed: Resume would stop again; only a new plan can continue.
@@ -2295,6 +2350,19 @@ export function withContinuation(job, options) {
   return { ...job, nextAction, recovery: { ...job.recovery, canResume: nextAction.action === "resume", nextAction, actions: stale ? [`${nextAction.label}: ${nextAction.reason}`] : retarget(job.recovery.actions, nextAction) } };
 }
 
+// Plain titles for stops that reach fail() with no diagnostic or specific title; every specific title above wins.
+const STOP_TITLES = {
+  health_check_failed: () => ({ title: "The app never answered its health check", summary: "The app started but its health path never returned success on the port it was given. Files and logs are preserved; a repair turn sees the port and the start log." }),
+  quality_gate_failed: (details) => ({ title: `The ${details?.gate ?? "quality"} check failed`, summary: `The ${details?.gate ?? "quality"} check failed and its output is saved in the named log. Files are preserved and repairs continue within the budget.` }),
+  deployment_exited: () => ({ title: "The app stopped right after it started", summary: "The app exited during its deploy checks. Its deployment log is preserved and names the reason." }),
+  invalid_metrics: () => ({ title: "The app's metrics page is not in the expected shape", summary: "The app started, but its metrics path did not return the fields the factory reads. Files and logs are preserved." }),
+  page_check_failed: () => ({ title: "The app's home page did not load", summary: "The app answered its health check, but its home page failed to load. Files and logs are preserved." }),
+  process_restarted: () => ({ title: "SoloFactory restarted during this run", summary: "SoloFactory stopped while this run was working. Its files are preserved, so Resume continues from them." }),
+  unexpected_error: () => ({ title: "SoloFactory hit an unexpected error", summary: "Something inside SoloFactory failed, not your app. Files are preserved; the message names what failed." }),
+  gate_timeout: (details) => ({ title: `The ${details?.gate ?? "check"} ran past its time limit`, summary: "A check did not finish in time, so no repair turn ran. The message says how to give it longer." }),
+  gate_infrastructure: () => ({ title: "The test runner crashed after the tests passed", summary: "Every test passed, but the runner itself then crashed, so no repair turn ran. The app's code is not at fault." }),
+};
+
 export function buildRecovery(job, workspace, diagnostics = job.error?.details?.diagnostics ?? [], { legacy = false, maxRepairs = 2 } = {}) {
   const failedState = inferFailedState(job);
   const timeoutReason = job.error?.details?.timeoutReason;
@@ -2305,8 +2373,9 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
   const loop = job.error?.details?.loop;
   const unconfirmed = job.error?.code === "worker_unconfirmed";
   const planBlocked = planBlockedOut(job);
+  const stop = STOP_TITLES[job.error?.code]?.(job.error.details);
   const title = unconfirmed ? "A worker from before the restart may still be running" : planBlocked ? "The repair plan needs a correction" : loop ? (loop.kind === "symptom" ? "Repeated failure despite code changes" : "Repeated failure on unchanged code") : stale ? "Specs or prototype inputs changed" : exhausted ? "Repair budget exhausted" : reviewBlocked ? "Required functionality or evidence is unfinished" : primary?.title
-    ?? (timeoutReason === "idle" ? "The coding agent became inactive" : timeoutReason === "hard" ? "The run reached its safety cap" : "The run paused before completion");
+    ?? (timeoutReason === "idle" ? "The coding agent became inactive" : timeoutReason === "hard" ? "The run reached its safety cap" : stop?.title ?? "The run paused before completion");
   const actions = diagnostics.map((item) => item.action);
   if (!actions.length) {
     if (unconfirmed) {
@@ -2348,7 +2417,8 @@ export function buildRecovery(job, workspace, diagnostics = job.error?.details?.
     ? `${diagnostics.map((item) => item.title).join("; ")}. The partial app and completed specification are intact.`
     : timeoutReason === "idle"
       ? `The agent stopped producing activity. ${attempts ? "Its one bounded same-session retry was used." : "A manual resume can continue without starting over."}`
-      : "The factory stopped safely. Its existing files and evidence are intact, so recovery does not require a new run.";
+      : stop && !timeoutReason ? stop.summary
+      : `The factory stopped safely${job.error?.code ? ` (${job.error.code})` : ""}. Its existing files and evidence are intact, so recovery does not require a new run.`;
   const nextAction = continuationAction(job, { maxRepairs });
   return {
     version: 2,
@@ -2428,19 +2498,22 @@ async function availablePort() {
 
 async function waitForHttp(url, child, signal, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
+  let last = "no answer";
   while (Date.now() < deadline) {
     if (signal.aborted) throw new FactoryError("cancelled", "Deployment cancelled.");
     if (child.exitCode !== null) throw new FactoryError("deployment_exited", `App exited with code ${child.exitCode}.`);
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(1_500) });
       if (response.ok) return;
-    } catch {
+      last = `HTTP ${response.status}`;
+    } catch (error) {
       // Startup races are expected until the deadline.
+      last = error.cause?.code ?? error.message;
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   stopApp(child);
-  throw new FactoryError("health_check_failed", `No successful health response from ${url}.`);
+  throw new FactoryError("health_check_failed", `No successful health response from ${url} within ${timeoutMs / 1000}s (last: ${last}).`, { last });
 }
 
 // What install consumes. Unchanged since the last passing install means node_modules is still current.

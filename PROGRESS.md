@@ -1,3 +1,14 @@
+## Unreleased: start check, plain stop titles, notifications (2026-11-23)
+
+Items 1 to 3 of the vibe-pilot adoption spec (v2, audited by Codex, Grok and Fable). A crash on launch now fails early as a repairable gate, a parked run says in plain words why it stopped, and the hub can notify the owner from a background tab.
+- Start gate: at final integration, after the gates pass and before review, `startGate` runs the start command with `PORT` and `NODE_ENV=production`, waits for the health path, and stops the app (`startAndCheck`, split out of `deployLocal`; it never promotes). A failure is `quality_gate_failed` with gate `start` and the start log. Skipped with a custom deployer and on a data follow-on, before the backup hold. A pass records `job.startChecked`.
+- Deploy repairs: `health_check_failed` is a repairable deploy code, and all deploy codes count toward `repairsExhausted`. A deploy health failure on the exact tree that just passed the start check is retried once on a fresh port with no repair. The health error names the last HTTP status, and the repair prompt carries the port.
+- Stop titles: `STOP_TITLES` gives a plain title and summary to stops that had none (health, exited, metrics, page, restart, unexpected error, gate timeout, runner crash, failed gate by name). Specific titles still win. Other codes keep the generic title and now show their code. The Recovery box shows the watchdog's *What I saw* line when it adds something.
+- Notifications: the hub asks for permission when the owner first sends a run, never on load. From a background tab it shows one notice per run that completes or stops needing the owner; an owner pause and the first poll send none.
+- Tests: `test/start-gate.test.mjs` (6), `test/stop-notices.test.mjs` (4).
+- Docs: SPEC §2, §6 final review, §7 failure behavior; manual sections 5 (start check, notifications) and 8 (plain stop titles, What I saw).
+- Smoke: not run. The real-provider smoke set is needed before release.
+
 ## 0.13.0: Node 24/26 LTS, release tags, GitHub backup (2026-11-18)
 
 Minor release: Node 26 LTS (recommended) and 24 LTS supported, each good release of a generated app tagged `solofactory/release/<n>`, an optional per-project GitHub backup that is off until the owner turns it on and uses their own `gh` sign-in, and three flaky tests fixed. Upgrades from 0.12.0 use the same safe update (Update now, the copy prompt or the update skill); projects and run states are untouched, and nothing migrates.
