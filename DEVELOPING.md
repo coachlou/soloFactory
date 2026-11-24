@@ -40,6 +40,26 @@ push the same commit to main. The `pre-push` hook refuses a push to main that ch
 until `node scripts/ci-green.mjs <sha>` finds a successful `test` run on that exact commit (it uses `gh`, signed in).
 Tag and sync to ambient-library only from that commit.
 
+### Patch release lane
+
+A small fix can ship as a patch (`X.Y.Z+1`) from the newest release tag, without the unreleased work on main
+(`docs/patch-release-lane-spec.md`). The diff decides, not a person: every file changed since the tag must be added
+or edited in `public/`, `docs/` (not `docs/INSTALL.md`), a top-level `*.md`, `test/` or `smoke/results.jsonl`, and
+`package.json` may change only its version. Anything else is a full release with a minor bump. While the version is
+an untagged patch, `npm test` fails on any other change (`scripts/release-lane.mjs --check`, quiet in CI).
+`node scripts/release-lane.mjs` prints which lane the changes since the newest tag qualify for.
+
+1. Branch from the newest tag: `git switch -c release-X.Y.Z vX.Y.(Z-1)`.
+2. Cherry-pick the fix with `git cherry-pick -x <sha>`. Keep only the fix's PROGRESS entry if PROGRESS.md conflicts.
+3. Bump `package.json` to `X.Y.Z`. Give the entry the heading `## X.Y.Z: <title> (<date>)` with `- Docs:` and `- Lane: patch` bullets.
+4. Run `npm test`, push the branch, and wait for Linux CI.
+5. Tag `vX.Y.Z` on that commit and sync to ambient-library from it.
+6. Try Update now once from the previous version.
+7. Merge the release branch into main through a branch and CI. Move the fix's PROGRESS entry under the patch heading.
+
+The patch lane never touches the engine, the store, the installer, the update runbook or the dependencies, so the
+update is the same safe flow and nothing migrates. The smoke set is never needed: its paths are all outside the lane.
+
 ## Tidy branches and worktrees
 
 GitHub deletes a pull request's branch when it merges, and `fetch.prune` (set once with
