@@ -50,7 +50,8 @@ failure I can recover from without discarding completed work.
   validated `factory.json` manifest.
 - At most two repair attempts with the exact failed command and output fed back to the
   coding agent. A deployed app's metrics response failing the schema contract counts as a
-  repairable gate failure and shares this same budget.
+  repairable gate failure and shares this same budget, as do `health_check_failed`,
+  `deployment_exited` and `page_check_failed`; all four count toward `repairsExhausted`.
 - Local deployment on an unused loopback port, followed by a real HTTP health check and a
   metrics schema check.
 - Live build telemetry and privacy-preserving generated-app metrics for uptime, requests,
@@ -322,6 +323,12 @@ Only one job may be active because the target user does not benefit from resourc
 - A gate that times out (`gate_timeout`), or a cased gate whose node:test summary shows every
   test passed before Node itself crashed (`gate_infrastructure`), parks without a repair turn
   and spends no attempt: neither says anything about the app's code.
+- A deploy `health_check_failed` on source that matches `job.startChecked` (the start gate
+  passed on that exact tree) is retried once on a fresh port with no repair; only a second
+  failure takes a repair turn, whose prompt carries the port and the last HTTP status.
+- The recovery box title names the stop in plain words for codes with no specific title
+  (`STOP_TITLES` in `src/factory.mjs`); any other code keeps the generic title and shows its
+  code in the summary.
 - Logs are stored in full per stage but only bounded tails are returned to the browser.
 - Repair receives the exact failed gate and log path. It never receives authority to skip or
   rewrite a gate.
@@ -611,6 +618,12 @@ carry a strategy forward.
    which the reviewer judges as a likely race. A second failure takes the normal repair path
    with the rerun's output. Install, lint and build never rerun, and feature-build gates go
    straight to repair, whose prompt says a test that passes on rerun is a bug to fix.
+   After the gates pass at final integration, a `start` gate runs the manifest's start command
+   with `PORT` and `NODE_ENV=production` and waits for the health path (`startAndCheck`, shared
+   with `deployLocal`), then stops the app; it never promotes it. A failure is
+   `quality_gate_failed` with gate `start` and the start log, repaired like any gate. It is
+   skipped with a custom deployer and on a data follow-on (before the backup hold). A pass sets
+   `job.startChecked` to the source baseline.
    The final reviewer of a feature plan is told every feature already passed its scoped review,
    and spends the review on integration and deploy readiness. The exception is features whose
    scoped review never ran (`reviews === 0`): features skipped under `risky`, and features built

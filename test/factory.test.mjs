@@ -115,9 +115,9 @@ test("deployment-only recovery does not replay agent work", async () => {
     commandRunner: async () => ({ code: 0, output: "passed" }),
     deployer: async () => {
       if (failDeployment) {
-        const error = new Error("metrics contract failed");
-        error.code = "invalid_metrics";
-        throw error;
+        // An environment stop, not a code defect: a repairable deploy code would spend the repair budget and then
+        // need a repair plan (repairsExhausted), so the deploy-only Resume path is exercised with one that is not.
+        throw new FactoryError("port_unavailable", "No free loopback port.");
       }
       return { mode: "fixture", status: "live", url: "http://127.0.0.1:9976" };
     },
@@ -741,7 +741,9 @@ test("a follow-on whose app exits on launch leaves the previous release live and
   factories.push(secondFactory);
   const second = await secondFactory.start(secondJob.id);
   assert.equal(second.state, "failed");
-  assert.equal(second.error.code, "deployment_exited", second.error.message);
+  // The start gate catches the crash at integration, before the deploy step ever stops the previous release.
+  assert.equal(second.error.code, "quality_gate_failed", second.error.message);
+  assert.equal(second.error.details.gate, "start");
   assert.equal((await fetch(`${first.deployment.url}/health`)).ok, true, "the previous release still answers");
   const kept = await store.read(first.id);
   assert.equal(kept.deployment.status, "live");

@@ -382,6 +382,7 @@
 <section aria-label="Recovery" style="display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--raise)">
 <strong style="font-weight: 600; color: var(--fg-strong)">{{run.recov.title}}</strong>
 <sc-if value="{{run.recov.summary}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 13px; color: var(--text1)">{{run.recov.summary}}</p></sc-if>
+<sc-if value="{{run.recov.saw}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 13px; color: var(--text2)">What I saw: {{run.recov.saw}}</p></sc-if>
 <sc-if value="{{run.recov.spend}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 13px; color: var(--text2)">{{run.recov.spend}}</p></sc-if>
 <sc-if value="{{run.recov.prior}}" hint-placeholder-val="{{false}}"><p style="margin: 0; font-size: 13px; color: var(--text2)">{{run.recov.prior}}</p></sc-if>
 <sc-for list="{{run.recov.lists}}" as="l">
