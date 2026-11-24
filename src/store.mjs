@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { workerAlive } from "./watchdog.mjs";
+import { proofResults } from "./summary.mjs";
 
 const execFileAsync = promisify(execFile);
 const templatesRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "project");
@@ -201,6 +202,23 @@ export class JobStore {
       const gaps = idleGapsOf(await readFile(file, "utf8"));
       this.gapCache.set(id, { size, gaps });
       return gaps;
+    } catch { return []; }
+  }
+
+  // The last result of each gate over the whole event file (not the 160-event tail), for the return summary.
+  async proofResults(id) {
+    const file = path.join(this.jobDir(id), "events.jsonl");
+    try {
+      const { size } = await stat(file);
+      this.proofCache ??= new Map();
+      const cached = this.proofCache.get(id);
+      if (cached?.size === size) return cached.proofs;
+      const events = (await readFile(file, "utf8")).split("\n").flatMap((line) => {
+        try { return line ? [JSON.parse(line)] : []; } catch { return []; }
+      });
+      const proofs = proofResults(events);
+      this.proofCache.set(id, { size, proofs });
+      return proofs;
     } catch { return []; }
   }
 

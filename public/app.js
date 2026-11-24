@@ -1466,7 +1466,20 @@ class Live extends Component {
       off: !ticked, opacity: ticked ? "1" : "0.5",
       confirm: () => ticked ? this.post(r, "backup-confirmed") : this.showInfo("Back up data/ first", "Tick the box once data/ is backed up."),
     } : null;
-    return { hasBackup: Boolean(backup), backup, hasFeatures: features.length > 0, features, featureHead: fp ? `Features · ${fp.done} of ${fp.total} done` : "", hasQa: job.state !== "queued", qa, hasStream: job.state !== "queued", stream, streamEmpty: !stream.length, chips,
+    // Return summary and "How do you know it works?" (item 7): the server writes the words; null = not recorded.
+    const ev = job.evidence, NONE = "Not recorded for this run.";
+    const proof = job.summary && ev ? {
+      summary: job.summary, riskLine: ev.riskLine,
+      proofs: (ev.proofs || []).map((p) => ({ text: `${p.gate}${p.feature ? ` (${p.feature})` : ""}: ${p.status}${p.message ? `. ${p.message}` : ""}`,
+        color: p.status === "failed" ? "var(--red-text)" : "var(--text1)" })),
+      proofsNone: ev.proofs ? "" : NONE,
+      logs: (ev.logs || []).map((name) => ({ name, href: `/api/jobs/${encodeURIComponent(r.jobId)}/logs/${encodeURIComponent(name)}` })),
+      logsNone: ev.logs ? "" : NONE,
+      deployChecks: ev.deployChecks || NONE,
+      risks: (ev.risks || []).map((risk) => risk.why),
+      risksNone: ev.riskLine ? "" : NONE,
+    } : null;
+    return { hasProof: Boolean(proof), proof, hasBackup: Boolean(backup), backup, hasFeatures: features.length > 0, features, featureHead: fp ? `Features · ${fp.done} of ${fp.total} done` : "", hasQa: job.state !== "queued", qa, hasStream: job.state !== "queued", stream, streamEmpty: !stream.length, chips,
       hasRecov: parked || Boolean(phase && job.state !== "completed"), recov: parked || phase ? this.recovVals(r, job, spend, next, phase, usage, parked) : null };
   }
 
