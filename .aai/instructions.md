@@ -37,3 +37,5 @@ The one source of rules for every agent in this repo: Claude Code, Codex and oth
 
 Follow the release steps in DEVELOPING.md: the smoke gate, Linux CI green on the release commit,
 then the tag and the sync to ambient-library.
+A patch version (`X.Y.Z+1`) may carry only patch-safe files (DEVELOPING.md, *Patch release lane*).
+Never move a change into the patch lane by hand. If the lane gate fails, bump the minor version.

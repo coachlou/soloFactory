@@ -1,3 +1,12 @@
+## Unreleased: patch release lane (2026-11-24)
+
+Lou asked for a quick release lane after PR 17 (a hub CSS fix) could not ship without the full smoke set, because it merged behind unreleased engine and Guide changes.
+- Lane gate: `scripts/release-lane.mjs`. A patch version (`X.Y.Z+1` over the newest release tag) passes only when every change since the tag is an added or edited file in `public/`, `docs/` (not `docs/INSTALL.md`), a top-level `*.md`, `test/` or `smoke/results.jsonl`, and `package.json` changes only its version. Deletions, renames, untracked files outside the list and a patch on an older line fail. Minor and major versions are not checked. Run by `build-distro.sh --check` (so `npm test`); quiet without tags, as in CI. `node scripts/release-lane.mjs` prints the lane.
+- Flow: a patch branches from the newest tag and cherry-picks the fix, so unreleased work on main does not ride along; then merges back into main. Same update flow; nothing migrates.
+- Not the vibe-pilot quick-fix lane for generated apps (item 5, still deferred).
+- Spec: `docs/patch-release-lane-spec.md`. Docs: DEVELOPING (*Patch release lane*), `.aai/instructions.md` Releases.
+- Tests: `test/release-lane.test.mjs` (7). Checked by hand: PR 17 cherry-picked onto v0.13.0 as 0.13.1 classifies as patch; the same tree plus a `src/factory.mjs` edit fails.
+
 ## Unreleased: Guide chat box wraps and grows (2026-11-24)
 
 Lou reported that the Guide box kept long text on one line, cut off at the right edge, and could not be resized.
