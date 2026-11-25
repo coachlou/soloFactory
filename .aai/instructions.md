@@ -33,6 +33,15 @@ The one source of rules for every agent in this repo: Claude Code, Codex and oth
 2. Agents may run it to show the list, but answer `y` only with the owner's written approval.
 3. Never force-delete a branch or worktree (`git branch -D`, `git worktree remove --force`).
 
+## Long jobs
+
+1. Start any job expected to run over about 10 minutes (the smoke set, a real factory run) with
+   `bash scripts/detached.sh <log> <command...>`, logging under a gitignored path such as `.solofactory/smoke-runs/`.
+   Never start one as a background task tied to your session: it dies when the session ends.
+2. Watch it with a separate waiter that ends when `<log>.exit` appears or the pid in `<log>.pid` dies.
+3. If the job stops early, overruns, exits nonzero, or its pid is dead with no `<log>.exit`, tell the owner at once,
+   before retrying.
+
 ## Releases
 
 Follow the release steps in DEVELOPING.md: the smoke gate, Linux CI green on the release commit,

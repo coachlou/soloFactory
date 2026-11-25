@@ -113,6 +113,9 @@ Node is refused before it starts, because the plan reviewer would reject every p
 node scripts/smoke.mjs
 ```
 
+An agent starts it detached so it outlives the agent's session, then checks `<log>.exit` (exit code) and
+`<log>.pid` to see when it ends: `bash scripts/detached.sh .solofactory/smoke-runs/<date>.log node scripts/smoke.mjs`.
+
 It builds each brief in `smoke/briefs/` in a fresh home and appends one row per run to
 `smoke/results.jsonl`; `node scripts/smoke.mjs table` prints the ledger. Each row also records minutes
 per stage (`stageMin`: planning, implement, review, repair, gates). A stage over its budget is printed after
